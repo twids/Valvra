@@ -24,8 +24,8 @@ jobs:
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: 10.0.x
       - run: dotnet restore Valvra.slnx
@@ -44,7 +44,7 @@ jobs:
           VALVRA_TEST_SQLSERVER: Server=localhost;Database=master;User Id=sa;Password=Valvra_CI_${{ github.run_id }}_Aa!;Encrypt=true;TrustServerCertificate=true
           VALVRA_TEST_POSTGRESQL: Host=localhost;Database=postgres;Username=postgres;Password=Valvra_CI_${{ github.run_id }}_Aa!;SSL Mode=Disable
         run: dotnet test Valvra.slnx -c Release --no-restore --logger "trx;LogFileName=tests.trx"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: database-test-results
@@ -52,15 +52,15 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: 10.0.x
       - run: dotnet restore Valvra.slnx
       - run: dotnet test Valvra.slnx -c Release --no-restore
       - name: Publish Windows IIS package
         run: dotnet publish src/Valvra.Web -c Release -r win-x64 --self-contained false -o artifacts/publish
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: valvra-windows-iis
           path: artifacts/publish

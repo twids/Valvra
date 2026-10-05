@@ -322,8 +322,10 @@
     }
     async function auditPage() {
         heading("Auditlogg", "Signerade händelser i separat databas. Tider visas i din lokala tidszon.");
-        const toolbar = node("div", undefined, "toolbar"); const from = field(toolbar, "Från", "datetime-local"); const to = field(toolbar, "Till (exklusive)", "datetime-local");
-        const actor = field(toolbar, "Aktörens ID", "text"); const action = field(toolbar, "Operation", "text"); $("content").append(toolbar);
+        const toolbar = node("div", undefined, "audit-filters");
+        const filter = (label, type) => { const group = node("div"); toolbar.append(group); return field(group, label, type); };
+        const from = filter("Från", "datetime-local"), to = filter("Till (exklusive)", "datetime-local");
+        const actor = filter("Aktörens ID", "text"), action = filter("Operation", "text"); $("content").append(toolbar);
         const panelNode = panel($("content"), "Händelser"); const results = node("div"); panelNode.append(results); let offset = 0;
         function query() { const params = new URLSearchParams({ offset }); if (from.value) params.set("from", new Date(from.value).toISOString()); if (to.value) params.set("to", new Date(to.value).toISOString()); if (actor.value) params.set("actorId", actor.value); if (action.value) params.set("action", action.value); return params.toString(); }
         const paint = async () => {
@@ -332,7 +334,8 @@
             table(results, ["Tid", "Aktör", "Operation", "Resultat", "Verifiering"], events.map(x => [date(x.event.timestamp), node("span", x.event.actorId, "audit-id"),
                 x.event.action, x.event.outcome, node("span", x.signatureValid ? "Giltig signatur" : "Ogiltig signatur", "badge" + (x.signatureValid ? "" : " error"))]));
         };
-        toolbar.append(button("Filtrera", async () => { offset = 0; await paint(); }), button("Exportera denna sida", async () => {
+        const filterActions = node("div", undefined, "actions filter-actions"); toolbar.append(filterActions);
+        filterActions.append(button("Filtrera", async () => { offset = 0; await paint(); }), button("Exportera denna sida", async () => {
             const response = await fetch("/api/audit/export?" + query(), { credentials: "same-origin", cache: "no-store" }); if (!response.ok) throw new Error("Auditexporten misslyckades.");
             const url = URL.createObjectURL(await response.blob()); const link = node("a"); link.href = url; link.download = "valvra-audit.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         }));

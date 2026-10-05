@@ -61,6 +61,7 @@ Skapa en resursgrupp, skapa en resurs och tilldela en AD-grupp läs- eller ändr
 - [Databaser, Windows Auth och rättigheter](docs/DATABASES.md)
 - [Backup, återställning, certifikatrotation och omkonfiguration](docs/OPERATIONS.md)
 - [Säkerhetsmodell och begränsningar](docs/SECURITY-MODEL.md)
+- [Verifierade tester och kontroll vid installation](docs/VERIFICATION.md)
 - [Rapportera sårbarheter privat](SECURITY.md)
 
 Hemligheter krypteras med AES-256-GCM och separata datanycklar, skyddade med ett RSA-certifikat utanför databasen. Audit signeras med ett annat certifikat. Om audit inte kan skrivas lämnas inga hemligheter ut. Ett lösenord som redan kopierats kan inte återkallas genom att en tillfällig rätt upphör.
