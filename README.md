@@ -21,6 +21,10 @@ För Kerberos SSO med en egen IIS-tjänsteidentitet ska AD-administratören regi
 
 ### 2. Publicera och installera
 
+Hämta det färdiga Windows-paketet från [v0.1.0-preview.1](https://github.com/twids/Valvra/releases/tag/v0.1.0-preview.1) och packa upp det på servern. Paketet innehåller `Install-Iis.ps1` och dokumentationen. Då behövs inget SDK på installationsservern, endast Hosting Bundle.
+
+För att bygga paketet själv:
+
 Från repots rot, med .NET 10 SDK:
 
 ```powershell
