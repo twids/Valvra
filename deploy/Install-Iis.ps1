@@ -34,6 +34,10 @@ if (-not $isGmsa) {
 
 New-Item -ItemType Directory -Path $destinationRoot | Out-Null
 Get-ChildItem -LiteralPath $sourceRoot -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $destinationRoot -Recurse }
+$settingsFile = Join-Path $destinationRoot 'appsettings.json'
+$settings = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json
+$settings.AllowedHosts = $HostName
+[System.IO.File]::WriteAllText($settingsFile, ($settings | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
 $configurationRoot = Join-Path $destinationRoot 'App_Data'
 New-Item -ItemType Directory -Path $configurationRoot -Force | Out-Null
 

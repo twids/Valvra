@@ -25,6 +25,16 @@ namespace Valvra.Tests;
 public sealed class WebSecurityTests
 {
     [Fact]
+    public async Task SetupRequiresPrivateBootstrapCodeEvenWithAuthenticatedCsrf()
+    {
+        await using var host = new TestWebHost(); using var client = host.Client("user");
+        await host.AddCsrfAsync(client);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/validate", new SetupRequest())).StatusCode);
+        client.DefaultRequestHeaders.Add("X-SETUP-TOKEN", new string('0', 64));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/finish", new SetupRequest())).StatusCode);
+    }
+
+    [Fact]
     public async Task UnauthenticatedApiIsChallenged()
     {
         await using var host = new TestWebHost(); using var client = host.Client(null);
@@ -96,7 +106,9 @@ public sealed class WebSecurityTests
 internal sealed class TestWebHost(bool preview = false) : WebApplicationFactory<Program>
 {
     private readonly string setupDirectory = Path.Combine(Path.GetTempPath(), "valvra-setup-tests-" + Guid.NewGuid());
-    private readonly SqliteConnection connection = new("Data Source=:memory:");
+    // Keep one anchor open, but give every request its own connection. Sharing a
+    // SqliteConnection instance is unsafe when the UI loads metadata concurrently.
+    private readonly SqliteConnection connection = new($"Data Source=valvra_web_{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
     private readonly SpyCipher cipher = new();
     public RecordingTransport Transport { get; } = new();
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -110,7 +122,7 @@ internal sealed class TestWebHost(bool preview = false) : WebApplicationFactory<
         {
             services.RemoveAll<VaultDbContext>(); services.RemoveAll<DbContextOptions<VaultDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<VaultDbContext>>();
-            services.AddDbContext<VaultDbContext>(options => options.UseSqlite(connection));
+            services.AddDbContext<VaultDbContext>(options => options.UseSqlite(connection.ConnectionString));
             services.RemoveAll<IDirectoryProvider>(); services.AddSingleton<IDirectoryProvider, FakeDirectory>();
             services.RemoveAll<ISecretCipher>(); services.AddSingleton<ISecretCipher>(cipher);
             services.RemoveAll<IAuditTransport>(); services.AddSingleton<IAuditTransport>(Transport);

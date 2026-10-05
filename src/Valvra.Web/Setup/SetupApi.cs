@@ -17,6 +17,7 @@ public static class SetupApi
             await SetupLock.WaitAsync(context.RequestAborted);
             try
             {
+                RequireToken(store, context);
                 var sid = identity.GetSubjectId(context.User) ?? throw new AccessDeniedException();
                 var result = await validator.ValidateAsync(body, sid, context.RequestAborted);
                 return Results.Ok(new { passed = result.Passed, checks = result.Checks });

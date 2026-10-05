@@ -28,7 +28,7 @@ public sealed class CredentialTestThrottle(TimeProvider clock)
 }
 
 public sealed class CredentialTestService(VaultDbContext db, AccessService access, VaultService vault,
-    AuditService audit, ICredentialTester tester, CredentialTestThrottle throttle)
+    AuditService audit, ICredentialTester tester, CredentialTestThrottle throttle, IDirectoryProvider directory)
 {
     public async Task<CredentialTestResult> TestAsync(Actor actor, Guid entryId, string correlation, CancellationToken ct)
     {
@@ -39,6 +39,8 @@ public sealed class CredentialTestService(VaultDbContext db, AccessService acces
         var payload = await vault.RevealSecretAsync(actor, entryId, null, "Ldap.TestRead", correlation, ct);
         throttle.Reserve(entry.LdapProfileId, payload.Username);
         await audit.RecordAsync(actor, "Ldap.Test", entryId, "AttemptAuthorized", correlation, ct);
+        var fresh = await directory.ResolveAsync(actor.SubjectId, ct);
+        await access.RequireAsync(fresh, TargetKind.Resource, entry.ResourceId, VaultPermission.TestCredential | VaultPermission.ReadSecret, ct);
         var result = await tester.TestAsync(entry.LdapProfileId, payload, ct);
         await audit.RecordAsync(actor, "Ldap.TestResult", entryId, result.ToString(), correlation, ct);
         return result;

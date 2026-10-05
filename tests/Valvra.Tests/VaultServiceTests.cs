@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Data.Common;
 using Valvra.Core;
 using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Authorization;
@@ -11,6 +13,31 @@ namespace Valvra.Tests;
 
 public sealed class VaultServiceTests
 {
+    [Fact]
+    public async Task LostCommitAcknowledgementIsNotReportedAsRollback()
+    {
+        var interceptor = new LostCommitAcknowledgement();
+        await using var fixture = await Fixture.CreateAsync(interceptor);
+        interceptor.Enabled = true;
+        await Assert.ThrowsAsync<IOException>(() => fixture.Vault.CreateSecretAsync(fixture.User, fixture.ResourceId,
+            "Account", new("u", "p", "n"), null, "request", default));
+        Assert.Single(await fixture.Db.Secrets.ToListAsync());
+        Assert.DoesNotContain(fixture.Transport.Events, x => x.Phase == AuditPhase.Failed);
+        Assert.Contains(fixture.Transport.Events, x => x.Outcome == "CommitUncertain");
+        await fixture.Audit.FlushAsync(default);
+        Assert.Contains(fixture.Transport.Events, x => x.Phase == AuditPhase.Committed);
+    }
+
+    private sealed class LostCommitAcknowledgement : DbTransactionInterceptor
+    {
+        public bool Enabled { get; set; }
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken ct = default)
+        {
+            if (Enabled) { Enabled = false; throw new IOException("Simulated lost commit acknowledgement."); }
+            return Task.CompletedTask;
+        }
+    }
+
     [Fact]
     public async Task AuditFailurePreventsSecretRelease()
     {
@@ -115,10 +142,12 @@ public sealed class VaultServiceTests
         public Actor User { get; } = new("ad", "user", "User", new HashSet<string>(), true, true, true);
         public Guid GroupId { get; } = Guid.NewGuid();
         public Guid ResourceId { get; } = Guid.NewGuid();
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(IInterceptor? interceptor = null)
         {
             var f = new Fixture(); await f.Connection.OpenAsync();
-            f.Db = new VaultDbContext(new DbContextOptionsBuilder<VaultDbContext>().UseSqlite(f.Connection).Options);
+            var options = new DbContextOptionsBuilder<VaultDbContext>().UseSqlite(f.Connection);
+            if (interceptor is not null) options.AddInterceptors(interceptor);
+            f.Db = new VaultDbContext(options.Options);
             await f.Db.Database.EnsureCreatedAsync();
             f.Db.Groups.Add(new ResourceGroup { Id = f.GroupId, Name = "Root", Revision = 1 });
             f.Db.Resources.Add(new VaultResource { Id = f.ResourceId, GroupId = f.GroupId, Name = "Resource", Revision = 1 });

@@ -239,7 +239,7 @@
         [[2, "Läsa hemligheter"], [4, "Ändra innehåll"], [8, "Hantera behörigheter"], [16, "Testa mot LDAP"]].forEach(([bit, label]) => { const row = node("div", undefined, "check-row"); const input = field(row, label, "checkbox"); input.value = "on"; checks.push({ bit, input }); body.append(row); });
         const times = node("div", undefined, "field-row"); const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         start = field(times, "Från", "datetime-local", localDate(new Date())); expiry = field(times, "Till", "datetime-local", localDate(new Date(Date.now() + 3600000))); body.append(times); times.hidden = true;
-        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; times.hidden = !temp; start.required = expiry.required = temp; checks.forEach(x => x.input.disabled = temp); });
+        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; times.hidden = !temp; start.required = expiry.required = temp; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; }); });
         hint(body, "Metadataåtkomst ingår. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.");
     }
     function ownerDialog(kind, target) {
