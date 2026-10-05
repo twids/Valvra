@@ -1,0 +1,16 @@
+@page "/setup"
+@{ Layout = null; }
+<!doctype html>
+<html lang="sv">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Installera Valvra</title><link rel="stylesheet" href="/css/site.css" /><link rel="stylesheet" href="/css/setup.css" /><script src="/js/setup.js" defer></script></head>
+<body>
+    <div class="setup-shell">
+        <header class="setup-header"><a class="brand" href="/"><span class="brand-mark">V</span>valvra<span class="brand-dot">.</span></a><span class="badge">INSTALLATION</span></header>
+        <div class="setup-intro"><p class="eyebrow">ETT SKYDDAT VALV FÖR ORGANISATIONEN</p><h1>Välkommen till Valvra</h1><p>Anslut databaserna och Active Directory. Vi kontrollerar säkerhetsinställningarna innan valvet öppnas.</p></div>
+        <ol class="setup-steps" id="steps"><li class="current">1 · Webbplats</li><li>2 · Databaser</li><li>3 · Identitet och nycklar</li><li>4 · Kontrollera och spara</li></ol>
+        <div id="setup-notice" class="notice" role="status" hidden></div>
+        <form id="setup-form" class="panel"><div class="panel-body" id="setup-fields"></div><div class="setup-navigation"><button type="button" id="previous" class="button">← Tillbaka</button><button type="button" id="next" class="button primary">Nästa →</button></div></form>
+        <p class="hint">Konfigurationen sparas krypterad med Windows DPAPI. Databaslösenord och installationskod skickas aldrig till loggar.</p>
+    </div>
+</body>
+</html>

@@ -426,3 +426,10 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+# Valvra deployment output and protected installation material
+artifacts/
+**/App_Data/
+**/*.pfx
+**/*.p12
+**/installation.bin*
+**/setup-token.sha256

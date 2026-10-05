@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Valvra.Core/Valvra.Core.csproj" />
+    <Project Path="src/Valvra.Infrastructure/Valvra.Infrastructure.csproj" />
+    <Project Path="src/Valvra.Migrations.SqlServer/Valvra.Migrations.SqlServer.csproj" />
+    <Project Path="src/Valvra.Migrations.PostgreSql/Valvra.Migrations.PostgreSql.csproj" />
+    <Project Path="src/Valvra.Web/Valvra.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/"><Project Path="tests/Valvra.Tests/Valvra.Tests.csproj" /></Folder>
+</Solution>

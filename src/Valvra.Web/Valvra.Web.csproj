@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Valvra.Infrastructure/Valvra.Infrastructure.csproj" />
+    <ProjectReference Include="../Valvra.Migrations.SqlServer/Valvra.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="../Valvra.Migrations.PostgreSql/Valvra.Migrations.PostgreSql.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.12" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup><Content Include="../../deploy/audit-*.sql" Link="deploy/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup>
+    <Content Include="../../deploy/Install-Iis.ps1" Link="Install-Iis.ps1" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../README.md;../../LICENSE;../../SECURITY.md" Link="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../docs/*.md" Link="docs/%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
