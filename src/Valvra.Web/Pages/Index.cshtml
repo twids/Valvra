@@ -1,0 +1,36 @@
+@page
+@{
+    Layout = null;
+}
+<!doctype html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Valvra · Säker förvaring</title>
+    <link rel="stylesheet" href="/css/site.css" />
+    <script src="/js/app.js" defer></script>
+</head>
+<body>
+    <aside class="sidebar">
+        <a class="brand" href="/" aria-label="Valvra startsida"><span class="brand-mark">V</span>valvra<span class="brand-dot">.</span></a>
+        <p class="sidebar-caption">ORGANISATIONENS VALV</p>
+        <nav aria-label="Huvudmeny">
+            <button class="nav-item active" data-view="vault"><span aria-hidden="true">◇</span>Resurser</button>
+            <button class="nav-item" data-view="groups"><span aria-hidden="true">▤</span>Resursgrupper</button>
+            <button class="nav-item" data-view="licenses"><span aria-hidden="true">▧</span>Licensöversikt</button>
+            <button class="nav-item" data-view="audit" id="audit-nav" hidden><span aria-hidden="true">◷</span>Auditlogg</button>
+        </nav>
+        <div class="sidebar-footer"><span class="status-dot"></span> Windows SSO<p id="identity">Verifierar identitet…</p><span class="small">Öppen källkod · EUPL-1.2</span></div>
+    </aside>
+    <main>
+        <header class="topbar"><span>Arbetsyta <span class="slash">/</span> <span id="breadcrumb">Resurser</span></span><button class="quiet" id="refresh">Uppdatera</button></header>
+        <div id="notice" class="notice" role="status" hidden></div>
+        <section class="page-heading"><div><p class="eyebrow">VALVRA</p><h1 id="page-title">Dina resurser</h1><p id="page-description">Lösenord och licenser samlade kring resurserna de tillhör.</p></div><div id="page-actions" class="actions"></div></section>
+        <section id="content" aria-live="polite"><div class="empty"><h2>Öppnar valvet</h2><p>Kontrollerar din identitet och anslutningen till auditdatabasen.</p></div></section>
+        <footer class="main-footer">Åtkomst kontrolleras av servern. Visning, kopiering och ändringar auditeras.</footer>
+    </main>
+    <dialog id="dialog"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title"></h2><button type="button" class="icon-button" id="close-dialog" aria-label="Stäng">×</button></div><div id="dialog-content"></div><p id="dialog-error" class="error" role="alert"></p><div id="dialog-actions" class="actions"></div></form></dialog>
+</body>
+</html>
