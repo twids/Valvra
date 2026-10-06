@@ -17,6 +17,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:security
       - run: npm run test:accessibility
+      - name: Password import and hierarchy mapping
+        run: npm run test:import
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -24,6 +26,7 @@ jobs:
           path: |
             artifacts/accessibility-report
             artifacts/accessibility-results
+            artifacts/import-browser-results
   databases:
     runs-on: ubuntu-latest
     services:

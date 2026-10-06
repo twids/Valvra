@@ -22,9 +22,9 @@ For Kerberos SSO with a custom IIS service identity, the AD administrator must r
 
 ### 2. Publish and install
 
-Download `Valvra-1.0.1-win-x64.zip` from [release 1.0.1](https://github.com/twids/Valvra/releases/tag/v1.0.1) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.0 requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-from-100-to-101) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
+Download `Valvra-1.1.0-win-x64.zip` from [release 1.1.0](https://github.com/twids/Valvra/releases/tag/v1.1.0) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.x requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-from-10x-to-110) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
 
-To build from source instead, use tag `v1.0.1` and the .NET 10 SDK from the repository root:
+To build from source instead, use tag `v1.1.0` and the .NET 10 SDK from the repository root:
 
 ```powershell
 dotnet restore
@@ -83,6 +83,7 @@ All main views, resource groups and resources have their own addresses. Mouse an
 
 ## Operations and security
 
+- [Password import, hierarchy mapping and interruptions](docs/IMPORT.md)
 - [Audit, reads and inserts without modification rights](docs/AUDIT.md)
 - [Databases, Windows Auth and permissions](docs/DATABASES.md)
 - [Backup, recovery, certificate rotation and reconfiguration](docs/OPERATIONS.md)

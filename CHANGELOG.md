@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 – 2026-10-06
+
+- Add a password import wizard for UTF-8 CSV/TSV, with delimiter detection, editable column mappings and a preview that does not display secrets.
+- Map group paths with up to two levels, or separate group/subgroup columns. Reuse visible existing groups/resources, map each source branch to a selected group, or import into one existing resource.
+- Skip existing and repeated titles within the same resource without overwriting passwords. New objects inherit destination permissions; import does not grant access.
+- Encrypt and audit each created record through the existing server operations. Clear staged values on focus loss, inactivity or cancellation; report partial completion and uncertain write responses without automatic retries.
+- Include Swedish/English UI, mobile and accessibility checks, parser/planning regressions and an isolated import browser suite in CI.
+
+Package: `Valvra-1.1.0-win-x64.zip` and `SHA256SUMS.txt`. No database schema changes or data conversion are required for an update from 1.0.x. Preserve protected installation files and certificates as described in the operations guide. Import supports passwords only, up to 2 MiB and 1,000 entries, and is not an all-or-nothing transaction. See [the import guide](docs/IMPORT.md).
+
 ## 1.0.1 – 2026-10-06
 
 - Show directory display names alongside stable user IDs in the global administrator list and role editor. Accounts that cannot be found still display their stable IDs and can have permissions revoked.

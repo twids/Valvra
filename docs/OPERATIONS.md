@@ -35,6 +35,10 @@ The command removes a prepared checkpoint only if the database's exact hash stil
 
 ## Changing the installation
 
+### Update from 1.0.x to 1.1.0
+
+This release adds password import without database schema changes or data conversion. Follow the same coordinated backup and file replacement procedure below using the verified 1.1.0 package. Preserve `App_Data`, the installation ID, certificates, key permissions, service identity and IIS authentication configuration. Do not rerun the installation script or setup. Verify an import with synthetic data in a group with the intended inherited access; see [the import guide](IMPORT.md).
+
 ### Update from 1.0.0 to 1.0.1
 
 This patch requires no database schema change or data conversion. Take a coordinated backup as described above, including the machine-bound protected files and certificate keys. Stop the IIS application pool and operator commands. Replace the application binaries and static files with the verified 1.0.1 package; **preserve the existing `App_Data` directory, installation ID, certificates, private-key permissions, service identity and IIS authentication configuration**. Do not run `Install-Iis.ps1` over an existing website or rerun setup to create a new vault.

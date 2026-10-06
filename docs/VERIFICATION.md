@@ -1,5 +1,11 @@
 # Verification and upgrade regressions
 
+## Release 1.1.0 import verification
+
+Verified locally on 2026-10-06: **202 C# tests**, **36 Node tests** and **4 isolated import Playwright/axe tests** passed. The import browser suite verifies two-level hierarchy creation and reuse, manual branch mapping, duplicate preservation, signed audit, focus-loss clearing, English UI, mobile layout and untrusted titles rendered as plain text. It runs separately from the existing accessibility suite so imported test records do not change that suite's fixed data.
+
+Run `npm run test:import` for the isolated import suite; see [the import guide](IMPORT.md) for format, permission and partial-completion boundaries. The release CI must pass the existing accessibility, Windows and both-provider database jobs, including the new import suite. The two database contract tests are skipped locally without dedicated connections; CI verifies them in disposable containers. Production IIS/AD and manual accessibility checks retain the scope below.
+
 ## Automatically verified
 
 Verified locally on 2026-10-05: **112 .NET tests in Release and 10 client tests passed**. The run included two contract tests against real SQL Server 2022 and PostgreSQL 17 in isolated, disposable Dockhand containers, plus Windows DPAPI tests. When running locally without test databases, only the two database tests are skipped.
