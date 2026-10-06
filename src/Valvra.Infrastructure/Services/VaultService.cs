@@ -1,4 +1,4 @@
-using System.Data;
+using Valvra.Infrastructure.Security;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Valvra.Core;
@@ -13,11 +13,11 @@ public sealed record ResourceView(Guid Id, Guid GroupId, string Name, long Revis
 public sealed record SecretView(Guid Id, string Title, int CurrentVersion, long Revision, string? LdapProfileId);
 public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, string CreatedBy);
 public sealed record LicenseView(Guid Id, Guid ResourceId, string Product, string Vendor, string PurchaseReference,
-    int Seats, int AssignedSeats, DateTimeOffset? ExpiresAt, long Revision);
+    int Seats, int AssignedSeats, DateTimeOffset? ExpiresAt, long Revision, int CurrentVersion);
 public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList<ResourceOwner> Owners);
 
-public sealed class VaultService(VaultDbContext db, AccessService access, AuditService audit, ISecretCipher cipher, TimeProvider clock,
-    IDirectoryProvider directory)
+public sealed class VaultOperations(VaultDbContext db, AccessService access, AuditService audit, ISecretCipher cipher, TimeProvider clock,
+    IDirectoryProvider directory, VaultIntegrity integrity)
 {
     public async Task<IReadOnlyList<GroupView>> GroupsAsync(Actor actor, CancellationToken ct)
     {
@@ -52,12 +52,13 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
         var id = Guid.NewGuid();
         return await audit.MutationAsync(actor, "Group.Create", id, correlation, async token =>
         {
-            var fresh = await directory.ResolveAsync(actor.SubjectId, token);
+            var fresh = await FreshActorAsync(actor, token);
             if (parentId is { } parent) await access.RequireAsync(fresh, TargetKind.Group, parent, VaultPermission.ManageAccess, token);
             else if (!fresh.IsEnabled || !fresh.IsAccessAdministrator) throw new AccessDeniedException();
+            if (parentId is { } parentGroup) await ValidateGroupPlacementAsync(parentGroup, null, token);
             db.Groups.Add(new ResourceGroup { Id = id, Name = name.Trim(), ParentId = parentId, Revision = 1 });
             return id;
-        }, ct);
+        }, ct, scopeHint: new(GroupId: id, Name: name.Trim(), ParentId: parentId));
     }
 
     public async Task<Guid> CreateResourceAsync(Actor actor, Guid groupId, string name, string correlation, CancellationToken ct)
@@ -70,7 +71,7 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
             await RequireFreshAsync(actor, TargetKind.Group, groupId, VaultPermission.ManageAccess, token);
             db.Resources.Add(new VaultResource { Id = id, GroupId = groupId, Name = name.Trim(), Revision = 1 });
             return id;
-        }, ct);
+        }, ct, scopeHint: new(ResourceId: id, GroupId: groupId, Name: name.Trim()));
     }
 
     public async Task RenameGroupAsync(Actor actor, Guid id, string name, long revision, string correlation, CancellationToken ct)
@@ -114,7 +115,7 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
         Name(title); ValidatePayload(payload);
         await access.RequireAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Modify, ct);
         var id = Guid.NewGuid();
-        var envelope = cipher.Encrypt(payload, id, 1, "secret");
+        var envelope = cipher.Encrypt(payload, id, 1, "secret", resourceId, integrity.InstallationId);
         return await audit.MutationAsync(actor, "Secret.Create", id, correlation, async token =>
         {
             await RequireFreshAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Modify, token);
@@ -123,7 +124,7 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
             db.SecretVersions.Add(new SecretVersion { EntryId = id, Version = 1, EnvelopeJson = envelope,
                 CreatedAt = clock.GetUtcNow(), CreatedBy = actor.SubjectId });
             return id;
-        }, ct);
+        }, ct, scopeHint: new(ResourceId: resourceId));
     }
 
     public async Task UpdateSecretAsync(Actor actor, Guid id, string title, SecretPayload payload,
@@ -138,7 +139,7 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
             Revision(entry.Revision, revision);
             entry.CurrentVersion++; entry.Revision++; entry.Title = title.Trim(); entry.LdapProfileId = ldapProfileId;
             db.SecretVersions.Add(new SecretVersion { EntryId = id, Version = entry.CurrentVersion,
-                EnvelopeJson = cipher.Encrypt(payload, id, entry.CurrentVersion, "secret"),
+                EnvelopeJson = cipher.Encrypt(payload, id, entry.CurrentVersion, "secret", entry.ResourceId, integrity.InstallationId),
                 CreatedAt = clock.GetUtcNow(), CreatedBy = actor.SubjectId });
             return true;
         }, ct);
@@ -155,9 +156,9 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
         await audit.FlushAsync(ct);
         // Authorized release is acknowledged externally before plaintext is produced.
         await audit.RecordAsync(actor, action, id, "ReleaseAuthorized", correlation, ct);
-        actor = await directory.ResolveAsync(actor.SubjectId, ct);
+        actor = await FreshActorAsync(actor, ct);
         await access.RequireAsync(actor, TargetKind.Resource, entry.ResourceId, VaultPermission.ReadSecret, ct);
-        return cipher.Decrypt<SecretPayload>(secret.EnvelopeJson, id, selectedVersion, "secret");
+        return cipher.Decrypt<SecretPayload>(secret.EnvelopeJson, id, selectedVersion, "secret", entry.ResourceId, integrity.InstallationId);
     }
 
     public async Task<IReadOnlyList<SecretVersionView>> VersionsAsync(Actor actor, Guid id, CancellationToken ct)
@@ -253,6 +254,7 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
         var directOwners = currentAccess.Owners.Where(x => x.TargetKind == kind && x.TargetId == id);
         if (kind == TargetKind.Group && (await access.GroupPathAsync(destination, ct)).Contains(id))
             throw new VaultValidationException("En grupp kan inte flyttas till sitt eget underträd.");
+        if (kind == TargetKind.Group) await ValidateGroupPlacementAsync(destination, id, ct);
         return new(targetAccess.Grants.Concat(directGrants).ToArray(), targetAccess.Owners.Concat(directOwners).ToArray());
     }
 
@@ -261,7 +263,7 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
         await PreviewMoveAsync(actor, kind, id, destination, ct);
         await audit.MutationAsync(actor, "Resource.Move", id, correlation, async token =>
         {
-            var fresh = await directory.ResolveAsync(actor.SubjectId, token);
+            var fresh = await FreshActorAsync(actor, token);
             await PreviewMoveAsync(fresh, kind, id, destination, token);
             if (kind == TargetKind.Group)
             {
@@ -282,13 +284,22 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
         await access.RequireAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Metadata, ct);
         return await db.Licenses.AsNoTracking().Where(x => x.ResourceId == resourceId && !x.Deleted).OrderBy(x => x.Product)
             .Select(x => new LicenseView(x.Id, x.ResourceId, x.Product, x.Vendor, x.PurchaseReference, x.Seats,
-                db.Assignments.Where(a => a.LicenseId == x.Id).Sum(a => (int?)a.Seats) ?? 0, x.ExpiresAt, x.Revision)).ToListAsync(ct);
+                db.Assignments.Where(a => a.LicenseId == x.Id).Sum(a => (int?)a.Seats) ?? 0, x.ExpiresAt, x.Revision, x.SecretVersion)).ToListAsync(ct);
     }
 
     public async Task<Guid> SaveLicenseAsync(Actor actor, Guid? id, Guid resourceId, string product, string vendor,
-        string purchaseReference, int seats, DateTimeOffset? expiresAt, LicensePayload payload, long revision, string correlation, CancellationToken ct)
+        string purchaseReference, int seats, DateTimeOffset? expiresAt, LicensePayload? payload, long revision, string correlation, CancellationToken ct,
+        SecretChange secretChange = SecretChange.Replace)
     {
-        Name(product); Length(vendor, 512); Length(purchaseReference, 512); Length(payload.LicenseKey, 65536); Length(payload.Notes, 65536);
+        Name(product); Length(vendor, 512); Length(purchaseReference, 512);
+        if (!Enum.IsDefined(secretChange) || secretChange == SecretChange.Replace && payload is null
+            || secretChange != SecretChange.Replace && payload is not null || id is null && secretChange != SecretChange.Replace)
+            throw new VaultValidationException("Ange uttryckligen om licenshemligheten ska bevaras, ersättas eller tömmas.");
+        if (payload is not null)
+        {
+            Length(payload.LicenseKey, 65536); Length(payload.Notes, 65536);
+            if (string.IsNullOrWhiteSpace(payload.LicenseKey)) throw new VaultValidationException("Tom nyckel kräver uttrycklig tömning.");
+        }
         if (seats < 1 || seats > 1000000) throw new VaultValidationException("Antal platser måste vara 1–1 000 000.");
         SoftwareLicense license;
         if (id is { } existing)
@@ -306,21 +317,49 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
             if (seats < assigned) throw new VaultValidationException("Antal platser understiger befintliga tilldelningar.");
             if (id is null) db.Licenses.Add(license);
             license.Product = product.Trim(); license.Vendor = vendor; license.PurchaseReference = purchaseReference;
-            license.Seats = seats; license.ExpiresAt = expiresAt; license.Revision++; license.SecretVersion++;
-            license.EnvelopeJson = cipher.Encrypt(payload, license.Id, license.SecretVersion, "license");
+            license.Seats = seats; license.ExpiresAt = expiresAt; license.Revision++;
+            if (secretChange != SecretChange.Preserve)
+            {
+                license.SecretVersion++;
+                license.EnvelopeJson = cipher.Encrypt(payload ?? new LicensePayload("", ""), license.Id, license.SecretVersion, "license", resourceId, integrity.InstallationId);
+                db.LicenseVersions.Add(new LicenseVersion { LicenseId = license.Id, Version = license.SecretVersion,
+                    EnvelopeJson = license.EnvelopeJson, CreatedAt = clock.GetUtcNow(), CreatedBy = actor.SubjectId });
+            }
             return license.Id;
-        }, ct);
+        }, ct, scopeHint: new(ResourceId: resourceId));
     }
 
-    public async Task<LicensePayload> RevealLicenseAsync(Actor actor, Guid id, string correlation, CancellationToken ct)
+    public async Task<LicensePayload> RevealLicenseAsync(Actor actor, Guid id, string correlation, CancellationToken ct, int? version = null)
     {
         var license = await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && !x.Deleted, ct) ?? throw new AccessDeniedException();
         await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.ReadSecret, ct);
+        var selected = version ?? license.SecretVersion;
+        var stored = await db.LicenseVersions.AsNoTracking().SingleOrDefaultAsync(x => x.LicenseId == id && x.Version == selected, ct)
+            ?? throw new VaultValidationException("Versionen finns inte.");
         await audit.FlushAsync(ct);
         await audit.RecordAsync(actor, "License.Reveal", id, "ReleaseAuthorized", correlation, ct);
-        actor = await directory.ResolveAsync(actor.SubjectId, ct);
+        actor = await FreshActorAsync(actor, ct);
         await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.ReadSecret, ct);
-        return cipher.Decrypt<LicensePayload>(license.EnvelopeJson, id, license.SecretVersion, "license");
+        return cipher.Decrypt<LicensePayload>(stored.EnvelopeJson, id, selected, "license", license.ResourceId, integrity.InstallationId);
+    }
+
+    public async Task<IReadOnlyList<SecretVersionView>> LicenseVersionsAsync(Actor actor, Guid id, CancellationToken ct)
+    {
+        var license = await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && !x.Deleted, ct) ?? throw new AccessDeniedException();
+        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Metadata, ct);
+        return await db.LicenseVersions.AsNoTracking().Where(x => x.LicenseId == id).OrderByDescending(x => x.Version)
+            .Select(x => new SecretVersionView(x.Version, x.CreatedAt, x.CreatedBy)).ToListAsync(ct);
+    }
+
+    public async Task RestoreLicenseVersionAsync(Actor actor, Guid id, int version, long revision, string correlation, CancellationToken ct)
+    {
+        var license = await db.Licenses.SingleOrDefaultAsync(x => x.Id == id && !x.Deleted, ct) ?? throw new AccessDeniedException();
+        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.ReadSecret | VaultPermission.Modify, ct);
+        var payload = await RevealLicenseAsync(actor, id, correlation, ct, version);
+        // Restore is an explicit operation; clearing a historic empty version is deliberate.
+        var change = string.IsNullOrWhiteSpace(payload.LicenseKey) ? SecretChange.Clear : SecretChange.Replace;
+        await SaveLicenseAsync(actor, id, license.ResourceId, license.Product, license.Vendor, license.PurchaseReference,
+            license.Seats, license.ExpiresAt, change == SecretChange.Clear ? null : payload, revision, correlation, ct, change);
     }
 
     public async Task<IReadOnlyList<LicenseAssignment>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct)
@@ -412,15 +451,45 @@ public sealed class VaultService(VaultDbContext db, AccessService access, AuditS
         await access.RequireAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Metadata, ct);
         return await db.Licenses.AsNoTracking().Where(x => x.ResourceId == resourceId && x.Deleted).OrderBy(x => x.Product)
             .Select(x => new LicenseView(x.Id, x.ResourceId, x.Product, x.Vendor, x.PurchaseReference, x.Seats,
-                db.Assignments.Where(a => a.LicenseId == x.Id).Sum(a => (int?)a.Seats) ?? 0, x.ExpiresAt, x.Revision)).ToListAsync(ct);
+                db.Assignments.Where(a => a.LicenseId == x.Id).Sum(a => (int?)a.Seats) ?? 0, x.ExpiresAt, x.Revision, x.SecretVersion)).ToListAsync(ct);
     }
+    private async Task ValidateGroupPlacementAsync(Guid destination, Guid? movingGroup, CancellationToken ct)
+    {
+        var destinationPath = await access.GroupPathAsync(destination, ct);
+        var height = 1;
+        if (movingGroup is { } moving)
+        {
+            var groups = await db.Groups.AsNoTracking().ToListAsync(ct);
+            var children = groups.ToLookup(x => x.ParentId);
+            var seen = new HashSet<Guid>();
+            var pending = new Queue<(Guid Id, int Depth)>(); pending.Enqueue((moving, 1));
+            while (pending.TryDequeue(out var item))
+            {
+                if (!seen.Add(item.Id) || destinationPath.Contains(item.Id)) throw new VaultValidationException("Flytten skapar en cykel.");
+                height = Math.Max(height, item.Depth);
+                if (destinationPath.Count + height > 128) throw new VaultValidationException("Grupper får ha högst 128 nivåer.");
+                foreach (var child in children[item.Id]) pending.Enqueue((child.Id, item.Depth + 1));
+            }
+        }
+        if (destinationPath.Count + height > 128) throw new VaultValidationException("Grupper får ha högst 128 nivåer.");
+    }
+
     private async Task ValidateSubjectAsync(string provider, string id, SubjectKind kind, CancellationToken ct)
     {
         if (provider != directory.ProviderId || await directory.FindAsync(id, kind, ct) is null)
             throw new VaultValidationException("Identiteten finns inte i den konfigurerade katalogen.");
     }
     private async Task RequireFreshAsync(Actor actor, TargetKind kind, Guid target, VaultPermission permission, CancellationToken ct) =>
-        await access.RequireAsync(await directory.ResolveAsync(actor.SubjectId, ct), kind, target, permission, ct);
+        await access.RequireAsync(await FreshActorAsync(actor, ct), kind, target, permission, ct);
+    private async Task<Actor> FreshActorAsync(Actor actor, CancellationToken ct)
+    {
+        var fresh = await directory.ResolveAsync(actor.SubjectId, ct);
+        if (fresh.Provider != actor.Provider || fresh.SubjectId != actor.SubjectId) throw new AccessDeniedException();
+        // CurrentActor loads global roles from the verified vault. The external
+        // integrity lease spans this operation, so only directory status and
+        // memberships need refreshing here; directory role flags are ignored.
+        return fresh with { IsAccessAdministrator = actor.IsAccessAdministrator, IsSystemAdministrator = actor.IsSystemAdministrator, IsAuditor = actor.IsAuditor };
+    }
     private static void Revision(long actual, long expected)
     { if (actual != expected) throw new VaultConflictException("Posten har ändrats. Ladda om före nytt försök."); }
     private static void Name(string value)

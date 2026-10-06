@@ -5,6 +5,8 @@ using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Configuration;
 using Valvra.Infrastructure.Identity;
 using Valvra.Infrastructure.Security;
+using Valvra.Web.Administration;
+using Valvra.Core;
 
 namespace Valvra.Web.Setup;
 
@@ -15,16 +17,31 @@ public sealed class InstallationSettings
     public AuditDatabaseOptions AuditDatabase { get; set; } = new();
     public KeyProtectionOptions KeyProtection { get; set; } = new();
     public ActiveDirectoryOptions ActiveDirectory { get; set; } = new();
+    public IdentitySelection Identity { get; set; } = new();
+    public long SettingsRevision { get; set; }
     public LdapTestOptions LdapTests { get; set; } = new();
+    public IntegrityOptions Integrity { get; set; } = new();
 }
 
 public sealed class SetupConfigurationStore(string directory)
 {
+    private readonly object writeLock = new();
+    public bool HasCheckpoint => File.Exists(Path.Combine(IntegrityDirectory, "checkpoint.bin"));
+    public string IntegrityDirectory => Path.Combine(directory, "Integrity");
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("Valvra.Configuration.v1");
     private string SettingsPath => Path.Combine(directory, "installation.bin");
     private string BootstrapPath => Path.Combine(directory, "setup-token.sha256");
     public bool HasSettings => File.Exists(SettingsPath);
     public bool CanConfigure => File.Exists(BootstrapPath);
+    public InstallationSettings? ReadSettings()
+    { using var stream = Load(); return stream is null ? null : JsonSerializer.Deserialize<InstallationSettings>(stream); }
+    public async Task<Guid> InstallationIdAsync(CancellationToken ct)
+    {
+        if (ReadSettings() is { } settings) return settings.Integrity.InstallationId;
+        var checkpoint = await new FileIntegrityCheckpointStore(IntegrityDirectory).ReadAsync(ct);
+        if (checkpoint is not null) return checkpoint.Current.InstallationId;
+        return new Guid(Convert.FromHexString(File.ReadAllText(BootstrapPath).Trim()).AsSpan(0, 16));
+    }
 
     public Stream? Load()
     {
@@ -50,7 +67,12 @@ public sealed class SetupConfigurationStore(string directory)
 
     public void Save(InstallationSettings settings)
     {
+        lock (writeLock) { SaveCore(settings); }
+    }
+    private void SaveCore(InstallationSettings settings)
+    {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Configuration protection requires Windows DPAPI.");
+        settings.SettingsRevision = checked((ReadSettings()?.SettingsRevision ?? 0) + 1);
         var plaintext = JsonSerializer.SerializeToUtf8Bytes(settings);
         try
         {
@@ -63,5 +85,17 @@ public sealed class SetupConfigurationStore(string directory)
             File.Delete(BootstrapPath);
         }
         finally { CryptographicOperations.ZeroMemory(plaintext); }
+    }
+    public DirectorySettings UpdateDirectory(DirectorySettings candidate)
+    {
+        lock (writeLock)
+        {
+            var settings = ReadSettings() ?? throw new VaultUnavailableException("Installationen är inte slutförd.");
+            if (settings.SettingsRevision != candidate.Revision) throw new VaultConflictException("Posten har ändrats. Ladda om före nytt försök.");
+            // Whitelist: preserve database credentials, certificates, test
+            // profiles and installation identity; never round-trip them via UI.
+            settings.ActiveDirectory = candidate.Options(); SaveCore(settings);
+            return DirectorySettings.From(settings);
+        }
     }
 }

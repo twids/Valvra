@@ -1,36 +1,45 @@
 @page
+@using System.Globalization
+@inject Valvra.Web.Localization.UiText Text
 @{
     Layout = null;
 }
 <!doctype html>
-<html lang="sv">
+<html lang="@CultureInfo.CurrentUICulture.TwoLetterISOLanguageName">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>Valvra · Säker förvaring</title>
+    <title data-i18n="Valvra · Säker förvaring">@Text.Get("Valvra · Säker förvaring")</title>
     <link rel="stylesheet" href="/css/site.css" />
+    <link rel="stylesheet" href="/css/compact.css" />
+    <script src="/js/i18n.js" defer></script>
+    <script src="/js/navigation.js" defer></script>
+    <script src="/js/settings.js" defer></script>
     <script src="/js/app.js" defer></script>
 </head>
 <body>
+    <a class="skip-link" href="#main-content" data-i18n="Hoppa till huvudinnehållet">@Text.Get("Hoppa till huvudinnehållet")</a>
     <aside class="sidebar">
-        <a class="brand" href="/" aria-label="Valvra startsida"><span class="brand-mark">V</span>valvra<span class="brand-dot">.</span></a>
-        <p class="sidebar-caption">ORGANISATIONENS VALV</p>
-        <nav aria-label="Huvudmeny">
-            <button class="nav-item active" data-view="vault"><span aria-hidden="true">◇</span>Resurser</button>
-            <button class="nav-item" data-view="groups"><span aria-hidden="true">▤</span>Resursgrupper</button>
-            <button class="nav-item" data-view="licenses"><span aria-hidden="true">▧</span>Licensöversikt</button>
-            <button class="nav-item" data-view="audit" id="audit-nav" hidden><span aria-hidden="true">◷</span>Auditlogg</button>
+        <a class="brand" href="/" aria-label="@Text.Get("Valvra startsida")" data-i18n-aria-label="Valvra startsida"><span class="brand-mark">V</span>valvra<span class="brand-dot">.</span></a>
+        <p class="sidebar-caption" data-i18n="ORGANISATIONENS VALV">@Text.Get("ORGANISATIONENS VALV")</p>
+        <nav aria-label="@Text.Get("Huvudmeny")" data-i18n-aria-label="Huvudmeny">
+            <a class="nav-item active" data-view="vault" href="/resources"><span aria-hidden="true">◇</span><span data-i18n="Resurser">@Text.Get("Resurser")</span></a>
+            <a class="nav-item" data-view="groups" href="/groups"><span aria-hidden="true">▤</span><span data-i18n="Resursgrupper">@Text.Get("Resursgrupper")</span></a>
+            <a class="nav-item" data-view="licenses" href="/licenses"><span aria-hidden="true">▧</span><span data-i18n="Licensöversikt">@Text.Get("Licensöversikt")</span></a>
+            <a class="nav-item" data-view="audit" href="/audit" id="audit-nav" hidden><span aria-hidden="true">◷</span><span data-i18n="Auditlogg">@Text.Get("Auditlogg")</span></a>
+            <a class="nav-item" data-view="settings" href="/settings" id="settings-nav" hidden><span aria-hidden="true">⚙</span><span data-i18n="Inställningar">@Text.Get("Inställningar")</span></a>
         </nav>
-        <div class="sidebar-footer"><span class="status-dot"></span> Windows SSO<p id="identity">Verifierar identitet…</p><span class="small">Öppen källkod · EUPL-1.2</span></div>
+        <div class="sidebar-footer"><span class="status-dot"></span><span>Windows SSO</span><p id="identity" data-i18n="Verifierar identitet…">@Text.Get("Verifierar identitet…")</p><span class="small" data-i18n="Öppen källkod · EUPL-1.2">@Text.Get("Öppen källkod · EUPL-1.2")</span></div>
     </aside>
-    <main>
-        <header class="topbar"><span>Arbetsyta <span class="slash">/</span> <span id="breadcrumb">Resurser</span></span><button class="quiet" id="refresh">Uppdatera</button></header>
+    <main id="main-content" tabindex="-1">
+        <header class="topbar"><span><span data-i18n="Arbetsyta">@Text.Get("Arbetsyta")</span> <span class="slash">/</span> <span id="breadcrumb" data-i18n="Resurser">@Text.Get("Resurser")</span></span><div class="language-control"><label for="language-select" data-i18n="Språk">@Text.Get("Språk")</label><select id="language-select" data-language-picker><option value="sv" lang="sv">Svenska</option><option value="en" lang="en">English</option></select></div><button class="quiet" id="refresh" data-i18n="Uppdatera">@Text.Get("Uppdatera")</button></header>
         <div id="notice" class="notice" role="status" hidden></div>
-        <section class="page-heading"><div><p class="eyebrow">VALVRA</p><h1 id="page-title">Dina resurser</h1><p id="page-description">Lösenord och licenser samlade kring resurserna de tillhör.</p></div><div id="page-actions" class="actions"></div></section>
-        <section id="content" aria-live="polite"><div class="empty"><h2>Öppnar valvet</h2><p>Kontrollerar din identitet och anslutningen till auditdatabasen.</p></div></section>
-        <footer class="main-footer">Åtkomst kontrolleras av servern. Visning, kopiering och ändringar auditeras.</footer>
+        <div id="page-error" class="notice error" role="alert" hidden></div>
+        <section class="page-heading"><div><p class="eyebrow">VALVRA</p><h1 id="page-title" tabindex="-1" data-i18n="Dina resurser">@Text.Get("Dina resurser")</h1><p id="page-description" data-i18n="Lösenord och licenser samlade kring resurserna de tillhör.">@Text.Get("Lösenord och licenser samlade kring resurserna de tillhör.")</p></div><div id="page-actions" class="actions"></div></section>
+        <section id="content" aria-labelledby="page-title"><div class="empty"><h2 data-i18n="Öppnar valvet">@Text.Get("Öppnar valvet")</h2><p data-i18n="Kontrollerar din identitet och anslutningen till auditdatabasen.">@Text.Get("Kontrollerar din identitet och anslutningen till auditdatabasen.")</p></div></section>
+        <footer class="main-footer" data-i18n="Åtkomst kontrolleras av servern. Visning, kopiering och ändringar auditeras.">@Text.Get("Åtkomst kontrolleras av servern. Visning, kopiering och ändringar auditeras.")</footer>
     </main>
-    <dialog id="dialog"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title"></h2><button type="button" class="icon-button" id="close-dialog" aria-label="Stäng">×</button></div><div id="dialog-content"></div><p id="dialog-error" class="error" role="alert"></p><div id="dialog-actions" class="actions"></div></form></dialog>
+    <dialog id="dialog" aria-labelledby="dialog-title" aria-modal="true"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title" tabindex="-1"></h2><button type="button" class="icon-button" id="close-dialog" aria-label="@Text.Get("Stäng dialog")" data-i18n-aria-label="Stäng dialog">×</button></div><div id="dialog-content"></div><p id="dialog-error" class="error" role="alert"></p><div id="dialog-actions" class="actions"></div></form></dialog>
 </body>
 </html>

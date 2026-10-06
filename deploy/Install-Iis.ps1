@@ -24,10 +24,10 @@ if (-not $httpsCertificate.HasPrivateKey) { throw 'HTTPS certificate has no priv
 if ($httpsCertificate.NotAfter -le (Get-Date)) { throw 'HTTPS certificate has expired.' }
 $account = New-Object System.Security.Principal.NTAccount($ServiceAccount)
 $null = $account.Translate([System.Security.Principal.SecurityIdentifier])
-$isGmsa = $ServiceAccount.EndsWith('$')
+$isManagedServiceAccount = $ServiceAccount.EndsWith('$')
 $servicePassword = ''
-if (-not $isGmsa) {
-    $credential = Get-Credential -UserName $ServiceAccount -Message 'Credentials for the IIS service identity (prefer gMSA).'
+if (-not $isManagedServiceAccount) {
+    $credential = Get-Credential -UserName $ServiceAccount -Message 'Credentials for the IIS service identity (prefer dMSA/gMSA).'
     if ($null -eq $credential) { throw 'Service identity credentials are required.' }
     $servicePassword = $credential.GetNetworkCredential().Password
 }
@@ -78,6 +78,10 @@ $audit = New-SelfSignedCertificate -Subject 'CN=Valvra Audit Signing' -CertStore
     -NotAfter (Get-Date).AddYears(5) -Type Custom
 Grant-PrivateKeyRead $encryption
 Grant-PrivateKeyRead $audit
+$integrity = New-SelfSignedCertificate -Subject 'CN=Valvra Integrity Signing' -CertStoreLocation Cert:\LocalMachine\My `
+    -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 -KeyUsage DigitalSignature -KeyExportPolicy Exportable `
+    -NotAfter (Get-Date).AddYears(5) -Type Custom
+Grant-PrivateKeyRead $integrity
 
 New-WebAppPool -Name $ApplicationPool | Out-Null
 Set-ItemProperty "IIS:\AppPools\$ApplicationPool" -Name managedRuntimeVersion -Value ''
@@ -102,4 +106,5 @@ try {
 } finally { Pop-Location }
 Write-Host "Encryption certificate: $($encryption.Thumbprint)"
 Write-Host "Audit signing certificate: $($audit.Thumbprint)"
-Write-Host "Open https://$HostName/setup and complete installation. Back up the two private keys separately before production use."
+Write-Host "Integrity signing certificate: $($integrity.Thumbprint)"
+Write-Host "Open https://$HostName/setup and complete installation. Back up the three private keys separately before production use."

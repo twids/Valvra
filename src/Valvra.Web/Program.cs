@@ -7,9 +7,12 @@ using Microsoft.EntityFrameworkCore;
 using Valvra.Core;
 using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Configuration;
+using Valvra.Infrastructure.Security;
 using Valvra.Web;
 using Valvra.Web.Setup;
 using Microsoft.AspNetCore.DataProtection;
+using Valvra.Web.Localization;
+using Valvra.Web.Administration;
 
 var builder = WebApplication.CreateBuilder(args);
 var configurationDirectory = Environment.GetEnvironmentVariable("VALVRA_CONFIG_DIR") ?? Path.Combine(AppContext.BaseDirectory, "App_Data");
@@ -21,6 +24,9 @@ if (args.Contains("--initialize-setup", StringComparer.Ordinal))
 }
 using (var saved = installation.Load()) { if (saved is not null) builder.Configuration.AddJsonStream(saved); }
 builder.Services.AddSingleton(installation);
+builder.Services.AddSingleton<IApplicationSettingsStore, ProtectedApplicationSettingsStore>();
+builder.Services.AddScoped<IDirectoryConfigurationProbe, DirectoryConfigurationProbe>();
+builder.Services.AddScoped<ApplicationSettingsService>();
 if (OperatingSystem.IsWindows() && !builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddDataProtection().SetApplicationName("Valvra")
@@ -29,7 +35,13 @@ if (OperatingSystem.IsWindows() && !builder.Environment.IsEnvironment("Testing")
 }
 builder.Services.AddScoped<SetupValidator>();
 builder.Services.AddValvra(builder.Configuration);
-builder.Services.AddRazorPages();
+builder.Services.AddRazorPages(options =>
+{
+    // Explicit UI routes share the authenticated shell. Never rewrite API/static paths.
+    foreach (var route in new[] { "/resources", "/resources/{resourceId}", "/groups", "/groups/{groupId}", "/groups/{groupId}/resources/{resourceId}", "/licenses", "/audit", "/settings" })
+        options.Conventions.AddPageRoute("/Index", route);
+});
+builder.Services.AddSingleton<UiText>();
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
 builder.Services.AddAuthorization(options => options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
 builder.Services.AddAntiforgery(options =>
@@ -48,6 +60,7 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var app = builder.Build();
+app.UseRequestLocalization(UiText.Options());
 // Integration tests replace infrastructure and run in a separate test environment.
 // There is no runtime simulated identity or demo authentication switch.
 if (!app.Environment.IsEnvironment("Testing"))
@@ -57,6 +70,18 @@ if (!app.Environment.IsEnvironment("Testing"))
     else if (!installation.CanConfigure) throw new InvalidOperationException("Run Valvra.Web --initialize-setup before first startup. See README.");
 }
 var installedAtStartup = installation.HasSettings || app.Environment.IsEnvironment("Testing");
+if (args.Contains("--recover-integrity", StringComparer.Ordinal))
+{
+    if (!OperatingSystem.IsWindows() || !installation.HasSettings || !args.Contains("--discard-uncommitted", StringComparer.Ordinal))
+        throw new InvalidOperationException("Explicit installed operator recovery requires --recover-integrity --discard-uncommitted. See SECURITY-MODEL.");
+    using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+    using var scope = app.Services.CreateScope();
+    var actor = await scope.ServiceProvider.GetRequiredService<IDirectoryProvider>().ResolveAsync(identity.User?.Value ?? throw new AccessDeniedException(), CancellationToken.None);
+    await scope.ServiceProvider.GetRequiredService<VaultIntegrity>().RecoverUncommittedAsync(actor, CancellationToken.None);
+    await scope.ServiceProvider.GetRequiredService<AuditService>().RecordAsync(actor, "Integrity.RecoverUncommitted", null, "OperatorConfirmed", "operator-recovery", CancellationToken.None);
+    Console.WriteLine("Verified previous checkpoint restored. No data was re-baselined. Review the audit and interrupted operation before restarting IIS.");
+    return;
+}
 if (args.Contains("--rewrap-keys", StringComparer.Ordinal))
 {
     if (!OperatingSystem.IsWindows() || !installation.HasSettings) throw new InvalidOperationException("Key rotation requires an installed Windows deployment.");
@@ -87,7 +112,7 @@ app.Use(async (context, next) =>
         var (status, message) = ex switch
         {
             AccessDeniedException => (403, "Åtkomst nekad."),
-            VaultValidationException => (400, ex.Message),
+            VaultValidationException => (400, app.Services.GetRequiredService<UiText>().Validation(ex.Message)),
             VaultConflictException or DbUpdateConcurrencyException => (409, "Posten har ändrats. Ladda om innan du försöker igen."),
             VaultUnavailableException or CryptographicException => (503, "Säkerhetskontroll eller audit är inte tillgänglig. Kontrollera aktuell post innan du försöker igen."),
             _ => (500, "Operationen kunde inte slutföras. Kontrollera aktuell post innan du försöker igen.")
@@ -95,7 +120,7 @@ app.Use(async (context, next) =>
         // Log only classification/correlation, never exceptions that could contain SQL parameters or credentials.
         app.Logger.LogWarning("Request failed: {Classification}; correlation {Correlation}", ex.GetType().Name, context.TraceIdentifier);
         context.Response.StatusCode = status;
-        await context.Response.WriteAsJsonAsync(new { error = message, correlationId = context.TraceIdentifier });
+        await context.Response.WriteAsJsonAsync(new { error = app.Services.GetRequiredService<UiText>().Get(message), correlationId = context.TraceIdentifier });
     }
 });
 app.UseStaticFiles();
@@ -107,7 +132,7 @@ app.Use(async (context, next) =>
 {
     if (!installedAtStartup && !context.Request.Path.StartsWithSegments("/setup") && !context.Request.Path.StartsWithSegments("/api/setup"))
     {
-        if (context.Request.Path.StartsWithSegments("/api")) { context.Response.StatusCode = 503; await context.Response.WriteAsJsonAsync(new { error = "Installationen måste slutföras och applikationen startas om." }); return; }
+        if (context.Request.Path.StartsWithSegments("/api")) { context.Response.StatusCode = 503; await context.Response.WriteAsJsonAsync(new { error = app.Services.GetRequiredService<UiText>().Get("Installationen måste slutföras och applikationen startas om.") }); return; }
         context.Response.Redirect("/setup"); return;
     }
     await next(context);
@@ -119,13 +144,14 @@ app.Use(async (context, next) =>
     {
         try { await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context); }
         catch (AntiforgeryValidationException)
-        { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { error = "Ogiltig säkerhetstoken. Ladda om sidan." }); return; }
+        { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { error = app.Services.GetRequiredService<UiText>().Get("Ogiltig säkerhetstoken. Ladda om sidan.") }); return; }
     }
     await next(context);
 });
 app.MapRazorPages();
 app.MapVaultApi();
 app.MapSetupApi();
+app.MapSettingsApi();
 app.Run();
 
 public partial class Program;

@@ -8,6 +8,8 @@ using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Authorization;
 using Valvra.Infrastructure.Data;
 using Valvra.Infrastructure.Services;
+using Valvra.Infrastructure.Security;
+using Valvra.Web.Setup;
 using Xunit;
 
 namespace Valvra.Tests;
@@ -38,9 +40,12 @@ public sealed class DatabaseContractTests
         Assert.False((await db.Database.GetPendingMigrationsAsync()).Any());
         using var signer = new TestAuditSigner();
         var transport = new DatabaseAuditTransport(f.AuditOptions, signer);
-        var audit = new AuditService(db, transport, TimeProvider.System);
+        using var integritySigner = new TestIntegritySigner();
+        var integrity = new VaultIntegrity(db, new MemoryCheckpointStore(), integritySigner, new IntegrityOptions { InstallationId = f.AuditOptions.InstallationId });
+        await integrity.InitializeEmptyAsync(default);
+        var audit = new AuditService(db, transport, TimeProvider.System, signer, integrity);
         using var cipher = new SpyCipher();
-        var vault = new VaultService(db, new AccessService(db, TimeProvider.System), audit, cipher, TimeProvider.System, new FakeDirectory());
+        var vault = new VaultService(new VaultOperations(db, new AccessService(db, TimeProvider.System), audit, cipher, TimeProvider.System, new FakeDirectory(), integrity), integrity);
         var actor = new Actor("ad", "user", "User", new HashSet<string>(), true, true, true);
         var group = await vault.CreateGroupAsync(actor, "Root", null, "database-test", default);
         var resource = await vault.CreateResourceAsync(actor, group, "Server", "database-test", default);
@@ -50,8 +55,9 @@ public sealed class DatabaseContractTests
         Assert.Equal("secret", (await vault.RevealSecretAsync(actor, secret, null, "Secret.Reveal", "database-test", default)).Password);
         var events = await new AuditReader(f.AuditOptions, signer).ReadAsync(actor, new(null, null, null, null, null), default);
         Assert.NotEmpty(events); Assert.All(events, x => Assert.True(x.SignatureValid));
-        var value = new AuditEvent(Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow, "ad", "user", "Duplicate.Test", resource, AuditPhase.Event, "Success", "database-test");
-        Assert.Equal(await transport.SendAsync(value, default), await transport.SendAsync(value, default));
+        var value = new AuditEvent(Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow, "ad", "user", "Duplicate.Test", resource, AuditPhase.Event, "Success", "database-test", InstallationId: f.AuditOptions.InstallationId);
+        var signed = signer.Sign(value);
+        Assert.Equal(await transport.SendAsync(signed, default), await transport.SendAsync(signed, default));
         events = await new AuditReader(f.AuditOptions, signer).ReadAsync(actor, new(null, null, null, "Duplicate.Test", null), default);
         Assert.Single(events);
         await f.MustDenyAsync(f.AuditOptions.WriterConnectionString, provider == "SqlServer" ? "SELECT * FROM dbo.AuditEvents" : "SELECT * FROM audit_events");
@@ -59,13 +65,86 @@ public sealed class DatabaseContractTests
         await f.MustDenyAsync(f.AuditOptions.WriterConnectionString, provider == "SqlServer" ? "DELETE FROM dbo.AuditEvents WHERE 1=0" : "DELETE FROM audit_events WHERE false");
         await f.MustDenyAsync(f.AuditOptions.ReaderConnectionString, provider == "SqlServer" ? "DELETE FROM dbo.AuditEvents WHERE 1=0" : "DELETE FROM audit_events WHERE false");
         var version = await db.SecretVersions.SingleAsync(); Assert.DoesNotContain("secret", version.EnvelopeJson);
+        var license = await vault.SaveLicenseAsync(actor, null, resource, "Product", "Vendor", "Reference", 2, null, new("license-secret", "note"), 0, "database-test", default);
+        await vault.SaveLicenseAsync(actor, license, resource, "Renamed", "Vendor", "Reference", 2, null, null, 1, "database-test", default, SecretChange.Preserve);
+        await vault.SaveLicenseAsync(actor, license, resource, "Renamed", "Vendor", "Reference", 2, null, new("second-key", "note"), 2, "database-test", default, SecretChange.Replace);
+        Assert.Equal("license-secret", (await vault.RevealLicenseAsync(actor, license, "database-test", default, 1)).LicenseKey);
+        await vault.RestoreLicenseVersionAsync(actor, license, 1, 3, "database-test", default);
+        Assert.Equal("license-secret", (await vault.RevealLicenseAsync(actor, license, "database-test", default)).LicenseKey);
+        Assert.Equal(3, (await vault.LicenseVersionsAsync(actor, license, default)).Count);
+        var other = await vault.CreateResourceAsync(actor, group, "Other resource", "database-test", default);
+        var auditReader = new AuditReader(f.AuditOptions, signer);
+        var scoped = await auditReader.ReadAsync(actor, new(null, null, null, "Secret.Create", null, ResourceId: resource, GroupId: group), default);
+        Assert.Equal(2, scoped.Count); Assert.All(scoped, x => Assert.True(x.SignatureValid));
+        Assert.Empty(await auditReader.ReadAsync(actor, new(null, null, null, "Secret.Create", null, ResourceId: other), default));
+        var targets = await auditReader.ReadTargetsAsync(actor, default);
+        Assert.Contains(targets.Resources, x => x.Id == resource); Assert.Contains(targets.Groups, x => x.Id == group);
+        var subgroup = await vault.CreateGroupAsync(actor, "Subgroup", group, "database-test", default);
+        var nested = await vault.CreateResourceAsync(actor, subgroup, "Nested server", "database-test", default);
+        Assert.Equal(2, (await auditReader.ReadAsync(actor, new(null, null, null, "Resource.Create", nested, GroupId: group), default)).Count);
+        Assert.Empty(await auditReader.ReadAsync(actor, new(null, null, null, "Resource.Create", nested, GroupId: group, IncludeSubgroups: false), default));
+        await vault.MoveAsync(actor, TargetKind.Resource, nested, group, 1, "database-test", default);
+        var oldLocation = await auditReader.ReadAsync(actor, new(null, null, null, "Resource.Create", nested, GroupId: subgroup, IncludeSubgroups: false), default);
+        Assert.Equal(2, oldLocation.Count);
+        var move = await auditReader.ReadAsync(actor, new(null, null, null, "Resource.Move", nested, GroupId: group, IncludeSubgroups: false), default);
+        Assert.Single(move); Assert.Equal(AuditPhase.Committed, move[0].Event.Phase);
+        await Assert.ThrowsAsync<AccessDeniedException>(() => auditReader.ReadTargetsAsync(actor with { IsAuditor = false }, default));
+        // Corrupt database data must not hide valid targets or crash either provider.
+        var historicalResource = Guid.NewGuid();
+        var historic = value with { Id = Guid.NewGuid(), TargetId = historicalResource, Format = 3,
+            Timestamp = DateTimeOffset.UtcNow, Scope = new(historicalResource, "Old signed name", group, [new(group, "Root")]) };
+        var renamed = historic with { Id = Guid.NewGuid(), Timestamp = historic.Timestamp.AddMinutes(1),
+            Scope = historic.Scope! with { ResourceName = "Latest signed name" } };
+        await f.InsertAuditRowAsync(signer.Sign(historic), projectedTime: historic.Timestamp.AddYears(10));
+        var latestSigned = signer.Sign(renamed);
+        await f.InsertAuditRowAsync(latestSigned, projectedTime: historic.Timestamp.AddYears(-10));
+        await f.InsertAuditRowAsync(latestSigned with { Event = renamed with { Id = Guid.NewGuid() } },
+            json: System.Text.Encoding.UTF8.GetString(latestSigned.Payload).Replace("Duplicate.Test", "Forged.Test", StringComparison.Ordinal),
+            projectedTime: historic.Timestamp.AddYears(20));
+        await f.InsertAuditRowAsync(signer.Sign(historic with { Id = Guid.NewGuid() }), json: "{");
+        await f.InsertAuditRowAsync(signer.Sign(historic with { Id = Guid.NewGuid() }), json: "{\"Format\":3,\"Scope\":{\"GroupPath\":null}}");
+        targets = await auditReader.ReadTargetsAsync(actor, default);
+        Assert.Equal("Latest signed name", Assert.Single(targets.Resources, x => x.Id == historicalResource).Name);
+        Assert.Equal(3, targets.InvalidEventCount);
+        var corruptPage = await auditReader.ReadAsync(actor, new(null, null, null, null, null, GroupId: group), default);
+        Assert.Equal(3, corruptPage.Count(x => !x.SignatureValid));
+        Assert.All(corruptPage.Where(x => !x.SignatureValid), x => Assert.Null(x.Event.Scope));
+        // Switch to the shared SELECT+INSERT runtime role and verify both adapters
+        // plus real permission enforcement, including administrative deletion paths.
+        await f.UseSharedAuditIdentityAsync();
+        await SetupValidator.CheckPermissionsAsync(f.AuditOptions, true, default);
+        await SetupValidator.CheckPermissionsAsync(f.AuditOptions, false, default);
+        await transport.SendAsync(signer.Sign(value with { Id = Guid.NewGuid() }), default);
+        Assert.NotEmpty(await new AuditReader(f.AuditOptions, signer).ReadAsync(actor, new(null, null, null, null, null), default));
+        var table = provider == "SqlServer" ? "dbo.AuditEvents" : "public.audit_events";
+        var actionColumn = provider == "SqlServer" ? "Action" : "action";
+        foreach (var sql in new[] { $"UPDATE {table} SET {actionColumn}='Forged'", $"DELETE FROM {table}", $"TRUNCATE TABLE {table}", $"DROP TABLE {table}" })
+            await f.MustDenyAsync(f.AuditOptions.WriterConnectionString, sql);
+        // Execute real SQL updates outside the trusted application boundary on both providers.
+        var secretSql = provider == "SqlServer" ? "UPDATE dbo.Secrets SET ResourceId={0} WHERE Id={1}" : "UPDATE \"Secrets\" SET \"ResourceId\"={0} WHERE \"Id\"={1}";
+        var licenseSql = provider == "SqlServer" ? "UPDATE dbo.Licenses SET ResourceId={0} WHERE Id={1}" : "UPDATE \"Licenses\" SET \"ResourceId\"={0} WHERE \"Id\"={1}";
+        foreach (var (sql, id) in new[] { (secretSql, secret), (licenseSql, license) })
+        {
+            await db.Database.ExecuteSqlRawAsync(sql, other, id);
+            var before = cipher.Decryptions;
+            await Assert.ThrowsAsync<VaultUnavailableException>(() => vault.RevealSecretAsync(actor, secret, null, "Secret.Reveal", "database-test", default));
+            await Assert.ThrowsAsync<VaultUnavailableException>(() => vault.RevealLicenseAsync(actor, license, "database-test", default));
+            Assert.Equal(before, cipher.Decryptions);
+            await db.Database.ExecuteSqlRawAsync(sql, resource, id);
+        }
+        await audit.FlushAsync(default);
+        await db.Database.ExecuteSqlRawAsync(provider == "SqlServer" ? "UPDATE dbo.Audit SET Action='Forged'" : "UPDATE \"Audit\" SET \"Action\"='Forged'");
+        var signatureCount = signer.Signatures;
+        await Assert.ThrowsAsync<VaultUnavailableException>(() => audit.FlushAsync(default));
+        Assert.Equal(signatureCount, signer.Signatures);
     }
 }
 
 internal sealed class TestAuditSigner : IAuditSigner, IDisposable
 {
     private readonly RSA rsa = RSA.Create(3072);
-    public SignedAuditEvent Sign(AuditEvent value) => AuditSignature.Sign(value, "test-key", rsa);
+    public int Signatures { get; private set; }
+    public SignedAuditEvent Sign(AuditEvent value) { Signatures++; return AuditSignature.Sign(value, "test-key", rsa); }
     public bool Verify(SignedAuditEvent value) => AuditSignature.Verify(value, rsa);
     public void Dispose() => rsa.Dispose();
 }
@@ -82,6 +161,7 @@ internal sealed class DatabaseFixture : IAsyncDisposable
     private string readerName = "";
     private string writerRole = "";
     private string readerRole = "";
+    private string runtimeRole = "";
     public AuditDatabaseOptions AuditOptions { get; private set; } = new();
 
     public static async Task<DatabaseFixture> CreateAsync(string provider)
@@ -92,6 +172,7 @@ internal sealed class DatabaseFixture : IAsyncDisposable
         f.vaultName = "valvra_test_v_" + suffix; f.auditName = "valvra_test_a_" + suffix;
         f.writerName = "valvra_test_w_" + suffix; f.readerName = "valvra_test_r_" + suffix;
         f.writerRole = "valvra_test_wrole_" + suffix; f.readerRole = "valvra_test_rrole_" + suffix;
+        f.runtimeRole = "valvra_test_arole_" + suffix;
         var password = "V!a1" + Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
         try
         {
@@ -110,7 +191,7 @@ internal sealed class DatabaseFixture : IAsyncDisposable
                 await f.ExecuteAsync(f.auditAdminConnection, $"ALTER ROLE valvra_audit_writer ADD MEMBER [{f.writerName}]; ALTER ROLE valvra_audit_reader ADD MEMBER [{f.readerName}];");
                 root.IntegratedSecurity = false; root.UserID = f.writerName; root.Password = password; var writer = root.ConnectionString;
                 root.UserID = f.readerName;
-                f.AuditOptions = new() { Provider = provider, WriterConnectionString = writer, ReaderConnectionString = root.ConnectionString };
+                f.AuditOptions = new() { InstallationId = Guid.NewGuid(), Provider = provider, WriterConnectionString = writer, ReaderConnectionString = root.ConnectionString };
             }
             else
             {
@@ -118,15 +199,20 @@ internal sealed class DatabaseFixture : IAsyncDisposable
                 await f.ExecuteAsync(f.serverConnection, $"CREATE DATABASE {f.vaultName}"); await f.ExecuteAsync(f.serverConnection, $"CREATE DATABASE {f.auditName}");
                 await f.ExecuteAsync(f.serverConnection, $"CREATE ROLE {f.writerName} LOGIN PASSWORD '{password}'; CREATE ROLE {f.readerName} LOGIN PASSWORD '{password}';");
                 root.Database = f.vaultName; f.vaultConnection = root.ConnectionString; root.Database = f.auditName; f.auditAdminConnection = root.ConnectionString;
-                var script = (await File.ReadAllTextAsync(ScriptPath("audit-postgresql.sql"))).Replace("valvra_audit_writer", f.writerRole, StringComparison.Ordinal).Replace("valvra_audit_reader", f.readerRole, StringComparison.Ordinal);
+                var script = (await File.ReadAllTextAsync(ScriptPath("audit-postgresql.sql"))).Replace("valvra_audit_writer", f.writerRole, StringComparison.Ordinal).Replace("valvra_audit_reader", f.readerRole, StringComparison.Ordinal).Replace("valvra_audit_runtime", f.runtimeRole, StringComparison.Ordinal);
                 await f.ExecuteAsync(f.auditAdminConnection, script);
                 await f.ExecuteAsync(f.auditAdminConnection, $"GRANT {f.writerRole} TO {f.writerName}; GRANT {f.readerRole} TO {f.readerName};");
                 root.Username = f.writerName; root.Password = password; var writer = root.ConnectionString; root.Username = f.readerName;
-                f.AuditOptions = new() { Provider = provider, WriterConnectionString = writer, ReaderConnectionString = root.ConnectionString };
+                f.AuditOptions = new() { InstallationId = Guid.NewGuid(), Provider = provider, WriterConnectionString = writer, ReaderConnectionString = root.ConnectionString };
             }
             return f;
         }
-        catch { await f.DisposeAsync(); throw; }
+        catch (Exception setupError)
+        {
+            try { await f.DisposeAsync(); }
+            catch (Exception cleanupError) { throw new AggregateException("Disposable database setup and cleanup failed.", setupError, cleanupError); }
+            throw;
+        }
     }
 
     public VaultDbContext Db()
@@ -138,6 +224,28 @@ internal sealed class DatabaseFixture : IAsyncDisposable
     }
     public async Task MustDenyAsync(string connection, string sql) =>
         await Assert.ThrowsAnyAsync<DbException>(() => ExecuteAsync(connection, sql));
+    public async Task InsertAuditRowAsync(SignedAuditEvent signed, string? json = null, DateTimeOffset? projectedTime = null)
+    {
+        await using var connection = Open(AuditOptions.WriterConnectionString); await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = provider == "SqlServer"
+            ? "INSERT INTO dbo.AuditEvents (EventId,PayloadHash,Timestamp,ActorId,Action,TargetId,EventJson,SigningKeyId,Signature) VALUES (@id,@hash,@time,@actor,@action,@target,@json,@key,@signature)"
+            : "INSERT INTO public.audit_events (event_id,payload_hash,timestamp,actor_id,action,target_id,event_json,signing_key_id,signature) VALUES (@id,@hash,@time,@actor,@action,@target,@json,@key,@signature)";
+        AuditConnections.Parameter(command, "id", signed.Event.Id); AuditConnections.Parameter(command, "hash", signed.PayloadHash);
+        AuditConnections.Parameter(command, "time", (projectedTime ?? signed.Event.Timestamp).UtcDateTime);
+        AuditConnections.Parameter(command, "actor", signed.Event.ActorId); AuditConnections.Parameter(command, "action", signed.Event.Action);
+        AuditConnections.Parameter(command, "target", signed.Event.TargetId);
+        AuditConnections.Parameter(command, "json", json ?? System.Text.Encoding.UTF8.GetString(signed.Payload));
+        AuditConnections.Parameter(command, "key", signed.SigningKeyId); AuditConnections.Parameter(command, "signature", signed.Signature);
+        await command.ExecuteNonQueryAsync();
+    }
+    public async Task UseSharedAuditIdentityAsync()
+    {
+        await ExecuteAsync(auditAdminConnection, provider == "SqlServer"
+            ? $"ALTER ROLE valvra_audit_writer DROP MEMBER [{writerName}]; ALTER ROLE valvra_audit_runtime ADD MEMBER [{writerName}];"
+            : $"REVOKE {writerRole} FROM {writerName}; GRANT {runtimeRole} TO {writerName};");
+        AuditOptions.ReaderConnectionString = AuditOptions.WriterConnectionString;
+    }
     private DbConnection Open(string connection) => provider == "SqlServer" ? new SqlConnection(connection) : new NpgsqlConnection(connection);
     private async Task ExecuteAsync(string connectionString, string sql)
     {
@@ -169,7 +277,7 @@ internal sealed class DatabaseFixture : IAsyncDisposable
         else
         {
             foreach (var db in new[] { vaultName, auditName }) await ExecuteAsync(serverConnection, $"DROP DATABASE IF EXISTS {db} WITH (FORCE)");
-            foreach (var role in new[] { writerName, readerName, writerRole, readerRole }) await ExecuteAsync(serverConnection, $"DROP ROLE IF EXISTS {role}");
+            foreach (var role in new[] { writerName, readerName, writerRole, readerRole, runtimeRole }) await ExecuteAsync(serverConnection, $"DROP ROLE IF EXISTS {role}");
         }
     }
 }

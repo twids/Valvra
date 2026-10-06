@@ -16,8 +16,13 @@ CREATE INDEX ix_audit_events_actor ON public.audit_events(actor_id, timestamp DE
 CREATE INDEX ix_audit_events_target ON public.audit_events(target_id, timestamp DESC);
 CREATE ROLE valvra_audit_writer NOLOGIN;
 CREATE ROLE valvra_audit_reader NOLOGIN;
+CREATE ROLE valvra_audit_runtime NOLOGIN;
 REVOKE ALL ON public.audit_events FROM PUBLIC;
-GRANT USAGE ON SCHEMA public TO valvra_audit_writer, valvra_audit_reader;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO valvra_audit_writer, valvra_audit_reader, valvra_audit_runtime;
+GRANT SELECT, INSERT ON public.audit_events TO valvra_audit_runtime;
+-- GRANT valvra_audit_runtime TO your_service_login;
+-- Optional separate identities:
 GRANT INSERT ON public.audit_events TO valvra_audit_writer;
 GRANT SELECT ON public.audit_events TO valvra_audit_reader;
 -- GRANT valvra_audit_writer TO your_writer_login;

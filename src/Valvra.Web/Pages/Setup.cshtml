@@ -1,16 +1,20 @@
 @page "/setup"
+@using System.Globalization
+@inject Valvra.Web.Localization.UiText Text
 @{ Layout = null; }
 <!doctype html>
-<html lang="sv">
-<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Installera Valvra</title><link rel="stylesheet" href="/css/site.css" /><link rel="stylesheet" href="/css/setup.css" /><script src="/js/setup.js" defer></script></head>
+<html lang="@CultureInfo.CurrentUICulture.TwoLetterISOLanguageName">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title data-i18n="Installera Valvra">@Text.Get("Installera Valvra")</title><link rel="stylesheet" href="/css/site.css" /><link rel="stylesheet" href="/css/setup.css" /><link rel="stylesheet" href="/css/compact.css" /><script src="/js/i18n.js" defer></script><script src="/js/setup.js" defer></script></head>
 <body>
-    <div class="setup-shell">
-        <header class="setup-header"><a class="brand" href="/"><span class="brand-mark">V</span>valvra<span class="brand-dot">.</span></a><span class="badge">INSTALLATION</span></header>
-        <div class="setup-intro"><p class="eyebrow">ETT SKYDDAT VALV FÖR ORGANISATIONEN</p><h1>Välkommen till Valvra</h1><p>Anslut databaserna och Active Directory. Vi kontrollerar säkerhetsinställningarna innan valvet öppnas.</p></div>
-        <ol class="setup-steps" id="steps"><li class="current">1 · Webbplats</li><li>2 · Databaser</li><li>3 · Identitet och nycklar</li><li>4 · Kontrollera och spara</li></ol>
+    <a class="skip-link" href="#main-content" data-i18n="Hoppa till installationen">@Text.Get("Hoppa till installationen")</a>
+    <main class="setup-shell" id="main-content" tabindex="-1">
+        <header class="setup-header"><a class="brand" href="/" aria-label="@Text.Get("Valvra startsida")" data-i18n-aria-label="Valvra startsida"><span class="brand-mark">V</span>valvra<span class="brand-dot">.</span></a><span class="badge">INSTALLATION</span><div class="language-control"><label for="language-select" data-i18n="Språk">@Text.Get("Språk")</label><select id="language-select" data-language-picker><option value="sv" lang="sv">Svenska</option><option value="en" lang="en">English</option></select></div></header>
+        <div class="setup-intro"><p class="eyebrow" data-i18n="ETT SKYDDAT VALV FÖR ORGANISATIONEN">@Text.Get("ETT SKYDDAT VALV FÖR ORGANISATIONEN")</p><h1 data-i18n="Välkommen till Valvra">@Text.Get("Välkommen till Valvra")</h1><p data-i18n="Anslut databaserna och Active Directory. Vi kontrollerar säkerhetsinställningarna innan valvet öppnas.">@Text.Get("Anslut databaserna och Active Directory. Vi kontrollerar säkerhetsinställningarna innan valvet öppnas.")</p></div>
+        <ol class="setup-steps" id="steps" aria-label="@Text.Get("Installationssteg")" data-i18n-aria-label="Installationssteg"><li class="current" aria-current="step" data-i18n="1 · Webbplats">@Text.Get("1 · Webbplats")</li><li data-i18n="2 · Databaser">@Text.Get("2 · Databaser")</li><li data-i18n="3 · Identitet och nycklar">@Text.Get("3 · Identitet och nycklar")</li><li data-i18n="4 · Kontrollera och spara">@Text.Get("4 · Kontrollera och spara")</li></ol>
         <div id="setup-notice" class="notice" role="status" hidden></div>
-        <form id="setup-form" class="panel"><div class="panel-body" id="setup-fields"></div><div class="setup-navigation"><button type="button" id="previous" class="button">← Tillbaka</button><button type="button" id="next" class="button primary">Nästa →</button></div></form>
-        <p class="hint">Konfigurationen sparas krypterad med Windows DPAPI. Databaslösenord och installationskod skickas aldrig till loggar.</p>
-    </div>
+        <div id="setup-error" class="notice error" role="alert" hidden></div>
+        <form id="setup-form" class="panel"><div class="panel-body" id="setup-fields"></div><div class="setup-navigation"><button type="button" id="previous" class="button" data-i18n="← Tillbaka">@Text.Get("← Tillbaka")</button><button type="button" id="next" class="button primary" data-i18n="Nästa →">@Text.Get("Nästa →")</button></div></form>
+        <p class="hint" data-i18n="Konfigurationen sparas krypterad med Windows DPAPI. Databaslösenord och installationskod skickas aldrig till loggar.">@Text.Get("Konfigurationen sparas krypterad med Windows DPAPI. Databaslösenord och installationskod skickas aldrig till loggar.")</p>
+    </main>
 </body>
 </html>

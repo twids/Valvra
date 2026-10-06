@@ -4,7 +4,9 @@
 
 Windows SSO identifierar webbanvändaren. Databasoperationer sker som **tjänstens Windows-identitet**, inte som webbanvändaren. Användarbehörigheter avgörs alltid i Valvra. Kerberos-delegering av användare till databasen behövs inte och konfigureras inte.
 
-För MSSQL används `Integrated Security=true;Encrypt=true;TrustServerCertificate=false`. Kör IIS-poolen som en domänidentitet, helst gMSA. SQL Server måste känna igen kontot och databascertifikatet måste vara betrott och stämma med serverns DNS-namn. Anslut aldrig som SQL Server-administratör under normal drift.
+För MSSQL används `Integrated Security=true;Encrypt=true;TrustServerCertificate=false`. Kör IIS-poolen som en domänidentitet, gärna dMSA eller gMSA. SQL Server måste känna igen kontot och databascertifikatet måste vara betrott och stämma med serverns DNS-namn. Anslut aldrig som SQL Server-administratör under normal drift.
+
+dMSA infördes i **Windows Server 2025** och kräver att Windows/AD-miljön förbereds för kontotypen och att IIS-värden tillåts använda kontot. Följ Microsofts [dMSA-anvisningar](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/delegated-managed-service-accounts/delegated-managed-service-accounts-overview) innan Valvra installeras. `Install-Iis.ps1` använder tomt lösenord för hanterade tjänstekonton med namn som slutar på `$`; skriptet skapar inte dMSA i AD eller konfigurerar dess Windows-policy. Verifiera IIS-inloggning, SQL Integrated Security och HTTP-SPN med AD/DBA-administratören. Körning mot ett faktiskt dMSA-konto är ännu inte verifierad i projektets testmiljö.
 
 PostgreSQL kan använda lösenordsinloggning eller SSPI/GSSAPI med tjänstens Windows-identitet. För det senare måste DBA konfigurera PostgreSQLs `pg_hba.conf`, Kerberos/SSPI och kontomappning; rätt PostgreSQL-roll anges i installationen. TLS kräver `SSL Mode=VerifyFull`. Det är inte tillräckligt att bara välja Windows i webbgränssnittet om databasservern inte är förberedd för SSPI/GSSAPI.
 
@@ -29,13 +31,26 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO valvra_ru
 -- Inga identitetssekvenser behövs: poster använder applikationsgenererade UUID:n.
 ```
 
-## Auditdatabasens identiteter
+## Auditdatabasens tjänstekonto
 
-Auditskrivaren använder tjänstens identitet och rollen `valvra_audit_writer`: endast INSERT på audittabellen. Auditläsaren använder `valvra_audit_reader`: endast SELECT. Roller och tabell skapas med skripten i `deploy/` eller installationsguidens schemainstallation.
+Standardinstallationen använder **ett tjänstekonto** för både tillägg och läsning, med `valvra_audit_runtime`: endast SELECT och INSERT på audittabellen. Roller och tabell skapas med skripten i `deploy/` eller installationsguidens schemainstallation. Som DBA, skapa SQL Server-login en gång och en user i respektive databas. Efter att auditskriptet körts, exempel:
 
-Om båda kopplingarna använder samma Windows-identitet kan de inte ha motsatta rättigheter. För Windows-inloggning i båda kopplingarna konfigureras därför ett **separat Windows-läskonto**. Valvra använder en begränsad nätverksinloggning (`LOGON32_LOGON_NEW_CREDENTIALS`) endast runt auditläsning. Användarens Windows-identitet vidarebefordras inte. Läskontots domän, användarnamn och lösenord lagras i DPAPI-skyddad installationskonfiguration. Ett separat SELECT-only databaskonto är ett alternativ.
+```sql
+-- Kör som DBA, inte som Valvras tjänstekonto.
+CREATE LOGIN [EXAMPLE\svcValvra$] FROM WINDOWS;
+USE [Valvra];
+CREATE USER [EXAMPLE\svcValvra$] FOR LOGIN [EXAMPLE\svcValvra$];
+ALTER ROLE valvra_runtime ADD MEMBER [EXAMPLE\svcValvra$];
+USE [ValvraAudit];
+CREATE USER [EXAMPLE\svcValvra$] FOR LOGIN [EXAMPLE\svcValvra$];
+ALTER ROLE valvra_audit_runtime ADD MEMBER [EXAMPLE\svcValvra$];
+```
 
-Installationsguiden kontrollerar INSERT/SELECT/UPDATE/DELETE/ALTER eller TRUNCATE-rättigheter. Dessa kontroller ersätter inte DBA:s granskning av bredare roller, schemaägarskap eller möjlighet att ändra behörigheter. Se [auditguiden](AUDIT.md) för hotmodell och återleverans.
+Skapa `valvra_runtime` enligt avsnittet ovan före rolltilldelningen. Kör inte login-/user-skapande igen om de redan finns. Välj Windows / Integrated Security för valv- och auditdatabasen i setup; lämna **Använd separat auditläsare** avmarkerat. Valvra sparar då ingen extra Windows-inloggning. Samma login har olika rättigheter i de två databaserna. Ge inte kontot databas-/schema-/tabellägarskap, administrativa roller, rättighetsadministration eller bredare behörigheter via AD-grupper/procedurer. MSSQL-skriptet nekar UPDATE/DELETE/ALTER/TAKE OWNERSHIP på audittabellen och ALTER/TAKE OWNERSHIP på dess schema; ge inga särskilda UPDATE-rättigheter på kolumner. CONTROL ska inte tilldelas. Ett DENY CONTROL används inte eftersom det även skulle blockera nödvändig SELECT/INSERT.
+
+Separata identiteter är ett valfritt alternativ: `valvra_audit_writer` för INSERT och `valvra_audit_reader` för SELECT. Aktivera separat auditläsare i setup. Vid separat Windows-läskonto används en begränsad nätverksinloggning (`LOGON32_LOGON_NEW_CREDENTIALS`) runt auditläsning och läskontots uppgifter lagras i DPAPI-skyddad konfiguration. Detta behövs inte för standardinstallationen med ett dMSA/gMSA-konto. Användarens Windows-identitet vidarebefordras inte. Ett separat SELECT-only databaskonto är också möjligt.
+
+Installationsguiden kräver INSERT på skrivkopplingen och SELECT på läskopplingen; båda får ha båda rättigheterna. Den nekar UPDATE/DELETE/ALTER eller TRUNCATE, även kolumn-UPDATE, samt vissa schema-/ägar-/administrationsrättigheter. Okända resultat nekas. Dessa kontroller ersätter inte DBA:s granskning av bredare roller, schemaägarskap eller möjlighet att ändra behörigheter. PostgreSQL-roller saknar SQL Servers DENY: inga bredare rättigheter får ärvas och runtime-kontot får inte kunna ta över administrativa roller. Se [auditguiden](AUDIT.md) för hotmodell och återleverans.
 
 ## Migrationer från källkod
 

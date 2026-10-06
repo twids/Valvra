@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using Valvra.Core;
 using Valvra.Infrastructure.Data;
 using Valvra.Infrastructure.Auditing;
+using Valvra.Infrastructure.Security;
 using Valvra.Web.Setup;
 using Xunit;
 
@@ -24,6 +25,24 @@ namespace Valvra.Tests;
 
 public sealed class WebSecurityTests
 {
+    [Fact]
+    public async Task DeepLinksRequireAuthenticationAndDoNotRewriteApiOrStaticRoutes()
+    {
+        await using var host = new TestWebHost(); using var anonymous = host.Client(null); using var authenticated = host.Client("user");
+        foreach (var path in new[] { "/resources", "/resources/99999999-9999-9999-9999-999999999999", "/groups", "/groups/99999999-9999-9999-9999-999999999999",
+            "/groups/99999999-9999-9999-9999-999999999999/resources/88888888-8888-8888-8888-888888888888", "/licenses", "/audit", "/settings" })
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(path)).StatusCode);
+            using var page = await authenticated.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+            Assert.Equal("text/html", page.Content.Headers.ContentType!.MediaType);
+            Assert.Contains("/js/navigation.js", await page.Content.ReadAsStringAsync());
+            Assert.Contains("no-store", page.Headers.CacheControl!.ToString());
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await authenticated.GetAsync("/api/not-a-real-endpoint")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await authenticated.GetAsync("/js/not-a-real-file.js")).StatusCode);
+    }
+
     [Fact]
     public async Task SetupRequiresPrivateBootstrapCodeEvenWithAuthenticatedCsrf()
     {
@@ -95,6 +114,28 @@ public sealed class WebSecurityTests
         Assert.Contains(host.Transport.Events, x => x.Action == "Access.Denied" && x.ActorId == "outsider");
     }
 
+    [Fact]
+    public async Task LicenseApiPreservesMetadataAndEnforcesHistoryAndExplicitSecretChanges()
+    {
+        await using var host = new TestWebHost(); using var owner = host.Client("user"); await host.AddCsrfAsync(owner);
+        var group = await PostId(owner, "/api/groups", new { name = "Group", parentId = (Guid?)null });
+        var resource = await PostId(owner, "/api/resources", new { name = "Resource", groupId = group });
+        await PostId(owner, "/api/grants", new { targetKind = 1, targetId = resource, subjectKind = 0, provider = "ad", subjectId = "user", permissions = 7 });
+        var license = await PostId(owner, "/api/licenses", new { resourceId = resource, product = "Product", vendor = "Vendor", purchaseReference = "Reference", seats = 2, secretChange = 1, payload = new { licenseKey = "api-secret-key", notes = "api-private-notes" } });
+        var update = new { resourceId = resource, product = "Renamed", vendor = "Vendor", purchaseReference = "Reference", seats = 3, revision = 1 };
+        Assert.Equal(HttpStatusCode.OK, (await owner.PostAsJsonAsync($"/api/licenses/{license}/update", update)).StatusCode);
+        var metadata = await owner.GetStringAsync($"/api/resources/{resource}/licenses");
+        Assert.DoesNotContain("api-secret", metadata); Assert.DoesNotContain("envelope", metadata, StringComparison.OrdinalIgnoreCase);
+        var versions = await owner.GetFromJsonAsync<JsonElement>($"/api/licenses/{license}/versions"); Assert.Equal(1, versions.GetArrayLength());
+        using var outsider = host.Client("outsider"); await host.AddCsrfAsync(outsider);
+        Assert.Equal(HttpStatusCode.Forbidden, (await outsider.GetAsync($"/api/licenses/{license}/versions")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await outsider.PostAsJsonAsync($"/api/licenses/{license}/reveal", new { version = 1 })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await outsider.PostAsJsonAsync($"/api/licenses/{license}/restore", new { version = 1, revision = 2 })).StatusCode);
+        var invalid = new { resourceId = resource, product = "Product", vendor = "Vendor", purchaseReference = "Reference", seats = 3, revision = 2, secretChange = 1, payload = new { licenseKey = "", notes = "" } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync($"/api/licenses/{license}/update", invalid)).StatusCode);
+        Assert.Contains("api-secret-key", await (await owner.PostAsJsonAsync($"/api/licenses/{license}/reveal", new { version = 1 })).Content.ReadAsStringAsync());
+    }
+
     private static async Task<Guid> PostId(HttpClient client, string path, object body)
     {
         using var response = await client.PostAsJsonAsync(path, body);
@@ -110,6 +151,10 @@ internal sealed class TestWebHost(bool preview = false) : WebApplicationFactory<
     // SqliteConnection instance is unsafe when the UI loads metadata concurrently.
     private readonly SqliteConnection connection = new($"Data Source=valvra_web_{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
     private readonly SpyCipher cipher = new();
+    private readonly MemoryCheckpointStore checkpoints = new();
+    private readonly TestIntegritySigner integritySigner = new();
+    private readonly TestAuditSigner auditSigner = new();
+    private readonly IntegrityOptions integrityOptions = new() { InstallationId = Guid.NewGuid() };
     public RecordingTransport Transport { get; } = new();
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -123,14 +168,26 @@ internal sealed class TestWebHost(bool preview = false) : WebApplicationFactory<
             services.RemoveAll<VaultDbContext>(); services.RemoveAll<DbContextOptions<VaultDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<VaultDbContext>>();
             services.AddDbContext<VaultDbContext>(options => options.UseSqlite(connection.ConnectionString));
-            services.RemoveAll<IDirectoryProvider>(); services.AddSingleton<IDirectoryProvider, FakeDirectory>();
+            services.RemoveAll<IDirectoryProvider>(); services.AddSingleton<IDirectoryProvider>(new FakeDirectory {ReportGlobalRoles=false});
+            services.RemoveAll<Valvra.Web.Administration.IApplicationSettingsStore>();
+            services.AddSingleton<Valvra.Web.Administration.IApplicationSettingsStore, MemoryApplicationSettings>();
+            services.RemoveAll<Valvra.Web.Administration.IDirectoryConfigurationProbe>();
+            services.AddSingleton<Valvra.Web.Administration.IDirectoryConfigurationProbe, FakeDirectoryProbe>();
             services.RemoveAll<ISecretCipher>(); services.AddSingleton<ISecretCipher>(cipher);
+            services.RemoveAll<IntegrityOptions>(); services.AddSingleton(integrityOptions);
+            services.RemoveAll<IIntegrityCheckpointStore>(); services.AddSingleton<IIntegrityCheckpointStore>(checkpoints);
+            services.RemoveAll<IIntegritySigner>(); services.AddSingleton<IIntegritySigner>(integritySigner);
+            services.RemoveAll<IAuditSigner>(); services.AddSingleton<IAuditSigner>(auditSigner);
             services.RemoveAll<IAuditTransport>(); services.AddSingleton<IAuditTransport>(Transport);
             services.RemoveAll<IAuditReader>(); services.AddSingleton<IAuditReader>(new TestAuditReader(Transport));
             services.AddSingleton(new TestIdentityOptions(preview ? "user" : null));
             if (preview)
             {
                 services.AddSingleton<IStartupFilter, LoopbackPreviewScheme>();
+                // Browser suites share one synthetic identity and exceed a normal
+                // user's request budget. Only this loopback test adapter disables
+                // throttling; ordinary security tests retain production limits.
+                services.PostConfigure<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>(options => options.GlobalLimiter = null);
                 services.PostConfigure<Microsoft.AspNetCore.Antiforgery.AntiforgeryOptions>(options =>
                 {
                     options.Cookie.Name = "Valvra-Browser-Test-CSRF";
@@ -155,6 +212,16 @@ internal sealed class TestWebHost(bool preview = false) : WebApplicationFactory<
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
         using var scope = Services.CreateScope(); scope.ServiceProvider.GetRequiredService<VaultDbContext>().Database.EnsureCreated();
+        if (checkpoints.Value is null)
+        {
+            var integrity = scope.ServiceProvider.GetRequiredService<VaultIntegrity>(); integrity.InitializeEmptyAsync(default).GetAwaiter().GetResult();
+            integrity.RunAsync(async () => {
+                var db = scope.ServiceProvider.GetRequiredService<VaultDbContext>();
+                db.Grants.Add(new AccessGrant { TargetKind = TargetKind.System, TargetId = integrity.InstallationId, SubjectKind = SubjectKind.User,
+                    Provider = "ad", SubjectId = "user", Permissions = (VaultPermission)(int)(GlobalRole.AccessAdministrator | GlobalRole.SystemAdministrator | GlobalRole.Auditor), Revision = 1 });
+                await integrity.SaveAsync(default);
+            }, default).GetAwaiter().GetResult();
+        }
         if (id is not null) client.DefaultRequestHeaders.Add("X-Test-Identity", id);
         return client;
     }
@@ -163,7 +230,7 @@ internal sealed class TestWebHost(bool preview = false) : WebApplicationFactory<
         var session = await client.GetFromJsonAsync<JsonElement>("/api/session");
         client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", session.GetProperty("csrfToken").GetString());
     }
-    public override async ValueTask DisposeAsync() { await base.DisposeAsync(); await connection.DisposeAsync(); cipher.Dispose(); if (Directory.Exists(setupDirectory)) Directory.Delete(setupDirectory, true); }
+    public override async ValueTask DisposeAsync() { await base.DisposeAsync(); await connection.DisposeAsync(); cipher.Dispose(); integritySigner.Dispose(); auditSigner.Dispose(); if (Directory.Exists(setupDirectory)) Directory.Delete(setupDirectory, true); }
 }
 
 internal sealed record TestIdentityOptions(string? DefaultSubject);
@@ -196,12 +263,22 @@ internal sealed class TestAuthentication(IOptionsMonitor<AuthenticationSchemeOpt
 
 internal sealed class TestAuditReader(RecordingTransport transport) : IAuditReader
 {
+    public Task<AuditTargetOptions> ReadTargetsAsync(Actor actor, CancellationToken ct)
+    {
+        if (!actor.IsEnabled || !actor.IsAuditor) throw new AccessDeniedException();
+        var scopes = transport.Events.Where(x => x.Scope is not null).Select(x => x.Scope!).ToArray();
+        return Task.FromResult(new AuditTargetOptions(
+            scopes.Where(x => x.ResourceId is not null).GroupBy(x => x.ResourceId!.Value).Select(x => new AuditTargetOption(x.Key, x.Last().ResourceName!)).ToArray(),
+            scopes.SelectMany(x => x.GroupPath).GroupBy(x => x.Id).Select(x => new AuditTargetOption(x.Key, x.Last().Name)).ToArray()));
+    }
     public Task<IReadOnlyList<AuditEventView>> ReadAsync(Actor actor, AuditQuery query, CancellationToken ct)
     {
         if (!actor.IsEnabled || !actor.IsAuditor) throw new AccessDeniedException();
+        if (query.Offset < 0 || query.Offset > 1000000) throw new VaultValidationException("Ogiltig sidposition.");
         return Task.FromResult<IReadOnlyList<AuditEventView>>(transport.Events.OrderByDescending(x => x.Timestamp)
             .Where(x => (query.From is null || x.Timestamp >= query.From) && (query.To is null || x.Timestamp < query.To)
-                && (query.Action is null || x.Action == query.Action) && (query.ActorId is null || x.ActorId == query.ActorId))
+                && (query.Action is null || x.Action == query.Action) && (query.ActorId is null || x.ActorId == query.ActorId)
+                && (query.TargetId is null || x.TargetId == query.TargetId) && query.MatchesScope(x))
             .Skip(query.Offset).Take(200).Select(x => new AuditEventView(x, AuditSignature.Hash(x), "test-key", true)).ToArray());
     }
 }

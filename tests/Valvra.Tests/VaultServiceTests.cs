@@ -7,6 +7,7 @@ using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Authorization;
 using Valvra.Infrastructure.Data;
 using Valvra.Infrastructure.Services;
+using Valvra.Infrastructure.Security;
 using Xunit;
 
 namespace Valvra.Tests;
@@ -31,9 +32,11 @@ public sealed class VaultServiceTests
     private sealed class LostCommitAcknowledgement : DbTransactionInterceptor
     {
         public bool Enabled { get; set; }
+        private int commits;
         public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken ct = default)
         {
-            if (Enabled) { Enabled = false; throw new IOException("Simulated lost commit acknowledgement."); }
+            // Intent and its receipt commit first. Lose the acknowledgement of the domain mutation itself.
+            if (Enabled && ++commits == 3) { Enabled = false; throw new IOException("Simulated lost commit acknowledgement."); }
             return Task.CompletedTask;
         }
     }
@@ -123,8 +126,10 @@ public sealed class VaultServiceTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var id = await fixture.Vault.CreateSecretAsync(fixture.User, fixture.ResourceId, "Account", new("u", "p", "n"), null, "request", default);
-        var grant = await fixture.Db.Grants.SingleAsync();
-        grant.ExpiresAt = fixture.Clock.GetUtcNow().AddMinutes(1); await fixture.Db.SaveChangesAsync();
+        await fixture.Integrity.RunAsync(async () => {
+            var grant = await fixture.Db.Grants.SingleAsync();
+            grant.ExpiresAt = fixture.Clock.GetUtcNow().AddMinutes(1); await fixture.Integrity.SaveAsync(default);
+        }, default);
         fixture.Transport.AfterSend = () => fixture.Clock.Advance(TimeSpan.FromMinutes(2));
         await Assert.ThrowsAsync<AccessDeniedException>(() => fixture.Vault.RevealSecretAsync(fixture.User, id, null, "Secret.Reveal", "request", default));
         Assert.Equal(0, fixture.Cipher.Decryptions);
@@ -137,6 +142,11 @@ public sealed class VaultServiceTests
         public FakeClock Clock { get; } = new();
         public RecordingTransport Transport { get; } = new();
         public SpyCipher Cipher { get; } = new();
+        public MemoryCheckpointStore Checkpoints { get; } = new();
+        public TestIntegritySigner IntegritySigner { get; } = new();
+        public TestAuditSigner AuditSigner { get; } = new();
+        public IntegrityOptions IntegrityOptions { get; } = new() { InstallationId = Guid.NewGuid() };
+        public VaultIntegrity Integrity { get; private set; } = null!;
         public AuditService Audit { get; private set; } = null!;
         public VaultService Vault { get; private set; } = null!;
         public Actor User { get; } = new("ad", "user", "User", new HashSet<string>(), true, true, true);
@@ -149,16 +159,20 @@ public sealed class VaultServiceTests
             if (interceptor is not null) options.AddInterceptors(interceptor);
             f.Db = new VaultDbContext(options.Options);
             await f.Db.Database.EnsureCreatedAsync();
+            f.Integrity = new(f.Db, f.Checkpoints, f.IntegritySigner, f.IntegrityOptions);
+            await f.Integrity.InitializeEmptyAsync(default);
+            await f.Integrity.RunAsync(async () => {
             f.Db.Groups.Add(new ResourceGroup { Id = f.GroupId, Name = "Root", Revision = 1 });
             f.Db.Resources.Add(new VaultResource { Id = f.ResourceId, GroupId = f.GroupId, Name = "Resource", Revision = 1 });
             f.Db.Grants.Add(new AccessGrant { TargetKind = TargetKind.Group, TargetId = f.GroupId, Provider = "ad", SubjectKind = SubjectKind.User,
                 SubjectId = "user", Permissions = VaultPermission.Metadata | VaultPermission.ReadSecret | VaultPermission.Modify, CreatedAt = f.Clock.GetUtcNow(), Revision = 1 });
-            await f.Db.SaveChangesAsync();
-            f.Audit = new(f.Db, f.Transport, f.Clock);
-            f.Vault = new(f.Db, new AccessService(f.Db, f.Clock), f.Audit, f.Cipher, f.Clock, new FakeDirectory());
+            await f.Integrity.SaveAsync(default);
+            }, default);
+            f.Audit = new(f.Db, f.Transport, f.Clock, f.AuditSigner, f.Integrity);
+            f.Vault = new(new VaultOperations(f.Db, new AccessService(f.Db, f.Clock), f.Audit, f.Cipher, f.Clock, new FakeDirectory(), f.Integrity), f.Integrity);
             return f;
         }
-        public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await Connection.DisposeAsync(); Cipher.Dispose(); }
+        public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await Connection.DisposeAsync(); Cipher.Dispose(); IntegritySigner.Dispose(); AuditSigner.Dispose(); }
     }
 }
 
@@ -174,8 +188,9 @@ internal sealed class RecordingTransport : IAuditTransport
     public AuditPhase? FailPhase { get; set; }
     public Action? AfterSend { get; set; }
     public List<AuditEvent> Events { get; } = [];
-    public Task<AuditReceipt> SendAsync(AuditEvent auditEvent, CancellationToken ct)
+    public Task<AuditReceipt> SendAsync(SignedAuditEvent signed, CancellationToken ct)
     {
+        var auditEvent = signed.Event;
         if (Fail || auditEvent.Phase == FailPhase) throw new IOException("Test audit outage.");
         if (!Events.Any(x => x.Id == auditEvent.Id)) Events.Add(auditEvent);
         AfterSend?.Invoke();
@@ -188,15 +203,16 @@ internal sealed class SpyCipher : ISecretCipher, IDisposable
     private readonly Valvra.Infrastructure.Security.EnvelopeCipher inner;
     public int Decryptions { get; private set; }
     public SpyCipher() => inner = new(keys);
-    public string Encrypt<T>(T payload, Guid id, long version, string purpose) => inner.Encrypt(payload, id, version, purpose);
-    public T Decrypt<T>(string envelope, Guid id, long version, string purpose) { Decryptions++; return inner.Decrypt<T>(envelope, id, version, purpose); }
+    public string Encrypt<T>(T payload, Guid id, long version, string purpose, Guid resourceId, Guid installationId) => inner.Encrypt(payload, id, version, purpose, resourceId, installationId);
+    public T Decrypt<T>(string envelope, Guid id, long version, string purpose, Guid resourceId, Guid installationId) { Decryptions++; return inner.Decrypt<T>(envelope, id, version, purpose, resourceId, installationId); }
     public string Rewrap(string envelope) => inner.Rewrap(envelope);
     public void Dispose() => keys.Dispose();
 }
 internal sealed class FakeDirectory : IDirectoryProvider
 {
+    public bool ReportGlobalRoles { get; set; } = true;
     public string ProviderId => "ad";
-    public Task<Actor> ResolveAsync(string id, CancellationToken ct) => Task.FromResult(new Actor("ad", id, id, new HashSet<string>(), true, id == "user", id == "user"));
+    public Task<Actor> ResolveAsync(string id, CancellationToken ct) => Task.FromResult(new Actor("ad", id, id, new HashSet<string>(), true, ReportGlobalRoles && id == "user", ReportGlobalRoles && id == "user"));
     public Task<IReadOnlyList<DirectorySubject>> SearchAsync(string query, SubjectKind kind, CancellationToken ct) => Task.FromResult<IReadOnlyList<DirectorySubject>>([new("ad", query, query, kind)]);
     public Task<DirectorySubject?> FindAsync(string id, SubjectKind kind, CancellationToken ct) => Task.FromResult<DirectorySubject?>(new("ad", id, id, kind));
 }
