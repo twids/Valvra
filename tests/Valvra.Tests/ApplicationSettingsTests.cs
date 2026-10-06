@@ -146,6 +146,7 @@ public sealed class ApplicationSettingsTests
         var globals = new GlobalRoleService(f.Db,f.Integrity,f.Audit,new FakeDirectory(),f.Clock);
         await globals.BootstrapAsync(f.User,"setup",default); await globals.BootstrapAsync(f.User,"retry",default);
         var user = await globals.ApplyAsync(f.User,default); Assert.True(user.IsAccessAdministrator); Assert.True(user.IsSystemAdministrator); Assert.False(user.IsAuditor);
+        Assert.Equal("user",(await globals.ReadAsync(user,default)).Single().Name);
         var outsider = f.User with {SubjectId="outsider",GroupIds=new HashSet<string>{"user"}};
         var ordinary = await globals.ApplyAsync(outsider,default); Assert.False(ordinary.IsAccessAdministrator); Assert.False(ordinary.IsSystemAdministrator);
         await Assert.ThrowsAsync<AccessDeniedException>(()=>globals.BootstrapAsync(outsider,"race",default));

@@ -1,20 +1,20 @@
-# Separat syntetisk demo
+# Separate synthetic demo
 
-`demo/Valvra.Demo` är en egen .NET-webbapp utan referens till produktionsservern, EF, SQL, LDAP eller certifikatskydd. Den visar samma klientgränssnitt med fasta offentliga exempelvärden. Inga riktiga lösenord, licenser eller inloggningsuppgifter ska matas in.
+`demo/Valvra.Demo` is a standalone .NET web app with no reference to the production server, EF, SQL, LDAP or certificate protection. It shows the same client interface with fixed public sample values. Do not enter real passwords, licenses or credentials.
 
-Demobesökaren har endast metadata- och läsrätt för syntetiska poster. Servern saknar skriv-/setup-/behörighets-/LDAP-/audit-API. Endast de två fasta exempelposternas utlämningsvägar accepterar POST; deras JSON får enbart välja version 1 eller kopiering. Andra POST, PUT och DELETE avvisas. Det finns ingen databas eller beständig lagring. Demon illustrerar gränssnittet; den verifierar inte produktionssäkerhet, kryptering, Windows SSO eller signerad audit.
+Demo visitors have only metadata and read access to synthetic records. The server has no write/setup/permission/LDAP/audit API. Only the release endpoints for the two fixed sample records accept POST; their JSON may only select version 1 or copying. Other POST, PUT and DELETE requests are rejected. There is no database or persistent storage. The demo illustrates the interface; it does not verify production security, encryption, Windows SSO or signed audit records.
 
-## Lokalt
+## Locally
 
 ```powershell
 dotnet run --project demo/Valvra.Demo --urls http://127.0.0.1:58800
 ```
 
-Öppna `http://127.0.0.1:58800`. Starta den separat från produktionsappen och ge den inga produktionsinställningar, certifikat, databasanslutningar eller `App_Data`-mounts. Applikationen avvisar kända produktionskonfigurationssektioner och `VALVRA_CONFIG_DIR`.
+Open `http://127.0.0.1:58800`. Run it separately from the production app and do not provide production settings, certificates, database connections or `App_Data` mounts. The application rejects known production configuration sections and `VALVRA_CONFIG_DIR`.
 
 ## Docker / Dockhand
 
-Publicera enbart demoprojektet:
+Publish only the demo project:
 
 ```powershell
 dotnet publish demo/Valvra.Demo -c Release --self-contained false -p:UseAppHost=false -o artifacts/demo-publish
@@ -22,6 +22,6 @@ Copy-Item deploy/Demo.Dockerfile artifacts/demo-publish/Dockerfile
 docker build -t local/valvra-demo:security-review artifacts/demo-publish
 ```
 
-Använd `deploy/demo.compose.yml` i Dockhand. Den kör som den obehöriga `app`-användaren, med skrivskyddat filsystem, utan capabilities och utan datavolymer. Endast localhost-port 15880 publiceras. Om demon ska nås via organisationens reverse proxy, anslut endast democontainern till det avsedda proxynätverket och skapa en HTTPS-route mot `valvra-demo:8080`. Produktionsappen och dess testhost får inte användas som publik demo.
+Use `deploy/demo.compose.yml` in Dockhand. It runs as the unprivileged `app` user, with a read-only filesystem, no capabilities and no data volumes. Only localhost port 15880 is published. To expose the demo through the organization's reverse proxy, connect only the demo container to the intended proxy network and create an HTTPS route to `valvra-demo:8080`. The production app and its test host must not be used as a public demo.
 
-HTTP- och klienttester körs via `dotnet test` och `node --test tests/browser/*.test.cjs`. Den publika demoidentiteten är inte en inloggningsprovider och finns inte i IIS-paketet.
+HTTP and client tests run through `dotnet test` and `node --test tests/browser/*.test.cjs`. The public demo identity is not a sign-in provider and is not included in the IIS package.

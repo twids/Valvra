@@ -6,7 +6,7 @@ using Valvra.Infrastructure.Security;
 
 namespace Valvra.Infrastructure.Services;
 
-public sealed record GlobalRoleView(Guid Id, string Provider, string SubjectId, GlobalRole Roles, long Revision);
+public sealed record GlobalRoleView(Guid Id, string Provider, string SubjectId, GlobalRole Roles, long Revision, string? Name);
 public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrity, AuditService audit, IDirectoryProvider directory, TimeProvider clock)
 {
     private const GlobalRole All = GlobalRole.AccessAdministrator | GlobalRole.SystemAdministrator | GlobalRole.Auditor;
@@ -33,7 +33,14 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
     {
         var fresh = await ApplyAsync(actor, ct);
         if (!fresh.IsAccessAdministrator && !fresh.IsSystemAdministrator) throw new AccessDeniedException();
-        return (await Rows(ct)).Select(x => new GlobalRoleView(x.Id, x.Provider, x.SubjectId, (GlobalRole)(int)x.Permissions, x.Revision)).ToArray();
+        var result = new List<GlobalRoleView>();
+        foreach (var row in await Rows(ct))
+        {
+            var person = row.Provider == directory.ProviderId ? await directory.FindAsync(row.SubjectId, SubjectKind.User, ct) : null;
+            if (person is not null && (person.Provider != row.Provider || person.Id != row.SubjectId || person.Kind != SubjectKind.User)) throw new AccessDeniedException();
+            result.Add(new(row.Id, row.Provider, row.SubjectId, (GlobalRole)(int)row.Permissions, row.Revision, person?.Name));
+        }
+        return result;
     }, ct);
     public Task<Guid> SetAsync(Actor actor, string provider, string subjectId, SubjectKind kind, GlobalRole roles, long revision, string correlation, CancellationToken ct) =>
         integrity.RunAsync(async () =>

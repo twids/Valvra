@@ -1,34 +1,34 @@
-# Navigering, länkar och historik
+# Navigation, links and history
 
-Huvudmenyn, gruppnamn, resurskort, brödsmulor och tillbaka-länkar använder vanliga länkar. De stöder öppning i ny flik, kopiering av länkadress och webbläsarens historik. Musens bakåt-/framåtknappar använder samma historik som webbläsarens knappar.
+The main menu, group names, resource cards, breadcrumbs and back links use ordinary links. They support opening in a new tab, copying the link address and browser history. Mouse back/forward buttons use the same history as the browser's buttons.
 
-| Adress | Vy |
+| Address | View |
 | --- | --- |
-| `/resources` | Resursöversikt |
-| `/resources/{resourceId}` | En resurs |
-| `/groups` | Resursgruppernas hierarki |
-| `/groups/{groupId}` | En grupp med resurser och undergrupper |
-| `/groups/{groupId}/resources/{resourceId}` | En resurs öppnad från gruppens vy |
-| `/licenses` | Licensöversikt |
-| `/audit` | Auditlogg, för auditläsare |
-| `/settings` | Inställningar, för behöriga administratörer |
+| `/resources` | Resource overview |
+| `/resources/{resourceId}` | A resource |
+| `/groups` | Resource group hierarchy |
+| `/groups/{groupId}` | A group with resources and subgroups |
+| `/groups/{groupId}/resources/{resourceId}` | A resource opened from the group view |
+| `/licenses` | License overview |
+| `/audit` | Audit log, for auditors |
+| `/settings` | Settings, for authorized administrators |
 
-`/` öppnar resursöversikten. ID:n är stabila när en resurs eller grupp får ett nytt namn. Den längre resursadressen behåller gruppen som tillbaka-länk; resursen kan ligga i en undergrupp. En flytt ut ur detta underträd kan göra den länken otillgänglig. Den fristående `/resources/{resourceId}`-adressen följer resursen även efter en flytt.
+`/` opens the resource overview. IDs remain stable when a resource or group is renamed. The longer resource address retains the group as a back link; the resource may be in a subgroup. Moving it outside this subtree can make that link unavailable. The standalone `/resources/{resourceId}` address follows the resource even after a move.
 
-Direktlänkar och omladdning hanteras av uttryckliga serverrutter i både produktionsappen och den syntetiska demon. IIS behöver ingen extra regel för att skriva om UI-adresser. Okända API- och statiska filadresser skrivs inte om till appens HTML-sida. Installationsguiden behåller sin befintliga `/Setup`-adress.
+Direct links and reloads are handled by explicit server routes in both the production app and the synthetic demo. IIS needs no additional rule to rewrite UI addresses. Unknown API and static file addresses are not rewritten to the app's HTML page. The installation wizard retains its existing `/Setup` address.
 
-## Filter och tangentbord
+## Filters and keyboard
 
-Resurssökning, gruppfilter, val av undergrupper och auditfilter inklusive sidposition behålls i sidans minne. Bakåt/Framåt återställer filtren för det aktuella historiksteget. Omladdning eller en ny flik öppnar rätt vy med standardfilter; filter skickas inte till kollegan genom länken.
+Resource search, group filters, subgroup selection and audit filters, including page position, are retained in page memory. Back/Forward restores the filters for the current history entry. Reloading or opening a new tab opens the correct view with default filters; filters are not shared with a colleague through the link.
 
-Vid navigering inom appen och vid historiknavigering flyttas fokus till den nya vyns huvudrubrik. Första sidladdningen behåller normal tabbordning, där **Hoppa till huvudinnehållet** är första länken.
+When navigating within the app or through history, focus moves to the new view's main heading. The initial page load retains the normal tab order, with **Skip to main content** as the first link.
 
-## Behörighet och känsliga uppgifter
+## Permissions and sensitive information
 
-En adress ger aldrig behörighet. Produktivappen kräver Windows-inloggning också på direktlänkar. Klienten väljer endast bland metadata som servern har lämnat ut till den aktuella användaren, och servern kontrollerar behörigheten för varje innehållsanrop. Ogiltiga, borttagna och otillåtna mål ger samma meddelande utan att hämta målens innehåll. Den publika demon öppnar endast sina fasta exempel.
+An address never grants permission. The production app requires Windows sign-in for direct links too. The client selects only from metadata released by the server to the current user, and the server checks permissions for every content request. Invalid, deleted and unauthorized targets show the same message without fetching their content. The public demo opens only its fixed samples.
 
-URL:er innehåller vy och ID:n, aldrig hemliga värden, namn, söktext eller redigeringsutkast. `history.state` innehåller endast en slumpmässig nyckel till filter som ligger i sidans minne. Hemligheter och formulärutkast ingår inte i dessa filterkopior.
+URLs contain the view and IDs, never secret values, names, search text or edit drafts. `history.state` contains only a random key to filters held in page memory. Secrets and form drafts are not included in these filter copies.
 
-Dialoger för visning, redigering, behörigheter och historik är tillfälliga åtgärder i aktuell vy. Navigering stänger dialogen och tömmer dess fält. Framåt visar vyn igen och öppnar inte dialogen, återställer inget redigeringsutkast och gör inget nytt reveal-anrop. Sena svar från den lämnade vyn får inte lägga till innehåll i den nya vyn.
+Dialogs for viewing, editing, permissions and history are temporary actions within the current view. Navigation closes the dialog and clears its fields. Forward shows the view again without opening the dialog, restoring an edit draft or making a new reveal request. Late responses from the view that was left must not add content to the new view.
 
-En omladdning kan avbryta ett pågående serveranrop. Avbrott före förberedelsen av en integritetskontrollpunkt rullar tillbaka databasändringen. När förberedelsen börjar slutför servern den redan verifierade commit-fasen med en intern tidsgräns på 30 sekunder, även om klienten kopplar ned. En auditpost kan därefter finnas kvar i den signerade outboxen tills nästa leverans. Lagringsfel, osäkra commits och manipulerad data följer fortfarande de befintliga reglerna för att neka åtkomst och kräva verifierad återhämtning.
+Reloading can cancel an ongoing server request. Cancellation before preparation of an integrity checkpoint rolls back the database change. Once preparation begins, the server completes the already verified commit phase with an internal 30-second time limit, even if the client disconnects. An audit record may then remain in the signed outbox until the next delivery. Storage failures, uncertain commits and tampered data still follow the existing rules for denying access and requiring verified recovery.

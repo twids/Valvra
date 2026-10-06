@@ -11,7 +11,7 @@
             const providers = await api("/settings/providers");
             if (!draft) draft = await api("/settings/directory");
             if (!ui.isCurrent() || state.view !== "settings") return;
-            const directory = panel(content, t("Inloggning och katalog"));
+            const directory = panel(content, t("Inloggning och katalog")); directory.classList.add("settings-panel");
             const installed = node("p");
             installed.textContent = providers.logins.find(x => x.id === draft.loginProviderId)?.name + " · "
                 + providers.directories.find(x => x.id === draft.directoryProviderId)?.name;
@@ -67,10 +67,16 @@
         }
         const roles = await api("/settings/roles");
         if (!ui.isCurrent() || state.view !== "settings") return;
-        const administrators = panel(content, t("Globala rättigheter"), state.session.isAccessAdministrator ? [button(t("+ Tilldela personkonto"), () => editRole())] : []);
+        const administrators = panel(content, t("Globala rättigheter"), state.session.isAccessAdministrator ? [button(t("+ Tilldela personkonto"), () => editRole())] : []); administrators.classList.add("settings-panel");
         hint(administrators, t("Tilldelas endast personkonton. Ger ingen automatisk läsrätt till lösenord eller licensnycklar. Den sista administratören för en rättighet kan inte tas bort."));
-        table(administrators, [t("Personkonto"), t("Rättigheter"), t("Åtgärder")], roles.map(role => [
-            role.subjectId === state.session.subjectId && role.provider === state.session.provider ? state.session.displayName : role.subjectId,
+        function personLabel(role) {
+            const label = node("div");
+            const name = role.subjectId === state.session.subjectId && role.provider === state.session.provider ? state.session.displayName : role.name;
+            label.append(node("strong", name || role.subjectId));
+            if (name && name !== role.subjectId) label.append(node("p", role.subjectId, "hint audit-id"));
+            return label;
+        }
+        table(administrators, [t("Personkonto"), t("Rättigheter"), t("Åtgärder")], roles.map(role => [personLabel(role),
             roleLabels.filter(([bit]) => role.roles & bit).map(([,label]) => t(label)).join(", "),
             state.session.isAccessAdministrator ? button(t("Ändra"), () => editRole(role)) : "—"
         ]));
@@ -84,7 +90,7 @@
                 await api("/settings/roles", {provider: subject.provider, subjectId: subject.id, kind: 0, roles: bits, revision: existing?.revision || 0});
                 await ui.refreshSession(); await ui.render();
             });
-            if (existing) body.append(node("p", existing.subjectId));
+            if (existing) body.append(personLabel(existing));
             else {
                 const search = field(body, t("Sök personkonto"), "text"); search.minLength = 2; search.maxLength = 128;
                 const results = node("div"), status = node("p"); status.setAttribute("role", "status");

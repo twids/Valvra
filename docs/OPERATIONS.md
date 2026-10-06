@@ -1,62 +1,70 @@
-# Drift, backup och återställning
+# Operations, backup and recovery
 
-## Vad som måste säkerhetskopieras
+## What must be backed up
 
-1. Valvdatabasen, inklusive krypterade datanycklar och audit-outbox.
-2. Auditdatabasen och dess backuphistorik under separat behörighetskontroll.
-3. Alla krypteringscertifikats privata nycklar i lösenordsskyddade PFX-backuper.
-4. Auditcertifikatets privata nyckel och äldre publika certifikat för signaturverifiering.
-5. Integritetscertifikatets privata nyckel och äldre publika certifikat, samt hela `App_Data` inklusive `installation.bin` och `Integrity/checkpoint.bin`.
-6. Windows system-/maskinbackup som bevarar DPAPI-maskinnycklarna, och dokumenterade tjänsteidentiteter/rättigheter i organisationens skyddade dokumentation.
+1. The vault database, including encrypted data keys and the audit outbox.
+2. The audit database and its backup history under separate access control.
+3. All encryption certificate private keys in password-protected PFX backups.
+4. The audit certificate's private key and older public certificates for signature verification.
+5. The integrity certificate's private key and older public certificates, plus all of `App_Data`, including `installation.bin` and `Integrity/checkpoint.bin`.
+6. A Windows system/machine backup that preserves the DPAPI machine keys, and documented service identities/permissions in the organization's protected documentation.
 
-PFX-backuper och deras lösenord ska lagras separat från databasbackup. **Utan krypteringsnyckeln går lagrade lösenord inte att återställa.** Både `installation.bin` och kontrollpunkten skyddas med maskinbunden Windows DPAPI. Databas + PFX + kopierad `App_Data` räcker inte ensamma för återställning på en ny Windows-installation.
+PFX backups and their passwords must be stored separately from database backups. **Stored passwords cannot be recovered without the encryption key.** Both `installation.bin` and the checkpoint are protected by machine-bound Windows DPAPI. A database, PFX and copied `App_Data` alone are insufficient for recovery on a new Windows installation.
 
-Stoppa IIS-applikationspoolen och eventuella operatörskommandon när valvdatabasen och kontrollpunkten säkerhetskopieras. Ta en samordnad kopia av dessa innan tjänsten startas igen. En databasbackup från en annan generation än kontrollpunkten nekas avsiktligt. Auditdatabasen säkerhetskopieras separat och befintlig senare audit ska bevaras vid valvåterställning. Dokumentera vilka kopior som hör ihop och skydda backupåtkomsten separat från databasens runtime-konton.
+Stop the IIS application pool and any operator commands when backing up the vault database and checkpoint. Take a coordinated copy of these before restarting the service. A database backup from a different generation than the checkpoint is deliberately rejected. Back up the audit database separately, and preserve any existing later audit history when restoring the vault. Document which copies belong together and protect backup access separately from database runtime accounts.
 
-## Återställning av samma skyddade installation
+## Restoring the same protected installation
 
-Stoppa tjänsten. Återställ ett verifierat, samordnat par av valvdatabas och kontrollpunkt till den Windows-installation som kan dekryptera DPAPI-filerna. Återställ nödvändiga certifikat i LocalMachine/My och begränsa privatnyckelåtkomst till tjänsteidentiteten. Bevara installations-ID och tidigare nyckelidentifierare. Starta tjänsten och verifiera med syntetiska poster att rättigheter, gamla och nya versioner samt audit fungerar.
+Stop the service. Restore a verified, coordinated pair of vault database and checkpoint to the Windows installation that can decrypt the DPAPI files. Restore the required certificates to LocalMachine/My and restrict private key access to the service identity. Preserve the installation ID and previous key identifiers. Start the service and verify permissions, old and new versions, and audit using synthetic records.
 
-Återställning till annan maskin kräver en verifierad återställning av Windows-maskinens DPAPI-kontext, exempelvis via organisationens maskinbackup. **Portabel export/import av kontrollpunkt till en ny Windows-installation är inte implementerad.** Setup kan inte godkänna en befintlig databas utan en giltig kontrollpunkt. Skapa inte en ny tom kontrollpunkt över återställd data och radera inte checkpoint-filen för att komma förbi ett integritetsfel.
+Restoring to another machine requires verified restoration of the Windows machine's DPAPI context, for example through the organization's machine backup. **Portable checkpoint export/import to a new Windows installation is not implemented.** Setup cannot approve an existing database without a valid checkpoint. Do not create a new empty checkpoint over restored data or delete the checkpoint file to bypass an integrity error.
 
-Genomför detta prov på en annan server före första produktionssättning. En backup som inte återställts är inte verifierad.
+Rehearse this on another server before the first production deployment. A backup that has not been restored is not verified.
 
-## Avbruten integritetsuppdatering
+## Interrupted integrity update
 
-Kontrollpunkten kan innehålla ett godkänt tillstånd och ett förberett nästa tillstånd. Om databasen exakt motsvarar det förberedda tillståndet slutför tjänsten kontrollpunkten automatiskt. Om den motsvarar det äldre tillståndet blockeras åtkomst; tjänsten gissar inte om det var ett avbrott eller en rollback-attack.
+The checkpoint can contain an approved state and a prepared next state. If the database exactly matches the prepared state, the service completes the checkpoint automatically. If it matches the older state, access is blocked; the service does not guess whether this was an interruption or a rollback attack.
 
-Efter separat kontroll av avbrott, databas och audit får en AD-behörighetsadministratör, med applikationspoolen stoppad och rätt certifikat-/databasåtkomst, köra:
+After separately checking the interruption, database and audit, an AD access administrator with the application pool stopped and appropriate certificate/database access may run:
 
 ```powershell
 C:\inetpub\Valvra\Valvra.Web.exe --recover-integrity --discard-uncommitted
 ```
 
-Kommandot tar endast bort en förberedd kontrollpunkt om databasens exakta hash fortfarande matchar den signerade föregående kontrollpunkten. Det godkänner inte godtycklig data och återskapar inte saknad kontrollpunkt. Operatörsåterhämtning auditeras. Vid andra avvikelser ska orsaken utredas och en verifierad samordnad backup användas.
+The command removes a prepared checkpoint only if the database's exact hash still matches the signed previous checkpoint. The operator must have a permanent, person-bound Access Administrator role in that verified vault snapshot; AD group membership or legacy directory administrator flags do not grant this role. The account must still be enabled in AD. It does not approve arbitrary data or recreate a missing checkpoint. Operator recovery is audited. For other discrepancies, investigate the cause and use a verified coordinated backup.
 
-## Ändra installationen
+## Changing the installation
 
-På servern, som behörig operatör:
+### Update from 1.0.0 to 1.0.1
+
+This patch requires no database schema change or data conversion. Take a coordinated backup as described above, including the machine-bound protected files and certificate keys. Stop the IIS application pool and operator commands. Replace the application binaries and static files with the verified 1.0.1 package; **preserve the existing `App_Data` directory, installation ID, certificates, private-key permissions, service identity and IIS authentication configuration**. Do not run `Install-Iis.ps1` over an existing website or rerun setup to create a new vault.
+
+Restart the same application pool. Verify sign-in, settings access, existing secret/license versions and signed audit using synthetic records. Keep the prior application files for rollback; roll back application binaries without replacing vault data or checkpoints with a different generation. Domain-specific IIS/AD verification remains required.
+
+### Reconfigure protected installation settings
+
+On the server, as an authorized operator:
 
 ```powershell
 C:\inetpub\Valvra\Valvra.Web.exe --initialize-setup
 ```
 
-Öppna `/setup`, ange den nya engångskoden och fyll i inställningarna. Guiden returnerar inte tidigare lösenord eller privat konfiguration till webbläsaren. Efter sparande startas applikationspoolen om. Omkonfiguration ersätter den sparade konfigurationen; behåll därför befintliga inställningar och tidigare nyckelidentifierare i skyddad operatörsdokumentation.
+Open `/setup`, enter the new one-time code and fill in the settings. The wizard does not return previous passwords or private configuration to the browser. Restart the application pool after saving. Reconfiguration replaces the saved configuration; therefore, retain existing settings and previous key identifiers in protected operator documentation.
 
-## Certifikatrotation
+## Certificate rotation
 
-Behåll äldre krypteringscertifikat tills alla datanycklar har ompaketerats och backupens återställningsperiod passerats. Äldre publika auditcertifikat behövs så länge äldre audit ska verifieras. Äldre integritetscertifikat behövs för aktuell och säkerhetskopierad kontrollpunkt. Rotation av TLS-certifikatet är separat från dessa tre certifikat.
+Keep older encryption certificates until all data keys have been rewrapped and the backup recovery period has elapsed. Older public audit certificates are needed as long as older audit records must be verified. Older integrity certificates are needed for the current and backed-up checkpoint. TLS certificate rotation is separate from these three certificates.
 
-Ändra inte aktivt krypteringscertifikat utan att också behålla gamla tumavtryck i `KeyProtection:AllowedThumbprints`. Äldre auditcertifikat anges i `AuditDatabase:VerificationCertificateThumbprints`. Dessa listor måste följa med vid omkonfiguration. Nyckeladministration ska auditeras.
+Do not change the active encryption certificate without also retaining old thumbprints in `KeyProtection:AllowedThumbprints`. Older audit certificates are listed in `AuditDatabase:VerificationCertificateThumbprints`. These lists must be retained during reconfiguration. Key administration must be audited.
 
-För integritet anges tidigare tumavtryck i `Integrity:VerificationCertificateThumbprints`. Behåll samma installations-ID. Omkonfiguration verifierar den befintliga databasens kontrollpunkt; den initierar inte om valvet. Nästa skyddade skrivning signerar nästa generation med aktivt integritetscertifikat.
+For integrity, list previous thumbprints in `Integrity:VerificationCertificateThumbprints`. Retain the same installation ID. Reconfiguration verifies the existing database's checkpoint; it does not reinitialize the vault. The next protected write signs the next generation with the active integrity certificate.
 
-Efter att nya och gamla certifikat konfigurerats och valvets återställning verifierats: stoppa webbplatsens applikationspool under ett underhållsfönster och kör `Valvra.Web.exe --rewrap-keys` från publiceringsmappen. Operatören måste vara AD-behörighetsadministratör och ha åtkomst till certifikatens privatnycklar samt databaserna. Kommandot ompaketerar datanycklar och auditerar varje post; det behöver inte dekryptera lösenordsvärden. Vid avbrott kan det köras igen: poster som redan använder aktiv nyckel hoppas över. Behåll ändå tidigare nyckelbackup för äldre databasbackuper. Starta sedan applikationspoolen och verifiera nya och gamla hemlighetsversioner.
+After configuring new and old certificates and verifying vault recovery, stop the website's application pool during a maintenance window and run `Valvra.Web.exe --rewrap-keys` from the publish directory. The operator must be an enabled AD person account with the vault's Access Administrator role and have access to the certificates' private keys and the databases. Directory group membership alone does not authorize this command. The command rewraps data keys and audits each record; it does not need to decrypt password values. If interrupted, it can be rerun: records already using the active key are skipped. Still retain previous key backups for older database backups. Then start the application pool and verify new and old secret versions.
 
-## Avbrott och övervakning
+## Outages and monitoring
 
-Auditdatabasens avbrott blockerar hemlighetsutlämning och nya skyddade ändringar. Ett fel efter lokal commit kan betyda att ändringen redan har genomförts. Kontrollera aktuell post före nytt manuellt försök. Outboxen återlevereras före nästa skyddade operation.
+An audit database outage blocks secret release and new protected changes. An error after a local commit can mean that the change has already been applied. Check the current record before another manual attempt. The outbox is redelivered before the next protected operation.
 
-`/api/health` kräver Windows SSO och behörighetsadministratörsrätt. Endpointen kontrollerar audit genom en installationsliknande händelse och visar databasanslutning samt antal kvarvarande outboxposter. Larma på HTTP-fel, växande outbox, certifikatsproblem och misslyckade backups. Ett HTTP 200 ensamt bevisar inte full återställning.
+`/api/health` requires Windows SSO and access administrator permission. The endpoint checks audit using an installation-like event and shows database connectivity and the number of remaining outbox records. Alert on HTTP errors, a growing outbox, certificate problems and failed backups. HTTP 200 alone does not prove full recovery.
 
-Kör en IIS-arbetsprocess för applikationspoolen. LDAP-testets frekvensgräns är lokal för denna process och återställs vid omstart. Gör inte automatiska LDAP-test mot konton i produktion.
+Run one IIS worker process for the application pool. The LDAP test rate limit is local to that process and resets on restart. Do not run automatic LDAP tests against production accounts.

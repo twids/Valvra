@@ -1,31 +1,31 @@
-# Grundläggande tillgänglighet i Valvra
+# Accessibility baseline in Valvra
 
-Valvra utgår från relevanta grundkrav på nivå A och AA i [WCAG 2.2](https://www.w3.org/WAI/WCAG22/quickref/). Detta är en dokumenterad bas för gränssnittet, **inte ett påstående om full WCAG-överensstämmelse eller certifiering**. Kraven gäller både valvet, licenshanteringen och installationsguiden. Den syntetiska demon använder samma JavaScript och CSS.
+Valvra is based on relevant Level A and AA requirements in [WCAG 2.2](https://www.w3.org/WAI/WCAG22/quickref/). This is a documented interface baseline, **not a claim of full WCAG conformance or certification**. The requirements apply to the vault, license management and installation wizard. The synthetic demo uses the same JavaScript and CSS.
 
-## Implementerad bas
+## Implemented baseline
 
-| Område | Genomförande | Relevanta WCAG-kriterier |
+| Area | Implementation | Relevant WCAG criteria |
 | --- | --- | --- |
-| Struktur och språk | Svenskt sidspråk, huvudinnehåll, namngiven navigation, rubriker, formuläretiketter, grupperade rättigheter och databasanslutningar, tabellrubriker och tabellnamn. | 1.3.1, 3.1.1, 4.1.2 |
-| Tangentbord | Hopplänk, vanliga HTML-kontroller, synligt fokus, fokus på rubriken vid vybyte, Escape stänger dialoger och fokus återgår till öppnande knapp eller sidrubrik. Native `dialog.showModal()` håller tabbordningen inne i dialogen. | 2.1.1, 2.1.2, 2.4.1, 2.4.3, 2.4.7 |
-| Dialoger | Namngivna dialoger med initialt fokus på rubriken och tydlig stängknapp. Skärmläsaren kan läsa strukturen och formulärfälten i egen takt. Dialogens hela innehåll används inte som automatisk beskrivning. | 2.4.6, 4.1.2 |
-| Kontrast och visuell presentation | Mörkare sekundärtext, varningsfärg och fältkanter. Tydlig fokusmarkering. Fel, installationsresultat och aktivt steg har text/semantik utöver färg. Stöd för Windows kontrasthöjande läge och minskad rörelse. | 1.4.1, 1.4.3, 1.4.11 |
-| Förstoring och små skärmar | Relativa textstorlekar, omflöde och radbrytning. Tabeller får rullas i sidled i namngivna, tangentbordsfokuserbara områden; sidan som helhet ska inte kräva sidledes rullning. | 1.4.4, 1.4.10 |
-| Kontroller | Minst 36 × 36 CSS-pixlar för knappar, 44 × 44 för stängknapp och minst 24 × 24 för kryssrutor. Upprepade radåtgärder får namn som anger vilken post de gäller. | 2.4.6, 2.5.8 |
-| Formulär och feedback | Obligatoriska grundfält markeras, installationsfält har kopplade hjälptexter. Native validering kompletteras med `aria-invalid` och textfel i en alertregion. Statusmeddelanden och sökresultatantal använder separata statusregioner. | 3.3.1, 3.3.2, 4.1.3 |
-| Installation | Aktivt steg anges med `aria-current="step"`. Nästa kontrollerar aktuella grundfält; rubriken får fokus när steget ändras och efter slutförd installation. Testresultat anges med ”Godkänd” eller ”Åtgärda”. | 2.4.3, 3.3.1, 4.1.2 |
+| Structure and language | Swedish page language, main content, named navigation, headings, form labels, grouped permissions and database connections, table headers and table names. | 1.3.1, 3.1.1, 4.1.2 |
+| Keyboard | Skip link, standard HTML controls, visible focus, heading focus when changing views, Escape closes dialogs and focus returns to the opening button or page heading. Native `dialog.showModal()` keeps the tab order within the dialog. | 2.1.1, 2.1.2, 2.4.1, 2.4.3, 2.4.7 |
+| Dialogs | Named dialogs with initial heading focus and a clear close button. Screen readers can read the structure and form fields at their own pace. The entire dialog content is not used as an automatic description. | 2.4.6, 4.1.2 |
+| Contrast and visual presentation | Darker secondary text, warning color and field borders. Clear focus indicators. Errors, installation results and the active step have text/semantics in addition to color. Support for Windows high contrast mode and reduced motion. | 1.4.1, 1.4.3, 1.4.11 |
+| Magnification and small screens | Relative text sizes, reflow and line wrapping. Tables may scroll horizontally in named, keyboard-focusable areas; the page as a whole should not require horizontal scrolling. | 1.4.4, 1.4.10 |
+| Controls | At least 36 × 36 CSS pixels for buttons, 44 × 44 for the close button and at least 24 × 24 for checkboxes. Repeated row actions are named to identify the record they affect. | 2.4.6, 2.5.8 |
+| Forms and feedback | Required basic fields are marked, and installation fields have associated help text. Native validation is supplemented with `aria-invalid` and text errors in an alert region. Status messages and search result counts use separate status regions. | 3.3.1, 3.3.2, 4.1.3 |
+| Installation | The active step is indicated with `aria-current="step"`. Next validates the current basic fields; the heading receives focus when the step changes and after setup completes. Test results are labeled “Passed” or “Action required”. | 2.4.3, 3.3.1, 4.1.2 |
 
-## Säkerhet och tidsgränser
+## Security and time limits
 
-Tillgänglighetsfunktionerna ändrar inte serverns autentisering, behörigheter, kryptering eller audit. Hemligheter läggs inte i automatiska statusregioner. Skärmläsaren kan däremot läsa ett hemligt fält när användaren själv navigerar till det; tänk på vilka som kan höra uppläsningen.
+Accessibility features do not change server authentication, permissions, encryption or audit. Secrets are not placed in automatic status regions. A screen reader can, however, read a secret field when the user navigates to it; consider who might hear it being read aloud.
 
-Visade lösenord och licensnycklar töms och dialogen stängs efter **30 sekunder** eller vid fokusförlust. Redigeringsformulär behåller vanliga uppgifter, men hemliga fält töms vid fokusförlust eller **fem minuters inaktivitet**. Meddelandet om tömning innehåller inga hemliga värden. Vid ersättning måste värdet fyllas i igen innan Spara blir tillgängligt. Metadatautkast lagras endast i flikens minne.
+Revealed passwords and license keys are cleared and the dialog closes after **30 seconds** or on loss of focus. Edit forms retain ordinary information, but secret fields are cleared on loss of focus or after **five minutes of inactivity**. The clearing notification contains no secret values. When replacing a value, it must be entered again before Save becomes available. Metadata drafts are stored only in tab memory.
 
-Den fasta visningstiden är en **känd tillgänglighetsbegränsning**, särskilt för den som behöver längre tid eller använder skärmläsare. En ny visning kräver en ny behörighetskontrollerad och auditerad begäran. Vi hävdar inte att WCAG 2.2.1 (justerbara tidsgränser) är uppfyllt eller att ett säkerhetsundantag automatiskt gäller. En framtida lösning för justerbar visning måste säkerhetsgranskas innan tidsgränser ändras.
+The fixed display duration is a **known accessibility limitation**, particularly for people who need more time or use screen readers. Revealing a value again requires a new request with permission checks and audit. We do not claim compliance with WCAG 2.2.1 (Timing Adjustable) or that a security exception automatically applies. A future solution for adjustable display times must undergo security review before time limits are changed.
 
-## Automatiska kontroller
+## Automated checks
 
-Installera Node.js och projektets .NET SDK och kör från repots rot:
+Install Node.js and the project's .NET SDK, then run from the repository root:
 
 ```powershell
 npm ci
@@ -34,20 +34,20 @@ npm run test:security
 npm run test:accessibility
 ```
 
-På Linux kan webbläsarens systemberoenden behöva installeras med `npx playwright install --with-deps chromium`. Beroenden är versionslåsta i `package-lock.json` och behövs endast vid utveckling/test.
+On Linux, browser system dependencies may need to be installed with `npx playwright install --with-deps chromium`. Dependencies are locked in `package-lock.json` and needed only for development/testing.
 
-Tillgänglighetstesterna startar en separat .NET-testvärd på `localhost:58902` med syntetiska uppgifter och testidentitet samt den skrivskyddade demon på `127.0.0.1:58903`. Båda portarna ska vara lediga. Ingen anslutning till AD, riktiga databaser eller produktionsinstallation används. Testvärden ingår aldrig i IIS-paketet. Installationsanrop ersätts bara i testets isolerade webbläsarsession; tester av serverns installationsbehörigheter finns i C#-sviten.
+Accessibility tests start a separate .NET test host on `localhost:58902` with synthetic data and a test identity, plus the read-only demo on `127.0.0.1:58903`. Both ports must be available. No connection to AD, real databases or a production installation is used. The test host is never included in the IIS package. Setup requests are replaced only in the test's isolated browser session; server setup authorization tests are in the C# suite.
 
-Playwright och axe-core kontrollerar relevanta WCAG A/AA-regler på översikter, resurser, dialoger och installationssteg. Därutöver verifieras tangentbordsfokus, dialogens tabbordning, Escape, formulärfel, 320 CSS-pixlars bredd, dubblerad textstorlek, kontrastläge och att tömning av hemliga fält behåller metadatautkast. Rapporter och felspår sparas under `artifacts/accessibility-report` och `artifacts/accessibility-results`. Kör samma svit vid .NET-, webbläsar- och gränssnittsuppgraderingar. GitHub Actions har ett separat tillgänglighetsjobb.
+Playwright and axe-core check relevant WCAG A/AA rules on overviews, resources, dialogs and installation steps. Additional checks cover keyboard focus, dialog tab order, Escape, form errors, 320 CSS pixel width, doubled text size, contrast mode and retention of metadata drafts when secret fields are cleared. Reports and failure traces are saved under `artifacts/accessibility-report` and `artifacts/accessibility-results`. Run the same suite for .NET, browser and interface upgrades. GitHub Actions has a separate accessibility job.
 
-## Manuell kontroll inför release
+## Manual checks before release
 
-Automatiska tester kan inte avgöra om hela arbetsflödet är begripligt eller om en verklig skärmläsare fungerar väl. Följande ska kontrolleras på Windows inför release:
+Automated tests cannot determine whether the entire workflow is understandable or a real screen reader works well. Check the following on Windows before release:
 
-1. Navigera med enbart Tab, Shift+Tab, Enter, Space och Escape. Kontrollera att fokus är synligt och inte döljs av rullning, särskilt i långa dialoger och installationssteg.
-2. Läs vyer och formulär med NVDA eller annan stödd skärmläsare. Kontrollera rubriker, tabeller, etiketter, hjälp, obligatoriska fält, fel, status och fokus vid vybyte. Sådan manuell skärmläsarprovning har inte genomförts i den automatiska sviten.
-3. Prova 200 % textförstoring, 400 % sidzoom, 320 CSS-pixlars bredd, långa resursnamn och ändrat textavstånd. De automatiska omflödestesterna täcker representativa vyer; dessa ytterligare scenarier behöver manuell provning.
-4. Kontrollera Windows kontrasthöjande läge och mobil peknavigation. Prova även den verkliga Windows-inloggningen, IIS och webbläsarens egna dialoger i installationsmiljön.
-5. Bedöm tidsgränserna tillsammans med användare som behöver längre tid. Dokumentera återstående hinder innan en organisation gör en formell tillgänglighetsbedömning.
+1. Navigate using only Tab, Shift+Tab, Enter, Space and Escape. Check that focus is visible and not hidden by scrolling, especially in long dialogs and installation steps.
+2. Read views and forms with NVDA or another supported screen reader. Check headings, tables, labels, help, required fields, errors, status and focus when changing views. Such manual screen reader testing has not been performed in the automated suite.
+3. Try 200% text enlargement, 400% page zoom, 320 CSS pixel width, long resource names and changed text spacing. Automated reflow tests cover representative views; these additional scenarios need manual testing.
+4. Check Windows high contrast mode and mobile touch navigation. Also test actual Windows sign-in, IIS and the browser's own dialogs in the installation environment.
+5. Assess time limits with users who need more time. Document remaining barriers before an organization performs a formal accessibility assessment.
 
-Fel rapporteras som GitHub-issues med vy, webbläsare, hjälpmedel och steg för att återskapa problemet. Bifoga aldrig riktiga lösenord eller licensnycklar. Organisationens eventuella tillgänglighetsredogörelse och lagkrav behöver bedömas separat för den faktiska installationen.
+Report errors as GitHub issues with the view, browser, assistive technology and reproduction steps. Never attach real passwords or license keys. Any organizational accessibility statement and legal requirements need to be assessed separately for the actual installation.
