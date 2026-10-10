@@ -81,10 +81,11 @@
         return cleared;
     }
     function updateSecretSubmitState() {
-        const missing = Array.from($("dialog-content").querySelectorAll("input,textarea")).some(x => x.required && (x.type === "password" || x.dataset.sensitive) && !x.value.trim());
+        const missing = $("dialog-content").dataset.importCleared === "true" || Array.from($("dialog-content").querySelectorAll("input,textarea")).some(x => x.required && (x.type === "password" || x.dataset.sensitive) && !x.value.trim());
         $("dialog-actions").querySelectorAll("button").forEach(x => { if (x.type === "submit") x.disabled = missing; });
     }
     function protectFocusLoss() {
+        window.ValvraImport?.clear();
         dialogEpoch++; const cleared = clearSecrets();
         if (revealedDialog) { closeDialog(); return; }
         if ($("dialog").open) {
@@ -93,6 +94,7 @@
         }
     }
     function closeDialog() {
+        window.ValvraImport?.clear();
         const wasOpen = $("dialog").open;
         dialogEpoch++; revealedDialog = false; clearSecrets(); $("dialog").close(); $("dialog-content").replaceChildren(); $("dialog-actions").replaceChildren();
         if (wasOpen && !document.hidden && document.hasFocus()) (dialogOpener?.isConnected ? dialogOpener : $("page-title")).focus();
@@ -101,12 +103,13 @@
         const opener = $("dialog").open ? dialogOpener : document.activeElement;
         closeDialog(); dialogOpener = opener; $("dialog-title").textContent = title; $("dialog-error").textContent = "";
         const content = $("dialog-content");
+        delete content.dataset.importCleared;
         const actions = $("dialog-actions"); actions.append(button(t("Avbryt"), closeDialog));
         if (submit) { const save = node("button", submitLabel, "button primary"); save.type = "submit"; actions.append(save); }
         $("dialog-form").onsubmit = async event => {
             event.preventDefault(); if (!submit || !$("dialog").open || document.hidden || !document.hasFocus()) return;
             const controls = Array.from(actions.querySelectorAll("button")); controls.forEach(x => x.disabled = true);
-            try { const message = await submit(); closeDialog(); notice(message === undefined ? t("Ändringen har sparats och auditerats.") : message); }
+            try { const message = await submit(); if (message === false) return; closeDialog(); notice(message === undefined ? t("Ändringen har sparats och auditerats.") : message); }
             catch (error) { $("dialog-error").textContent = error.message; }
             finally { controls.forEach(x => x.disabled = false); updateSecretSubmitState(); }
         };
@@ -165,8 +168,13 @@
         else if (state.view === "settings") await window.ValvraSettings.render({state, api, node, button, field, panel, table, hint, heading, dialog, notice, t, render, refreshSession, isCurrent: () => settingsEpoch === renderEpoch});
         else await auditPage();
     }
+    function appendImportAction() {
+        if (state.resources.some(x => (x.permissions & 5) === 5) || state.groups.some(x => x.canManage && (x.permissions & 5) === 5))
+            $("page-actions").append(button(t("Importera lösenord"), () => window.ValvraImport.open({state, api, node, button, field, select, hint, table, dialog, notice, load, t})));
+    }
     function resourcesPage() {
         heading(t("Dina resurser"), t("Lösenord och licenser samlade kring resurserna de tillhör."), state.groups.some(x => x.canManage) ? [button(t("+ Ny resurs"), createResource, "primary")] : []);
+        appendImportAction();
         const content = $("content");
         if (!state.resources.length) { empty(content, t("Inga resurser ännu"), state.session.isAccessAdministrator ? t("Skapa en resursgrupp, lägg till resurser och tilldela åtkomst för att öppna valvet.") : t("Be en resursägare eller behörighetsadministratör tilldela dig åtkomst.")); return; }
         const toolbar = node("div", undefined, "toolbar"); const search = node("input"); search.placeholder = t("Sök bland dina resurser…"); search.setAttribute("aria-label", t("Sök resurser")); search.value = state.resourceSearch; toolbar.append(search);
@@ -262,6 +270,7 @@
     function groupsPage() {
         const canCreate = state.session.isAccessAdministrator || state.groups.some(x => x.canManage);
         heading(t("Resursgrupper"), t("Organisera resurser i ett träd. Tilldelningar ärvs till undergrupper och resurser."), canCreate ? [button(t("+ Ny grupp"), createGroup, "primary")] : []);
+        appendImportAction();
         if (!state.groups.length) { empty($("content"), t("Inga synliga grupper"), t("Grupper visas när du har metadataåtkomst eller rätt att administrera dem.")); return; }
         const p = panel($("content"), t("Gruppstruktur"));
         groupTree(p, state.groups);
@@ -272,6 +281,7 @@
         if (group.canManage) actions.push(button(t("+ Ny resurs"), createResource, "primary"), button(t("+ Ny undergrupp"), createGroup));
         if (group.canManage) actions.push(groupManagement(group));
         heading(group.name, t("Resurser och undergrupper som du har åtkomst till."), actions); groupBreadcrumb(group.id);
+        appendImportAction();
         const children = state.groups.filter(child => child.parentId === group.id);
         if (children.length) groupTree(panel($("content"), t("Undergrupper")), children, false);
         const resources = panel($("content"), t("Resurser")); const body = node("div", undefined, "panel-body"); resources.append(body);
@@ -294,6 +304,7 @@
         if (has(4)) actions.push(button(t("Papperskorg"), recycleBin));
         if (resource.canManage) actions.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
         heading(resource.name, t("Din åtkomst: ") + (rights(resource.permissions) || t("Behörighetsadministration")), actions);
+        appendImportAction();
         if (state.view === "groups") groupBreadcrumb(resource.groupId, resource.name);
         if (!has(1)) { empty($("content"), t("Du administrerar åtkomsten"), t("Tilldela metadata-, läs- eller ändringsrätt för att använda resursens innehåll.")); return; }
         const [secrets, licenses] = await Promise.all([api(`/resources/${resource.id}/secrets`), api(`/resources/${resource.id}/licenses`)]);

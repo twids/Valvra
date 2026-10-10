@@ -59,5 +59,6 @@ dialog{overflow-y:auto}
 .button{display:inline-flex;align-items:center;justify-content:center}
 @media(forced-colors:active){.group-management summary:focus-visible{outline-color:Highlight}}
 .settings-form {max-width: 46rem;}
+.settings-panel > p, .settings-panel > form {margin: 1rem;}
 .settings-form details {margin: 1rem 0;}
 .settings-form summary {cursor: pointer; margin-bottom: .8rem;}

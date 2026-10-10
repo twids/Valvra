@@ -131,13 +131,20 @@ public sealed class VaultIntegrity(VaultDbContext db, IIntegrityCheckpointStore 
 
     public async Task RecoverUncommittedAsync(Actor actor, CancellationToken ct)
     {
-        if (!actor.IsEnabled || !actor.IsAccessAdministrator) throw new AccessDeniedException();
+        if (!actor.IsEnabled) throw new AccessDeniedException();
         await using var lease = await store.AcquireAsync(ct);
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var checkpoint = await store.ReadAsync(ct) ?? throw Failure();
         Validate(checkpoint);
         if (checkpoint.Prepared is null) throw new VaultValidationException("Ingen förberedd kontrollpunkt finns.");
         if (Hash(await ReadSnapshotAsync(ct), options.InstallationId) != checkpoint.Current.Hash) throw Failure();
+        // A normal integrity scope cannot open this interrupted state. Resolve
+        // the operator's role only AFTER verifying the signed previous snapshot,
+        // in the same serializable transaction and external lease.
+        if (!await db.Grants.AsNoTracking().AnyAsync(x => x.TargetKind == TargetKind.System && x.TargetId == options.InstallationId
+            && x.SubjectKind == SubjectKind.User && x.Provider == actor.Provider && x.SubjectId == actor.SubjectId
+            && x.StartsAt == null && x.ExpiresAt == null && x.Permissions.HasFlag((VaultPermission)(int)GlobalRole.AccessAdministrator), ct))
+            throw new AccessDeniedException();
         // Explicit operator recovery of a failed write, not automatic rollback.
         await store.WriteAsync(new(checkpoint.Current), ct);
     }

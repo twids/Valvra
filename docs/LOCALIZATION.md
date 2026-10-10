@@ -1,25 +1,25 @@
-# Språk / Languages
+# Languages
 
-Valvra har svenska och engelska gränssnitt i samma applikation. Välj **Språk / Language** i sidhuvudet. Valet gäller också installationsguiden och det separata demoläget.
+Valvra provides Swedish and English interfaces in the same application. Choose **Language** in the header. The choice also applies to the installation wizard and the separate demo mode.
 
-Första besöket använder webbläsarens språkpreferenser om svenska eller engelska finns där. Annars används svenska. Ett uttryckligt val sparas i `Valvra.Language` i ett år, för denna webbplats och webbläsare. Språkbytet laddar inte om sidan: installationsfält behåller sina värden. Vid omladdning gäller vanliga regler för osparade formulär. Inga formulärvärden eller hemligheter sparas i språkvalet.
+On the first visit, the browser's language preferences are used if they include Swedish or English. Otherwise, Swedish is used. An explicit choice is stored in `Valvra.Language` for one year, for this website and browser. Changing language does not reload the page: installation fields retain their values. On reload, the usual rules for unsaved forms apply. No form values or secrets are stored in the language preference.
 
-English: choose **Language → English** in the header. The choice is remembered for subsequent visits and also applies to the installation wizard and the synthetic demo. No separate installation is needed.
+Choose **Language → English** in the header. The choice is remembered for subsequent visits and also applies to the installation wizard and the synthetic demo. No separate installation is needed.
 
-## Vad översätts?
+## What is translated?
 
-Menyer, rubriker, dialoger, fältetiketter, hjälptexter, valideringsmeddelanden, serverns felmeddelanden och installationskontroller översätts. HTML-språket och hjälpmedlens etiketter följer valet. Datum som presenteras av appen formateras med `sv-SE` respektive `en-GB`, i webbläsarens lokala tidszon. Webbläsarens egna datumkontroller och inloggningsdialoger kan även bero på operativsystemets och webbläsarens språk.
+Menus, headings, dialogs, field labels, help text, validation messages, server error messages and installation checks are translated. The HTML language and assistive technology labels follow the choice. Dates displayed by the app are formatted using `sv-SE` or `en-GB`, in the browser's local time zone. The browser's own date controls and sign-in dialogs may also depend on the operating system and browser language.
 
-Resursnamn, gruppnamn, kontouppgifter, licensuppgifter och användarnas egna texter översätts inte. Demots svenska exempeldata behåller också sina namn. Audithändelsernas operations-ID:n, utfall och exporter behåller sina ursprungliga maskinläsbara värden; auditens lagrade tidsstämplar påverkas inte av språkvalet. Kryptering, signaturer, behörigheter och CSRF-kontroller har samma beteende för båda språken.
+Resource names, group names, account information, license information and users' own text are not translated. The demo's Swedish sample data also retains its names. Audit event operation IDs, outcomes and exports retain their original machine-readable values; stored audit timestamps are unaffected by the language choice. Encryption, signatures, permissions and CSRF checks behave identically in both languages.
 
-Språkkakan innehåller endast `sv` eller `en`. Den har `SameSite=Lax`, `Path=/` och `Secure` vid HTTPS. JavaScript behöver kunna läsa den; den är inget autentiseringsbevis. API-anrop skickar `X-Valvra-Language` så att svarens språk stämmer med gränssnittet även innan en kaka sparats. Servern väljer språk i ordningen explicit header, språkkaka, `Accept-Language`, svenska. Okända språk och felaktiga språkheaders ger säker återgång till ett språk som stöds och tilldelar inga rättigheter.
+The language cookie contains only `sv` or `en`. It uses `SameSite=Lax`, `Path=/` and `Secure` over HTTPS. JavaScript needs to read it; it is not proof of authentication. API requests send `X-Valvra-Language` so that the response language matches the interface even before a cookie has been stored. The server chooses a language in this order: explicit header, language cookie, `Accept-Language`, Swedish. Unknown languages and invalid language headers safely fall back to a supported language and grant no permissions.
 
-## För utvecklare
+## For developers
 
-Gemensamma språkfiler finns i `src/Valvra.Web/wwwroot/i18n/sv.json` och `en.json`. Svenska originaltexter fungerar som nycklar. Lägg till båda översättningarna samtidigt. Använd namngivna parametrar som `{version}` när hela meningar behöver varierande värden; behåll samma parametrar i båda filerna.
+Shared language files are in `src/Valvra.Web/wwwroot/i18n/sv.json` and `en.json`. The original Swedish text serves as keys. Add both translations together. Use named parameters such as `{version}` when complete sentences need variable values; keep the same parameters in both files.
 
-I klienten används `ValvraI18n.message(key, parameters)` för gränssnittstexter och `ValvraI18n.setText(element, text)` för säker textutmatning. Översätt inte rå användardata och använd inte `innerHTML`. Lägg aldrig lösenord, licensnycklar eller andra hemliga värden i översättningsparametrar eller DOM-attribut. Statisk HTML använder explicita `data-i18n`-markeringar, även för `aria-label` när det behövs. Översättningsmarkeringar tas bort när ett element får rå användardata.
+The client uses `ValvraI18n.message(key, parameters)` for interface text and `ValvraI18n.setText(element, text)` for safe text output. Do not translate raw user data or use `innerHTML`. Never put passwords, license keys or other secret values in translation parameters or DOM attributes. Static HTML uses explicit `data-i18n` markers, including for `aria-label` where needed. Translation markers are removed when an element receives raw user data.
 
-Servern använder `UiText` vid webbgränsen. Domänmodeller, feltyper, audithändelser och kryptografiska payloads lokaliseras inte. ASP.NETs kulturval följer [Microsofts dokumentation för RequestLocalization](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/localization/select-language-culture?view=aspnetcore-10.0). Okända valideringsfel får ett generiskt engelskt meddelande, så att interna detaljer inte råkar lämnas ut genom en fallback.
+The server uses `UiText` at the web boundary. Domain models, error types, audit events and cryptographic payloads are not localized. ASP.NET culture selection follows [Microsoft's RequestLocalization documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/localization/select-language-culture?view=aspnetcore-10.0). Unknown validation errors receive a generic English message to prevent internal details from being exposed through a fallback.
 
-Kör `npm run test:security` för katalog- och klientregressioner, `dotnet test tests/Valvra.Tests -c Release --filter FullyQualifiedName~LocalizationTests` för serverns språkval och åtkomstgränser samt `npm run test:accessibility` för båda språkens webbläsarflöden. Inför release behöver manuell skärmläsarprovning göras på båda språken enligt [tillgänglighetsguiden](ACCESSIBILITY.md).
+Run `npm run test:security` for catalog and client regressions, `dotnet test tests/Valvra.Tests -c Release --filter FullyQualifiedName~LocalizationTests` for server language selection and access boundaries, and `npm run test:accessibility` for browser workflows in both languages. Before release, manual screen reader testing is required in both languages as described in [the accessibility guide](ACCESSIBILITY.md).

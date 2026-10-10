@@ -8,7 +8,7 @@ using Valvra.Infrastructure.Data;
 
 namespace Valvra.Infrastructure.Services;
 
-public sealed record GroupView(Guid Id, Guid? ParentId, string Name, long Revision, bool CanManage);
+public sealed record GroupView(Guid Id, Guid? ParentId, string Name, long Revision, bool CanManage, VaultPermission Permissions);
 public sealed record ResourceView(Guid Id, Guid GroupId, string Name, long Revision, VaultPermission Permissions, bool CanManage);
 public sealed record SecretView(Guid Id, string Title, int CurrentVersion, long Revision, string? LdapProfileId);
 public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, string CreatedBy);
@@ -25,8 +25,9 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         foreach (var group in await db.Groups.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct))
         {
             var manage = await access.CanManageAsync(actor, TargetKind.Group, group.Id, ct);
-            if (manage || (await access.EffectiveAsync(actor, TargetKind.Group, group.Id, ct)).HasFlag(VaultPermission.Metadata))
-                result.Add(new(group.Id, group.ParentId, group.Name, group.Revision, manage));
+            var permissions = await access.EffectiveAsync(actor, TargetKind.Group, group.Id, ct);
+            if (manage || permissions.HasFlag(VaultPermission.Metadata))
+                result.Add(new(group.Id, group.ParentId, group.Name, group.Revision, manage, permissions));
         }
         return result;
     }

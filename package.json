@@ -2,6 +2,7 @@
   "name": "valvra-browser-tests",
   "private": true,
   "scripts": {
+    "test:import": "node tests/browser/run-import.cjs",
     "test:security": "node --test tests/browser/*.test.cjs",
     "pretest:accessibility": "dotnet build tests/Valvra.Preview -c Release && dotnet build demo/Valvra.Demo -c Release",
     "test:accessibility": "playwright test"
