@@ -1,45 +1,45 @@
-# Säkerhetsmodell
+# Security model
 
-Valvra är ett serverstyrt valv. Servern får dekryptera efter behörighetskontroll. En angripare som kontrollerar servern eller tjänsteidentiteten med privatnyckelåtkomst kan läsa hemligheter; detta är inte en zero-knowledge-lösning.
+Valvra is a server-controlled vault. The server may decrypt after checking permissions. An attacker controlling the server or the service identity with private key access can read secrets; this is not a zero-knowledge solution.
 
-## Kryptering
+## Encryption
 
-AES-256-GCM med en ny slumpmässig datanyckel för varje hemlighetsversion. Autentiserad tilläggsdata binder innehållet till installations-ID, resurs-ID, post-ID, version, format och innehållstyp. Format 2 accepterar inte tidigare obundna envelopes. Datanycklar skyddas med RSA-OAEP/SHA-256 genom ett RSA-certifikat på minst 3072 bitar utanför databasen. Titlar, resursnamn och organisationsstruktur är synlig metadata. Kontonamn, lösenord, licensnycklar och hemliga anteckningar krypteras.
+AES-256-GCM with a new random data key for every secret version. Authenticated additional data binds the content to the installation ID, resource ID, record ID, version, format and content type. Format 2 does not accept earlier unbound envelopes. Data keys are protected with RSA-OAEP/SHA-256 through an RSA certificate of at least 3072 bits outside the database. Titles, resource names and organizational structure are visible metadata. Account names, passwords, license keys and secret notes are encrypted.
 
-Datanyckel- och plaintext-bytebuffertar nollställs efter kryptografiska operationer. .NET-strängar, JSON-bindning och webbläsarens minne kan inte garanterat raderas. Hemligheter ska inte finnas i loggar, URL:er, beständig webbläsarlagring eller telemetry. UI tömmer visade hemligheter efter 30 sekunder eller när fönstret tappar fokus. Urklipp kan inte säkert återkallas av webbappen.
+Data key and plaintext byte buffers are zeroed after cryptographic operations. .NET strings, JSON binding and browser memory cannot be guaranteed to be erased. Secrets must not appear in logs, URLs, persistent browser storage or telemetry. The UI clears revealed secrets after 30 seconds or when the window loses focus. The web app cannot reliably revoke clipboard contents.
 
-Fokusförlust tömmer även känsliga redigeringsfält. Vanliga formuläruppgifter behålls. Sparande av licensmetadata kräver ingen dekryptering och bevarar befintlig nyckel. Ersättning kräver en icke-tom ny nyckel; tömning kräver explicit val. Varje nyckeländring skapar en krypterad historikversion. Återställning kräver både läs- och ändringsrätt. Sena utlämningssvar efter fokusförlust eller byte av dialog visas inte och kopieras inte till urklipp.
+Loss of focus also clears sensitive edit fields. Ordinary form information is retained. Saving license metadata requires no decryption and preserves the existing key. Replacement requires a non-empty new key; clearing requires an explicit choice. Every key change creates an encrypted history version. Restoration requires both read and modify permissions. Late release responses after loss of focus or a dialog change are neither displayed nor copied to the clipboard.
 
-## Integritet mot en databasangripare
+## Integrity against a database attacker
 
-GCM skyddar ciphertext, men kan inte ensam skydda vilka användare som ges åtkomst till vilken resurs. Därför verifierar tjänsten hela valvets tillstånd innan behörighetsbeslut och operationer. Kontrollpunkten innehåller installations-ID, generation och SHA-256-hash av samtliga tio domäntabeller, inklusive ägare, rättigheter, versioner och audit-outbox. Den signeras med ett tredje, separat RSA-PSS-certifikat och lagras DPAPI-skyddad i `App_Data` med begränsad NTFS-ACL.
+GCM protects ciphertext but cannot, by itself, protect which users are granted access to which resources. The service therefore verifies the entire vault state before permission decisions and operations. The checkpoint contains the installation ID, generation and a SHA-256 hash of all ten domain tables, including owners, permissions, versions and the audit outbox. It is signed with a third, separate RSA-PSS certificate and stored with DPAPI protection in `App_Data` under a restricted NTFS ACL.
 
-En databasidentitet får inte ha åtkomst till kontrollpunktsfiler eller tjänstens privatnycklar. Detta är en förutsättning: serveradministratörer och tjänsteidentiteten är betrodda. Skyddet upptäcker databasändringar, radering, tillägg och återställning av äldre valvdata; det förhindrar inte att en databasadministratör orsakar driftstopp.
+A database identity must not have access to checkpoint files or the service's private keys. This is a prerequisite: server administrators and the service identity are trusted. Protection detects database changes, deletions, additions and restoration of older vault data; it does not prevent a database administrator from causing an outage.
 
-En processoberoende filspärr och serialiserbar databastransaktion håller verifiering och operation tillsammans. Endast EF-spårade, avsedda ändringar får skapa nästa signerade kontrollpunkt; oväntade triggerändringar godkänns inte. Kontrollpunkten förbereds före commit och slutförs efteråt. Efter avbrott accepteras automatiskt endast exakt det förberedda nya tillståndet. Gammalt tillstånd kräver uttrycklig operatörsåterhämtning; ett okänt tillstånd nekas. Se [driftguiden](OPERATIONS.md).
+A file lock shared across processes and a serializable database transaction keep verification and the operation together. Only intended, EF-tracked changes may create the next signed checkpoint; unexpected trigger changes are not approved. The checkpoint is prepared before commit and completed afterward. Following an interruption, only the exact prepared new state is accepted automatically. The old state requires explicit operator recovery; an unknown state is rejected. See [the operations guide](OPERATIONS.md).
 
-Klientavbrott respekteras före förberedelsen. Från förberedelse till slutförd commit används en intern tidsgräns på 30 sekunder, oberoende av klientens anslutning, för att undvika en halvfärdig kontrollpunkt vid exempelvis snabb omladdning. Detta kan slutföra en redan verifierad ändring efter att klienten lämnat sidan. Fel i lagring eller commit försvagar inte integritetskontrollerna eller kraven för återhämtning.
+Client cancellation is honored before preparation. From preparation through completed commit, an internal 30-second time limit is used independently of the client connection to avoid a partially completed checkpoint, for example during a quick reload. This can complete an already verified change after the client has left the page. Storage or commit failures do not weaken integrity checks or recovery requirements.
 
-Den första implementationen läser hela tillståndet vid varje verifiering och skyddat sparande, och serialiserar operationer. Datamängd och växande outbox påverkar därför svarstid och minne. Kör en arbetsprocess på en server; stöd för distribuerade instanser och skalning är inte verifierat. Belastningsprova representativa datamängder innan drift. Automatisk ombasering eller automatisk borttagning av kontrollpunkten är förbjuden.
+The first implementation reads the entire state during every verification and protected save, and serializes operations. Data volume and a growing outbox therefore affect response time and memory. Run one worker process on one server; support for distributed instances and scaling is not verified. Load-test representative data volumes before production use. Automatic rebasing or automatic checkpoint removal is prohibited.
 
-## Behörigheter
+## Permissions
 
-Alla kontroller sker på servern. AD-kontot och gruppmedlemskap hämtas inför API-operationer; AD-avbrott ger nekad åtkomst. Tilldelningar summeras från resursen och dess gruppträd. Inga explicita deny-regler eller brutet arv finns. Läs-, ändrings-, LDAP-test- och administratörsrätt är separata. Resursägare och centrala behörighetsadministratörer är betrodda och kan tilldela sig själva läsrätt.
+All checks take place on the server. The AD account and group memberships are retrieved before API operations; an AD outage results in denied access. Grants are combined from the resource and its group tree. There are no explicit deny rules or broken inheritance. Read, modify, LDAP test and administrator permissions are separate. Resource owners and central access administrators are trusted and can grant themselves read permission.
 
-Tillfällig läsrätt har exakt start- och sluttid i UTC och kontrolleras vid utlämning. Redan utlämnade värden kan inte återkallas. Vid behov måste lösenordet bytas i målsystemet.
+Temporary read access has exact start and end times in UTC and is checked on release. Values already released cannot be revoked. If necessary, change the password in the target system.
 
-Globala rättigheter är personbundna, integritetsskyddade tilldelningar. AD-grupper och katalogproviderflaggor ger inga globala rättigheter. Installatören får behörighets- och systemadministration vid skyddad setup, utan automatisk auditläsning eller läsrätt till hemligheter. Systemadministration är högt betrodd eftersom rollen styr katalogens verifiering av identiteter. Se [SETTINGS.md](SETTINGS.md) för roller, sökbaser, modulgränser och konfigurationssparandets auditbegränsning.
+Global permissions are integrity-protected grants to individual accounts. AD groups and directory provider flags grant no global permissions. The installer receives access and system administration during protected setup, without automatic audit or secret read access. System administration is highly trusted because the role controls directory verification of identities. See [SETTINGS.md](SETTINGS.md) for roles, search bases, module boundaries and the audit limitation when saving configuration.
 
-Gruppträd får ha högst 128 nivåer. Både skapande och flytt kontrollerar hela underträdets djup före ändring, så att en delegerad administratör inte kan skapa ett träd som gör valvets listning oanvändbar.
+Group trees may have at most 128 levels. Both creation and moves check the depth of the entire subtree before making changes, so a delegated administrator cannot create a tree that makes vault listing unusable.
 
-## Inloggning och drift
+## Sign-in and operations
 
-Windows SSO utan extra MFA är det beslutade inloggningsflödet. Det bygger på domänens och klienternas skydd. Databaserna använder tjänstens identitet; ingen användardelegering till SQL görs. Servern kräver HTTPS och validerade databas-/LDAPS-certifikat. Aktivera IIS Windows Authentication och inaktivera Anonymous Authentication.
+Windows SSO without additional MFA is the chosen sign-in flow. It relies on protection of the domain and clients. Databases use the service identity; no user delegation to SQL occurs. The server requires HTTPS and validated database/LDAPS certificates. Enable IIS Windows Authentication and disable Anonymous Authentication.
 
-Följ även det obligatoriska steget [Kräv skydd för Windows-inloggningen](../README.md#21-kräv-skydd-för-windows-inloggningen). Installationsskriptet och setup-guiden verifierar ännu inte detta skydd automatiskt.
+Also follow the mandatory step [Require protection for Windows sign-in](../README.md#21-require-protection-for-windows-sign-in). The installation script and setup wizard do not yet verify this protection automatically.
 
-Installationen kräver Windows SSO och en slumpmässig 256-bitars engångskod som en serveroperatör genererar. Konfiguration skyddas med DPAPI LocalMachine **och NTFS-ACL**: DPAPI ersätter inte filbehörigheter. Ingen lokal lösenordsinloggning, simulerad användare eller hemlig webb-bakdörr finns.
+Installation requires Windows SSO and a random 256-bit one-time code generated by a server operator. Configuration is protected by DPAPI LocalMachine **and NTFS ACLs**: DPAPI does not replace file permissions. There is no local password sign-in, simulated user or secret web backdoor.
 
 ## Audit
 
-Audit kör i samma tjänst men separat databas. Standardinstallationen använder samma tjänstekonto med SELECT och INSERT, utan ändrings-, raderings- eller administrationsrätt i auditdatabasen; separata skriv-/läsidentiteter är valbara. Auditläsarrollen i applikationen krävs fortfarande för åtkomst till historiken. Händelser signeras. Begränsningar och skydd mot manipulation/radering dokumenteras i [AUDIT.md](AUDIT.md). Individuella signaturer bevisar inte att historiken är fullständig.
+Audit runs in the same service but in a separate database. The default installation uses the same service account with SELECT and INSERT, without modification, deletion or administration permissions in the audit database; separate writer/reader identities are optional. The application's auditor role is still required to access history. Events are signed. Limitations and protection against tampering/deletion are documented in [AUDIT.md](AUDIT.md). Individual signatures do not prove that the history is complete.

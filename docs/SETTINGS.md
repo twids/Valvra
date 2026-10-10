@@ -1,47 +1,47 @@
-# Inställningar och administration
+# Settings and administration
 
-**Inställningar** finns i huvudmenyn för behörighets- och systemadministratörer. Vanlig katalogadministration kräver ingen installationskod eller omstart. Alla administrativa API-anrop kontrollerar rättigheter på servern; menyn är inte säkerhetsgränsen. Skrivningar kräver CSRF-token och signerad audit.
+**Settings** is available in the main menu for access and system administrators. Routine directory administration requires no setup code or restart. All administrative API requests check permissions on the server; the menu is not the security boundary. Writes require a CSRF token and signed audit records.
 
-## Kataloganslutning
+## Directory connection
 
-Systemadministratören kan ändra server, uppslagsbas, personkontonas sökbas och säkerhetsgruppernas sökbas. Under **Avancerad anslutning** finns LDAPS-port och timeout. Betrott TLS-certifikat krävs; certifikatkontrollen kan inte stängas av. Anslutningen använder tjänstens Windows-identitet och sparar inget LDAP-lösenord.
+The system administrator can change the server, lookup base, user search base and security group search base. **Advanced connection** contains the LDAPS port and timeout. A trusted TLS certificate is required; certificate validation cannot be disabled. The connection uses the service's Windows identity and stores no LDAP password.
 
-| Fält | Användning |
+| Field | Purpose |
 | --- | --- |
-| Uppslagsbas (`BaseDn`) | Inloggat konto och aktuella gruppmedlemskap, inklusive nästlade grupper och primär säkerhetsgrupp. |
-| Personkontonas sökbas (`UserSearchBaseDn`) | Sökning och validering av aktiva personkonton vid tilldelning. Exempel: `OU=Users,DC=example,DC=se`. |
-| Säkerhetsgruppernas sökbas (`GroupSearchBaseDn`) | Sökning och validering av säkerhetsgrupper vid resursbehörigheter. Exempel: `OU=Groups,DC=example,DC=se`. Distributionsgrupper ingår inte. |
+| Lookup base (`BaseDn`) | Signed-in account and current group memberships, including nested groups and the primary security group. |
+| User search base (`UserSearchBaseDn`) | Searching for and validating active individual user accounts when granting access. Example: `OU=Users,DC=example,DC=se`. |
+| Security group search base (`GroupSearchBaseDn`) | Searching for and validating security groups for resource permissions. Example: `OU=Groups,DC=example,DC=se`. Distribution groups are excluded. |
 
-Tom person-/gruppbas använder uppslagsbasen. Båda måste ligga inom den. En begränsad gruppsökbas begränsar vilka grupper som kan väljas; den tar inte bort medlemskap eller tidigare resursrättigheter. Återkalla sådana tilldelningar separat.
+An empty user/group base uses the lookup base. Both must be within it. Restricting the group search base limits which groups can be selected; it does not remove memberships or previous resource permissions. Revoke such grants separately.
 
-**Testa anslutning** verifierar ditt aktiva konto med samma provider och stabila ID och visar upp till fem konton/grupper för vald söktext. **Spara inställningar** gör testet igen och sparar först när det lyckas. Misslyckade tester lämnar sparad konfiguration orörd. Utkast finns i sidans minne, även vid språkbyte eller fokusförlust; omladdning stänger utkastet. Vid versionskonflikt: läs in sparade inställningar och gör ändringen igen.
+**Test connection** verifies your active account with the same provider and stable ID and shows up to five accounts/groups for the chosen search text. **Save settings** repeats the test and saves only after it succeeds. Failed tests leave saved configuration untouched. Drafts remain in page memory, including during language changes or loss of focus; reloading discards the draft. If a version conflict occurs, load the saved settings and make the change again.
 
-API:t returnerar endast katalogfält och versionsnummer. Databaslösenord, anslutningssträngar, certifikatinställningar och nycklar skickas inte till denna sida. Sparandet uppdaterar en tillåten uppsättning fält i den DPAPI-skyddade konfigurationen och bevarar övriga inställningar. Installation och vanlig katalogändring ska inte köras samtidigt; kör en arbetsprocess enligt driftguiden.
+The API returns only directory fields and the version number. Database passwords, connection strings, certificate settings and keys are not sent to this page. Saving updates an allowed set of fields in the DPAPI-protected configuration and preserves the remaining settings. Do not run installation and routine directory changes simultaneously; run one worker process as described in the operations guide.
 
-Konfigurationsfilen och auditdatabasen har ingen gemensam transaktion. En levererad, signerad intent föregår ändringen. Om fel uppstår efter filskrivningen kan ändringen redan gälla trots ett felmeddelande eller en `Failed`-händelse. Läs tillbaka sparade inställningar och jämför versionsnumret innan ett nytt försök. Outbox återlevererar kvarvarande signerade händelser; `Failed` är inte ett bevis på att filen återställdes. Återställningen av konfiguration följer [OPERATIONS.md](OPERATIONS.md).
+The configuration file and audit database do not share a transaction. A delivered, signed intent precedes the change. If an error occurs after the file is written, the change may already apply despite an error message or a `Failed` event. Read back the saved settings and compare the version number before retrying. The outbox redelivers remaining signed events; `Failed` is not proof that the file was restored. Configuration recovery follows [OPERATIONS.md](OPERATIONS.md).
 
-## Personbundna globala rättigheter
+## Global permissions for individual accounts
 
-| Rättighet | Tillåter |
+| Permission | Allows |
 | --- | --- |
-| Behörighetsadministratör | Administrera resursåtkomst, ägare och globala personrättigheter. |
-| Systemadministratör | Läsa och ändra kataloginställningar, testa kataloganslutning och läsa globala tilldelningar. |
-| Auditläsare | Läsa, filtrera och exportera auditloggen. |
+| Access administrator | Administer resource access, owners and global permissions for individual accounts. |
+| System administrator | Read and modify directory settings, test the directory connection and read global grants. |
+| Auditor | Read, filter and export the audit log. |
 
-Installatörens aktiva personkonto får de två administratörsrättigheterna när installationen slutförs med den privata engångskoden. Auditläsning ingår inte automatiskt. Första besökaren till ett färdigt valv blir inte administratör. Ett avbrutet installationsförsök kan fortsättas av samma person; en annan person får inte ta över den redan skapade bootstrap-tilldelningen.
+The installer's active individual account receives both administrator permissions when setup is completed with the private one-time code. Audit read access is not included automatically. The first visitor to a completed vault does not become an administrator. An interrupted installation attempt can be continued by the same person; another person cannot take over the bootstrap grant already created.
 
-Globala rättigheter lagras i valvets integritetsskyddade tilldelningstabell som installationens `System`-tilldelningar, med provider och stabilt person-ID. AD-grupper eller provider-rapporterade administratörsflaggor ger inga globala rättigheter. Resursbehörigheternas vanliga API kan inte skapa dessa tilldelningar. Inga nya tabeller krävs för detta tillägg; konvertering av äldre preview-installationer ingår inte.
+Global permissions are stored in the vault's integrity-protected grants table as the installation's `System` grants, with the provider and stable user ID. AD groups or provider-reported administrator flags grant no global permissions. The ordinary resource permission API cannot create these grants. This addition requires no new tables; conversion of earlier preview installations is not included.
 
-Använd **Tilldela personkonto**, sök ett konto, markera endast nödvändiga rättigheter och spara. Använd **Ändra** för att återkalla; avmarkera alla för borttagning. Versionskontroll skyddar samtidiga ändringar. Den sista administratören för respektive administratörsrätt kan inte tas bort genom sidan, och en kvarvarande ersättare måste kunna verifieras som aktiv. Inaktiverade eller borttagna kontons tilldelningar kan fortfarande återkallas.
+Use **Assign user account**, search for an account, select only the necessary permissions and save. Use **Modify** to revoke permissions; uncheck all permissions to remove the grant. Version checks protect concurrent changes. The last administrator for each administrator permission cannot be removed through the page, and a remaining replacement must be verifiable as active. Grants for disabled or deleted accounts can still be revoked.
 
-Globala rättigheter ger ingen automatisk dekryptering av lösenord eller licensnycklar. **Båda administratörsrollerna är ändå högt betrodda:** behörighetsadministratören kan tilldela sig själv läsrätt, och systemadministratören styr vilken katalog som verifierar identiteter och medlemskap. De är därför inte skyddade sandlådor för obetrodda operatörer. Auditläsning visar även känslig organisatorisk metadata.
+Global permissions do not automatically allow password or license key decryption. **Both administrator roles are nevertheless highly trusted:** the access administrator can grant themselves read permission, and the system administrator controls which directory verifies identities and memberships. They are therefore not protected sandboxes for untrusted operators. Audit read access also exposes sensitive organizational metadata.
 
-Ha minst två utsedda personkonton för de administratörsrättigheter ni behöver upprätthålla. AD kan externt inaktivera även den sista administratören; applikationen kan inte förhindra det. Återställ kontots åtkomst i AD eller återställ rätt konfiguration med serveroperatören. Setup på en befintlig installation återutdelar inte globala roller. Ändra inte rättigheterna direkt i SQL och skapa inte en ny kontrollpunkt för befintliga data.
+Maintain at least two designated individual accounts for the administrator permissions you need to preserve. AD can externally disable even the last administrator; the application cannot prevent that. Restore the account's access in AD or restore the correct configuration with the server operator. Setup on an existing installation does not reassign global roles. Do not change permissions directly in SQL or create a new checkpoint for existing data.
 
-## Identitetsmoduler
+## Identity modules
 
-Den levererade implementationen använder **Windows SSO** för inloggning och **Active Directory över LDAPS** som katalog. Sidan visar de installerade modulerna. Inga OIDC-, lokala lösenords- eller andra LDAP-moduler levereras ännu, och befintlig provider kan inte bytas från sidan.
+The supplied implementation uses **Windows SSO** for sign-in and **Active Directory over LDAPS** as its directory. The page shows the installed modules. No OIDC, local password or other LDAP modules are supplied yet, and the existing provider cannot be changed from the page.
 
-`ProviderRegistry` registrerar betrodda login-/katalogfabriker och beskrivningar i kod. `IIdentityProvider` hämtar stabilt ID från en redan autentiserad principal; `IDirectoryProvider` löser aktiva konton/medlemskap samt söker och validerar personkonton/grupper. Modulerna måste dela identitetsnamnrymd. Web-projektet måste dessutom registrera den nya providerns verkliga autentiseringsscheme och eventuella säkra konfigurationsfält; dagens scheme är Negotiate. Inga klassnamn, DLL-sökvägar eller moduluppladdningar accepteras från webbläsaren.
+`ProviderRegistry` registers trusted sign-in/directory factories and descriptions in code. `IIdentityProvider` retrieves a stable ID from an already authenticated principal; `IDirectoryProvider` resolves active accounts/memberships and searches for and validates individual accounts/groups. The modules must share an identity namespace. The Web project must also register the new provider's actual authentication scheme and any secure configuration fields; the current scheme is Negotiate. No class names, DLL paths or module uploads are accepted from the browser.
 
-Ett providerbyte i befintligt valv kräver planerad koppling av alla person-/grupp-ID:n, ägare, licenstilldelningar och globala roller. Automatisk omkoppling ingår inte. Verifiera Windows/IIS/AD i er riktiga miljö enligt [VERIFICATION.md](VERIFICATION.md); syntetiska tester bevisar inte er Kerberos- eller LDAPS-konfiguration.
+Changing providers in an existing vault requires planned mapping of all user/group IDs, owners, license assignments and global roles. Automatic remapping is not included. Verify Windows/IIS/AD in your actual environment as described in [VERIFICATION.md](VERIFICATION.md); synthetic tests do not prove your Kerberos or LDAPS configuration.

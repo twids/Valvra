@@ -88,8 +88,12 @@ if (args.Contains("--rewrap-keys", StringComparer.Ordinal))
     using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
     var sid = identity.User?.Value ?? throw new AccessDeniedException();
     using var scope = app.Services.CreateScope();
-    var actor = await scope.ServiceProvider.GetRequiredService<IDirectoryProvider>().ResolveAsync(sid, CancellationToken.None);
-    var count = await scope.ServiceProvider.GetRequiredService<Valvra.Infrastructure.Services.KeyRotationService>().RewrapAsync(actor, CancellationToken.None);
+    var count = await scope.ServiceProvider.GetRequiredService<VaultIntegrity>().RunAsync(async () =>
+    {
+        var actor = await scope.ServiceProvider.GetRequiredService<IDirectoryProvider>().ResolveAsync(sid, CancellationToken.None);
+        actor = await scope.ServiceProvider.GetRequiredService<Valvra.Infrastructure.Services.GlobalRoleService>().ApplyAsync(actor, CancellationToken.None);
+        return await scope.ServiceProvider.GetRequiredService<Valvra.Infrastructure.Services.KeyRotationService>().RewrapAsync(actor, CancellationToken.None);
+    }, CancellationToken.None);
     Console.WriteLine($"Rewrapped {count} encrypted records. Retain old keys for backup recovery.");
     return;
 }

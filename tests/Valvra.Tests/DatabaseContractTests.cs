@@ -41,7 +41,8 @@ public sealed class DatabaseContractTests
         using var signer = new TestAuditSigner();
         var transport = new DatabaseAuditTransport(f.AuditOptions, signer);
         using var integritySigner = new TestIntegritySigner();
-        var integrity = new VaultIntegrity(db, new MemoryCheckpointStore(), integritySigner, new IntegrityOptions { InstallationId = f.AuditOptions.InstallationId });
+        var checkpoints = new MemoryCheckpointStore();
+        var integrity = new VaultIntegrity(db, checkpoints, integritySigner, new IntegrityOptions { InstallationId = f.AuditOptions.InstallationId });
         await integrity.InitializeEmptyAsync(default);
         var audit = new AuditService(db, transport, TimeProvider.System, signer, integrity);
         using var cipher = new SpyCipher();
@@ -120,6 +121,17 @@ public sealed class DatabaseContractTests
         var actionColumn = provider == "SqlServer" ? "Action" : "action";
         foreach (var sql in new[] { $"UPDATE {table} SET {actionColumn}='Forged'", $"DELETE FROM {table}", $"TRUNCATE TABLE {table}", $"DROP TABLE {table}" })
             await f.MustDenyAsync(f.AuditOptions.WriterConnectionString, sql);
+        // Exercise the recovery role query on each real provider using a signed,
+        // synthetic prepared checkpoint over the unchanged database snapshot.
+        var globals = new GlobalRoleService(db, integrity, audit, new FakeDirectory(), TimeProvider.System);
+        await globals.BootstrapAsync(actor, "database-test", default);
+        var current = checkpoints.Value!.Current;
+        checkpoints.Value = new(current, integritySigner.Sign(current.InstallationId, current.Generation + 1, current.Hash));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => integrity.RecoverUncommittedAsync(actor with { SubjectId = "outsider" }, default));
+        Assert.NotNull(checkpoints.Value.Prepared);
+        await integrity.RecoverUncommittedAsync(actor with { IsAccessAdministrator = false }, default);
+        Assert.Null(checkpoints.Value.Prepared);
+        await integrity.RunAsync(() => Task.CompletedTask, default);
         // Execute real SQL updates outside the trusted application boundary on both providers.
         var secretSql = provider == "SqlServer" ? "UPDATE dbo.Secrets SET ResourceId={0} WHERE Id={1}" : "UPDATE \"Secrets\" SET \"ResourceId\"={0} WHERE \"Id\"={1}";
         var licenseSql = provider == "SqlServer" ? "UPDATE dbo.Licenses SET ResourceId={0} WHERE Id={1}" : "UPDATE \"Licenses\" SET \"ResourceId\"={0} WHERE \"Id\"={1}";

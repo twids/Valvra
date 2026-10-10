@@ -134,15 +134,59 @@ public sealed class IntegritySecurityTests
     {
         var interceptor = new AbortCommit();
         await using var f = await VaultServiceTests.Fixture.CreateAsync(interceptor);
+        await new Valvra.Infrastructure.Services.GlobalRoleService(f.Db, f.Integrity, f.Audit, new FakeDirectory(), f.Clock).BootstrapAsync(f.User, "setup", default);
         interceptor.Enabled = true;
         await Assert.ThrowsAsync<IOException>(() => ChangeName(f));
         Assert.NotNull(f.Checkpoints.Value!.Prepared);
         var restarted = Restarted(f);
         await Assert.ThrowsAsync<VaultUnavailableException>(() => restarted.RunAsync(() => Task.CompletedTask, default));
-        await Assert.ThrowsAsync<AccessDeniedException>(() => restarted.RecoverUncommittedAsync(f.User with { IsAccessAdministrator = false }, default));
-        await restarted.RecoverUncommittedAsync(f.User, default);
+        await Assert.ThrowsAsync<AccessDeniedException>(() => restarted.RecoverUncommittedAsync(f.User with { SubjectId = "outsider" }, default));
+        await restarted.RecoverUncommittedAsync(f.User with { IsAccessAdministrator = false }, default);
         await restarted.RunAsync(() => Task.CompletedTask, default);
         Assert.Equal("Resource", (await f.Db.Resources.SingleAsync()).Name);
+    }
+
+    [Theory]
+    [InlineData("directory-claim")]
+    [InlineData("group")]
+    [InlineData("provider")]
+    [InlineData("disabled")]
+    [InlineData("temporary")]
+    [InlineData("wrong-installation")]
+    [InlineData("system-admin-only")]
+    [InlineData("tampered-role")]
+    public async Task RecoveryRejectsUntrustedOrIneligibleAdministratorRoles(string scenario)
+    {
+        var interceptor = new AbortCommit();
+        await using var f = await VaultServiceTests.Fixture.CreateAsync(interceptor);
+        if (scenario != "directory-claim")
+            await f.Integrity.RunAsync(async () =>
+            {
+                f.Db.Grants.Add(new AccessGrant
+                {
+                    TargetKind = TargetKind.System,
+                    TargetId = scenario == "wrong-installation" ? Guid.NewGuid() : f.Integrity.InstallationId,
+                    SubjectKind = scenario == "group" ? SubjectKind.Group : SubjectKind.User,
+                    Provider = scenario == "provider" ? "other" : f.User.Provider,
+                    SubjectId = scenario == "tampered-role" ? "outsider" : f.User.SubjectId,
+                    Permissions = (VaultPermission)(int)(scenario == "system-admin-only" ? GlobalRole.SystemAdministrator : GlobalRole.AccessAdministrator),
+                    ExpiresAt = scenario == "temporary" ? f.Clock.GetUtcNow().AddHours(1) : null
+                });
+                await f.Integrity.SaveAsync(default);
+            }, default);
+        interceptor.Enabled = true;
+        await Assert.ThrowsAsync<IOException>(() => ChangeName(f));
+        var checkpoint = f.Checkpoints.Value;
+        if (scenario == "tampered-role")
+            await f.Db.Database.ExecuteSqlRawAsync("UPDATE Grants SET SubjectId='user' WHERE TargetKind=2");
+        var actor = f.User with { IsEnabled = scenario != "disabled", IsAccessAdministrator = true };
+        var restarted = Restarted(f);
+        if (scenario == "tampered-role")
+            await Assert.ThrowsAsync<VaultUnavailableException>(() => restarted.RecoverUncommittedAsync(actor, default));
+        else
+            await Assert.ThrowsAsync<AccessDeniedException>(() => restarted.RecoverUncommittedAsync(actor, default));
+        Assert.Same(checkpoint, f.Checkpoints.Value);
+        Assert.Equal(0, f.Cipher.Decryptions);
     }
 
     private static VaultIntegrity Restarted(VaultServiceTests.Fixture f) => new(f.Db, f.Checkpoints, f.IntegritySigner, f.IntegrityOptions);
