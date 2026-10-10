@@ -1,97 +1,92 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Valvra.Core;
 using Valvra.Infrastructure.Data;
+using Valvra.Infrastructure.Security;
 
 namespace Valvra.Infrastructure.Auditing;
 
-public sealed class AuditService(VaultDbContext db, IAuditTransport transport, TimeProvider clock)
+public sealed class AuditService(VaultDbContext db, IAuditTransport transport, TimeProvider clock, IAuditSigner signer, VaultIntegrity integrity)
 {
-    public AuditRecord Create(Actor actor, string action, Guid? target, AuditPhase phase, string outcome,
-        string correlationId, Guid? operationId = null) => new()
+    private AuditRecord Create(Actor actor, string action, Guid? target, AuditPhase phase, string outcome,
+        string correlationId, Guid? operationId = null, string detailsJson = "{}", AuditScope? scope = null)
     {
-        Id = Guid.NewGuid(), OperationId = operationId ?? Guid.NewGuid(), Timestamp = clock.GetUtcNow(),
-        ActorProvider = actor.Provider, ActorId = actor.SubjectId, Action = action, TargetId = target,
-        Phase = phase, Outcome = outcome, CorrelationId = correlationId
-    };
-
-    public async Task RecordAsync(Actor actor, string action, Guid? target, string outcome, string correlationId, CancellationToken ct)
-    {
-        var record = Create(actor, action, target, AuditPhase.Event, outcome, correlationId);
-        db.Audit.Add(record);
-        await db.SaveChangesAsync(ct);
-        await DeliverAsync(record, ct);
-    }
-
-    public async Task<T> MutationAsync<T>(Actor actor, string action, Guid? target, string correlationId,
-        Func<CancellationToken, Task<T>> mutation, CancellationToken ct, string detailsJson = "{}")
-    {
-        // Deliver older committed outcomes before accepting further protected mutations.
-        await FlushAsync(ct);
-        var intent = Create(actor, action, target, AuditPhase.Intent, "Requested", correlationId);
-        intent.DetailsJson = detailsJson;
-        db.Audit.Add(intent);
-        await db.SaveChangesAsync(ct);
-        await DeliverAsync(intent, ct);
-        T result;
-        AuditRecord completed;
-        var commitAttempted = false;
-        try
+        var value = new AuditEvent(Guid.NewGuid(), operationId ?? Guid.NewGuid(), clock.GetUtcNow(), actor.Provider,
+            actor.SubjectId, action, target, phase, outcome, correlationId, detailsJson, integrity.InstallationId,
+            Format: scope is null ? 2 : 3, Scope: scope);
+        var signed = signer.Sign(value);
+        return new AuditRecord
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
-            result = await mutation(ct);
-            completed = Create(actor, action, target, AuditPhase.Committed, "Committed", correlationId, intent.OperationId);
-            completed.DetailsJson = detailsJson;
-            db.Audit.Add(completed);
-            await db.SaveChangesAsync(ct);
-            commitAttempted = true;
-            await transaction.CommitAsync(ct);
-        }
-        catch
-        {
-            db.ChangeTracker.Clear();
-            // A lost commit acknowledgement does not prove rollback. Preserve that ambiguity;
-            // a durable Committed outbox record, when present, is the authoritative result.
-            var failed = Create(actor, action, target,
-                commitAttempted ? AuditPhase.Event : AuditPhase.Failed,
-                commitAttempted ? "CommitUncertain" : "Failed", correlationId, intent.OperationId);
-            failed.DetailsJson = detailsJson;
-            db.Audit.Add(failed);
-            await db.SaveChangesAsync(CancellationToken.None);
-            await DeliverAsync(failed, CancellationToken.None);
-            throw;
-        }
-        // A transport failure here leaves a durable committed outbox item for reconciliation.
-        await DeliverAsync(completed, ct);
-        return result;
+            Id = value.Id, OperationId = value.OperationId, Timestamp = value.Timestamp, ActorProvider = value.ActorProvider,
+            ActorId = value.ActorId, Action = value.Action, TargetId = value.TargetId, Phase = value.Phase, Outcome = value.Outcome,
+            CorrelationId = value.CorrelationId, DetailsJson = value.DetailsJson, InstallationId = value.InstallationId,
+            EventJson = Encoding.UTF8.GetString(signed.Payload), PayloadHash = signed.PayloadHash,
+            SigningKeyId = signed.SigningKeyId, Signature = signed.Signature
+        };
     }
+    public Task RecordAsync(Actor actor, string action, Guid? target, string outcome, string correlationId, CancellationToken ct) =>
+        integrity.RunAsync(async () =>
+        {
+            var scope = await AuditScopeCapture.CaptureAsync(db, target, null, ct);
+            var record = Create(actor, action, target, AuditPhase.Event, outcome, correlationId, scope: scope);
+            db.Audit.Add(record); await integrity.SaveAsync(ct); await DeliverAsync(record, ct);
+        }, ct);
 
-    public async Task FlushAsync(CancellationToken ct)
+    public Task<T> MutationAsync<T>(Actor actor, string action, Guid? target, string correlationId,
+        Func<CancellationToken, Task<T>> mutation, CancellationToken ct, string detailsJson = "{}", AuditScopeHint? scopeHint = null) =>
+        integrity.RunAsync(async () =>
+        {
+            await FlushCoreAsync(ct);
+            var before = await AuditScopeCapture.CaptureAsync(db, target, scopeHint, ct);
+            var intent = Create(actor, action, target, AuditPhase.Intent, "Requested", correlationId, detailsJson: detailsJson, scope: before);
+            db.Audit.Add(intent); await integrity.SaveAsync(ct); await DeliverAsync(intent, ct);
+            T result; AuditRecord completed;
+            try
+            {
+                result = await mutation(ct);
+                var after = await AuditScopeCapture.CaptureAsync(db, target, scopeHint, ct) ?? before;
+                completed = Create(actor, action, target, AuditPhase.Committed, "Committed", correlationId, intent.OperationId, detailsJson, after);
+                db.Audit.Add(completed);
+                await integrity.SaveAsync(ct);
+            }
+            catch
+            {
+                var uncertain = integrity.CommitUncertain;
+                await integrity.RestartAsync(CancellationToken.None);
+                var failed = Create(actor, action, target, uncertain ? AuditPhase.Event : AuditPhase.Failed,
+                    uncertain ? "CommitUncertain" : "Failed", correlationId, intent.OperationId, detailsJson, before);
+                db.Audit.Add(failed); await integrity.SaveAsync(CancellationToken.None); await DeliverAsync(failed, CancellationToken.None);
+                throw;
+            }
+            await DeliverAsync(completed, ct);
+            return result;
+        }, ct);
+
+    public Task FlushAsync(CancellationToken ct) => integrity.RunAsync(() => FlushCoreAsync(ct), ct);
+    private async Task FlushCoreAsync(CancellationToken ct)
     {
-        var pending = await db.Audit.Where(x => !x.Delivered).OrderBy(x => x.Timestamp).Take(500).ToListAsync(ct);
+        var pending = await db.Audit.Where(x => !x.Delivered).OrderBy(x => x.Timestamp).ThenBy(x => x.Id).Take(500).ToListAsync(ct);
         foreach (var record in pending) await DeliverAsync(record, ct);
-        if (await db.Audit.AnyAsync(x => !x.Delivered, ct))
-            throw new VaultUnavailableException("Auditavstämning pågår.");
+        if (await db.Audit.AnyAsync(x => !x.Delivered, ct)) throw new VaultUnavailableException("Auditavstämning pågår.");
     }
-
     private async Task DeliverAsync(AuditRecord record, CancellationToken ct)
     {
+        var payload = System.Text.Json.JsonSerializer.Deserialize<AuditEvent>(record.EventJson)
+            ?? throw new VaultUnavailableException("Ogiltig audithändelse.");
+        var value = new AuditEvent(record.Id, record.OperationId, record.Timestamp, record.ActorProvider,
+            record.ActorId, record.Action, record.TargetId, record.Phase, record.Outcome, record.CorrelationId, record.DetailsJson, record.InstallationId,
+            payload.Format, payload.Scope);
+        var signed = new SignedAuditEvent(value, record.PayloadHash, record.SigningKeyId, record.Signature, Encoding.UTF8.GetBytes(record.EventJson));
+        if (value.InstallationId != integrity.InstallationId || !signer.Verify(signed))
+            throw new VaultUnavailableException("Audithändelsens signatur kan inte verifieras.");
         AuditReceipt receipt;
-        try
-        {
-            var auditEvent = new AuditEvent(record.Id, record.OperationId, record.Timestamp,
-                record.ActorProvider, record.ActorId, record.Action, record.TargetId, record.Phase,
-                record.Outcome, record.CorrelationId, record.DetailsJson);
-            receipt = await transport.SendAsync(auditEvent, ct);
-            if (receipt.Hash != AuditSignature.Hash(auditEvent)) throw new IOException("Audit receipt hash mismatch.");
-        }
+        try { receipt = await transport.SendAsync(signed, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new VaultUnavailableException("Auditmottagaren är inte tillgänglig. Operationen kan inte slutföras.", ex);
-        }
-        if (receipt.EventId != record.Id || receipt.Hash.Length != 64)
+        { throw new VaultUnavailableException("Auditmottagaren är inte tillgänglig. Operationen kan inte slutföras.", ex); }
+        if (receipt.EventId != record.Id || receipt.Hash != signed.PayloadHash)
             throw new VaultUnavailableException("Ogiltig auditkvittens.");
-        record.Delivered = true;
-        record.ReceiptHash = receipt.Hash;
-        await db.SaveChangesAsync(ct);
+        record.Delivered = true; record.ReceiptHash = receipt.Hash;
+        db.Update(record);
+        await integrity.SaveAsync(ct);
     }
 }

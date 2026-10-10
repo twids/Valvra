@@ -109,6 +109,13 @@ namespace Valvra.Migrations.SqlServer.Migrations
                         .HasMaxLength(4096)
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("EventJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("InstallationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("OperationId")
                         .HasColumnType("uniqueidentifier");
 
@@ -117,10 +124,24 @@ namespace Valvra.Migrations.SqlServer.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
                     b.Property<int>("Phase")
                         .HasColumnType("int");
 
                     b.Property<string>("ReceiptHash")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<byte[]>("Signature")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("SigningKeyId")
+                        .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
 
@@ -174,6 +195,32 @@ namespace Valvra.Migrations.SqlServer.Migrations
                     b.HasIndex("ResourceId");
 
                     b.ToTable("Assignments");
+                });
+
+            modelBuilder.Entity("Valvra.Core.LicenseVersion", b =>
+                {
+                    b.Property<Guid>("LicenseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("EnvelopeJson")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("LicenseId", "Version");
+
+                    b.ToTable("LicenseVersions");
                 });
 
             modelBuilder.Entity("Valvra.Core.ResourceGroup", b =>
@@ -382,6 +429,15 @@ namespace Valvra.Migrations.SqlServer.Migrations
                         .WithMany()
                         .HasForeignKey("ResourceId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Valvra.Core.LicenseVersion", b =>
+                {
+                    b.HasOne("Valvra.Core.SoftwareLicense", null)
+                        .WithMany()
+                        .HasForeignKey("LicenseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Valvra.Core.ResourceGroup", b =>

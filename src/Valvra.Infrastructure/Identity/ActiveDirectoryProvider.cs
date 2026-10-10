@@ -13,8 +13,8 @@ public sealed class ActiveDirectoryOptions
     public string Server { get; set; } = "";
     public int Port { get; set; } = 636;
     public string BaseDn { get; set; } = "";
-    public string AccessAdministratorGroupSid { get; set; } = "";
-    public string AuditorGroupSid { get; set; } = "";
+    public string UserSearchBaseDn { get; set; } = "";
+    public string GroupSearchBaseDn { get; set; } = "";
     public int TimeoutSeconds { get; set; } = 10;
 }
 
@@ -45,22 +45,23 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
             if (user is null) throw new AccessDeniedException();
             var enabled = (int.Parse(Text(user, "userAccountControl"), System.Globalization.CultureInfo.InvariantCulture) & 2) == 0;
             if (!enabled) throw new AccessDeniedException();
-            var groups = Search(connection, $"(&(objectCategory=group)(member:1.2.840.113556.1.4.1941:={Escape(user.DistinguishedName)}))", "objectSid")
+            var groups = Search(connection, $"(&{Category(SubjectKind.Group)}(member:1.2.840.113556.1.4.1941:={Escape(user.DistinguishedName)}))", "objectSid")
                 .Select(Sid).ToHashSet(StringComparer.Ordinal);
             var accountSid = new SecurityIdentifier(subjectId);
             var primaryRid = Text(user, "primaryGroupID");
             if (accountSid.AccountDomainSid is { } domain && int.TryParse(primaryRid, out var rid))
             {
                 var primarySid = $"{domain.Value}-{rid}";
-                groups.Add(primarySid);
-                var primary = Search(connection, $"(&(objectCategory=group)(objectSid={SidFilter(primarySid)}))", "objectSid").SingleOrDefault();
+                var primary = Search(connection, $"(&{Category(SubjectKind.Group)}(objectSid={SidFilter(primarySid)}))", "objectSid").SingleOrDefault();
                 if (primary is not null)
-                    foreach (var ancestor in Search(connection, $"(&(objectCategory=group)(member:1.2.840.113556.1.4.1941:={Escape(primary.DistinguishedName)}))", "objectSid"))
+                {
+                    groups.Add(primarySid);
+                    foreach (var ancestor in Search(connection, $"(&{Category(SubjectKind.Group)}(member:1.2.840.113556.1.4.1941:={Escape(primary.DistinguishedName)}))", "objectSid"))
                         groups.Add(Sid(ancestor));
+                }
             }
             cancellationToken.ThrowIfCancellationRequested();
-            return new Actor("ad", Sid(user), Text(user, "displayName", "sAMAccountName"), groups, true,
-                groups.Contains(options.AccessAdministratorGroupSid), groups.Contains(options.AuditorGroupSid));
+            return new Actor("ad", Sid(user), Text(user, "displayName", "sAMAccountName"), groups, true, false, false);
         }
         catch (Exception ex) when (ex is LdapException or DirectoryOperationException)
         {
@@ -72,9 +73,9 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
     {
         if (!Enum.IsDefined(kind) || query.Length is < 2 or > 128) throw new VaultValidationException("Ange 2–128 tecken för katalogsökning.");
         using var connection = Connect();
-        var category = kind == SubjectKind.Group ? "(objectCategory=group)" : "(&(objectCategory=person)(objectClass=user))";
+        var category = Category(kind);
         var term = Escape(query);
-        var entries = Search(connection, $"(&{category}(|(sAMAccountName={term}*)(displayName={term}*)(cn={term}*)))", "objectSid", "displayName", "sAMAccountName", "cn");
+        var entries = SearchAt(connection, SearchBase(kind), $"(&{category}(|(sAMAccountName={term}*)(displayName={term}*)(cn={term}*)))", "objectSid", "displayName", "sAMAccountName", "cn");
         cancellationToken.ThrowIfCancellationRequested();
         return entries.Take(100).Select(x => new DirectorySubject("ad", Sid(x), Text(x, "displayName", "sAMAccountName", "cn"), kind)).ToArray();
     }, cancellationToken);
@@ -83,8 +84,8 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
     {
         if (!Enum.IsDefined(kind)) throw new VaultValidationException("Ogiltig katalogtyp.");
         using var connection = Connect();
-        var category = kind == SubjectKind.Group ? "(objectCategory=group)" : "(&(objectCategory=person)(objectClass=user))";
-        var entry = Search(connection, $"(&{category}(objectSid={SidFilter(subjectId)}))", "objectSid", "displayName", "sAMAccountName", "cn").SingleOrDefault();
+        var category = Category(kind);
+        var entry = SearchAt(connection, SearchBase(kind), $"(&{category}(objectSid={SidFilter(subjectId)}))", "objectSid", "displayName", "sAMAccountName", "cn").SingleOrDefault();
         cancellationToken.ThrowIfCancellationRequested();
         return entry is null ? null : new DirectorySubject("ad", Sid(entry), Text(entry, "displayName", "sAMAccountName", "cn"), kind);
     }, cancellationToken);
@@ -108,8 +109,10 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
     }
 
     private List<SearchResultEntry> Search(LdapConnection connection, string filter, params string[] attributes)
+        => SearchAt(connection, options.BaseDn, filter, attributes);
+    private List<SearchResultEntry> SearchAt(LdapConnection connection, string searchBase, string filter, params string[] attributes)
     {
-        var request = new SearchRequest(options.BaseDn, filter, SearchScope.Subtree, attributes);
+        var request = new SearchRequest(searchBase, filter, SearchScope.Subtree, attributes);
         var page = new PageResultRequestControl(250);
         request.Controls.Add(page);
         var results = new List<SearchResultEntry>();
@@ -122,6 +125,12 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
         } while (page.Cookie.Length > 0);
         return results;
     }
+    public string SearchBase(SubjectKind kind) => kind == SubjectKind.User
+        ? (string.IsNullOrWhiteSpace(options.UserSearchBaseDn) ? options.BaseDn : options.UserSearchBaseDn)
+        : (string.IsNullOrWhiteSpace(options.GroupSearchBaseDn) ? options.BaseDn : options.GroupSearchBaseDn);
+    public static string Category(SubjectKind kind) => kind == SubjectKind.Group
+        ? "(&(objectCategory=group)(groupType:1.2.840.113556.1.4.803:=2147483648))"
+        : "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))";
 
     public static string Escape(string value)
     {

@@ -16,6 +16,13 @@ CREATE INDEX IX_AuditEvents_Timestamp ON dbo.AuditEvents(Timestamp DESC);
 CREATE INDEX IX_AuditEvents_Actor ON dbo.AuditEvents(ActorId, Timestamp DESC);
 CREATE INDEX IX_AuditEvents_Target ON dbo.AuditEvents(TargetId, Timestamp DESC);
 GO
+CREATE ROLE valvra_audit_runtime;
+GRANT SELECT, INSERT ON OBJECT::dbo.AuditEvents TO valvra_audit_runtime;
+DENY UPDATE, DELETE, ALTER, TAKE OWNERSHIP ON OBJECT::dbo.AuditEvents TO valvra_audit_runtime;
+DENY ALTER, TAKE OWNERSHIP ON SCHEMA::dbo TO valvra_audit_runtime;
+-- Do not grant CONTROL: DENY CONTROL would also block required SELECT/INSERT.
+-- Optional separate identities. Do not combine these roles with the runtime role:
+-- their DENY SELECT/INSERT permissions would override its grants.
 CREATE ROLE valvra_audit_writer;
 GRANT INSERT ON OBJECT::dbo.AuditEvents TO valvra_audit_writer;
 DENY SELECT, UPDATE, DELETE ON OBJECT::dbo.AuditEvents TO valvra_audit_writer;
@@ -24,6 +31,7 @@ GRANT SELECT ON OBJECT::dbo.AuditEvents TO valvra_audit_reader;
 DENY INSERT, UPDATE, DELETE ON OBJECT::dbo.AuditEvents TO valvra_audit_reader;
 GO
 -- Example, after users have been created:
+-- ALTER ROLE valvra_audit_runtime ADD MEMBER [EXAMPLE\svcValvra$];
 -- ALTER ROLE valvra_audit_writer ADD MEMBER [ValvraAuditWriter];
 -- ALTER ROLE valvra_audit_reader ADD MEMBER [ValvraAuditReader];
 -- Neither runtime identity may be db_owner, sysadmin, dbo, or own this table.

@@ -6,6 +6,7 @@ using Valvra.Core;
 using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Authorization;
 using Valvra.Infrastructure.Data;
+using Valvra.Infrastructure.Security;
 
 namespace Valvra.Infrastructure.Services;
 
@@ -28,9 +29,11 @@ public sealed class CredentialTestThrottle(TimeProvider clock)
 }
 
 public sealed class CredentialTestService(VaultDbContext db, AccessService access, VaultService vault,
-    AuditService audit, ICredentialTester tester, CredentialTestThrottle throttle, IDirectoryProvider directory)
+    AuditService audit, ICredentialTester tester, CredentialTestThrottle throttle, IDirectoryProvider directory, VaultIntegrity integrity)
 {
-    public async Task<CredentialTestResult> TestAsync(Actor actor, Guid entryId, string correlation, CancellationToken ct)
+    public Task<CredentialTestResult> TestAsync(Actor actor, Guid entryId, string correlation, CancellationToken ct) =>
+        integrity.RunAsync(() => TestCoreAsync(actor, entryId, correlation, ct), ct);
+    private async Task<CredentialTestResult> TestCoreAsync(Actor actor, Guid entryId, string correlation, CancellationToken ct)
     {
         var entry = await db.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == entryId && !x.Deleted, ct)
             ?? throw new AccessDeniedException();

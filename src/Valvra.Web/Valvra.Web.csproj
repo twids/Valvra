@@ -9,7 +9,7 @@
   <ItemGroup><Content Include="../../deploy/audit-*.sql" Link="deploy/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
   <ItemGroup>
     <Content Include="../../deploy/Install-Iis.ps1" Link="Install-Iis.ps1" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="../../README.md;../../LICENSE;../../SECURITY.md" Link="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="../../docs/*.md" Link="docs/%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../README.md;../../LICENSE;../../SECURITY.md;../../CHANGELOG.md" Link="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../docs/*.md" Exclude="../../docs/DEMO-DEPLOYMENT.md" Link="docs/%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
