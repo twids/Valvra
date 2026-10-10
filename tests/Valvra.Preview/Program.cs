@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Valvra.Infrastructure.Data;
 using Valvra.Core;
 using Valvra.Tests;
@@ -48,4 +49,8 @@ foreach (var name in new[] { "Databasplattform", "Windows-servrar", "Nätverk oc
         expiresAt = DateTimeOffset.UtcNow.AddDays(20), secretChange = 1, payload = new { licenseKey = "SYNTHETIC-LICENSE", notes = "Endast testdata" } });
 }
 Console.WriteLine("BROWSER_TEST_URL=" + address);
-await Task.Delay(Timeout.InfiniteTimeSpan);
+// Let SIGTERM end the executable after Kestrel begins graceful shutdown.
+// An uncancellable infinite delay keeps the Linux process alive after tests finish.
+var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+try { await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.ApplicationStopping); }
+catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested) { }
