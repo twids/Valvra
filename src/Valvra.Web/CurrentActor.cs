@@ -1,9 +1,11 @@
 using Valvra.Core;
 using Valvra.Infrastructure.Auditing;
+using Valvra.Infrastructure.Security;
+using Valvra.Infrastructure.Services;
 
 namespace Valvra.Web;
 
-public sealed class CurrentActor(IIdentityProvider identity, IDirectoryProvider directory, AuditService audit)
+public sealed class CurrentActor(IIdentityProvider identity, IDirectoryProvider directory, AuditService audit, VaultIntegrity integrity, GlobalRoleService globals)
 {
     private Actor? actor;
     public async Task<Actor> GetAsync(HttpContext context)
@@ -19,13 +21,15 @@ public sealed class CurrentActor(IIdentityProvider identity, IDirectoryProvider 
             throw;
         }
         if (!actor.IsEnabled) throw new AccessDeniedException();
+        if (actor.Provider != identity.ProviderId || actor.Provider != directory.ProviderId || actor.SubjectId != sid) throw new AccessDeniedException();
+        actor = await globals.ApplyAsync(actor, context.RequestAborted);
         return actor;
     }
 
     public async Task<T> RunAsync<T>(HttpContext context, Func<Actor, Task<T>> operation)
     {
         var user = await GetAsync(context);
-        try { return await operation(user); }
+        try { return await integrity.RunAsync(async () => await operation(await globals.ApplyAsync(user, context.RequestAborted)), context.RequestAborted); }
         catch (AccessDeniedException)
         {
             await audit.RecordAsync(user, "Access.Denied", null, "Denied", context.TraceIdentifier, context.RequestAborted);

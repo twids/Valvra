@@ -38,7 +38,7 @@ public static class PermissionEvaluator
     {
         const VaultPermission all = VaultPermission.Metadata | VaultPermission.ReadSecret
             | VaultPermission.Modify | VaultPermission.ManageAccess | VaultPermission.TestCredential;
-        if (!Enum.IsDefined(grant.TargetKind) || !Enum.IsDefined(grant.SubjectKind)
+        if (grant.TargetKind is not (TargetKind.Group or TargetKind.Resource) || !Enum.IsDefined(grant.SubjectKind)
             || grant.Permissions == VaultPermission.None || (grant.Permissions & ~all) != 0
             || string.IsNullOrWhiteSpace(grant.SubjectId) || string.IsNullOrWhiteSpace(grant.Provider))
             throw new VaultValidationException("Ogiltig tilldelning.");

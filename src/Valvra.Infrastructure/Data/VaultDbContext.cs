@@ -13,6 +13,7 @@ public sealed class VaultDbContext(DbContextOptions<VaultDbContext> options) : D
     public DbSet<SecretEntry> Secrets => Set<SecretEntry>();
     public DbSet<SecretVersion> SecretVersions => Set<SecretVersion>();
     public DbSet<SoftwareLicense> Licenses => Set<SoftwareLicense>();
+    public DbSet<LicenseVersion> LicenseVersions => Set<LicenseVersion>();
     public DbSet<LicenseAssignment> Assignments => Set<LicenseAssignment>();
     public DbSet<AuditRecord> Audit => Set<AuditRecord>();
 
@@ -25,6 +26,9 @@ public sealed class VaultDbContext(DbContextOptions<VaultDbContext> options) : D
         model.Entity<SecretVersion>().Property(x => x.EnvelopeJson).IsConcurrencyToken();
         model.Entity<SecretVersion>().HasOne<SecretEntry>().WithMany().HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<SoftwareLicense>().HasOne<VaultResource>().WithMany().HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<LicenseVersion>().HasKey(x => new { x.LicenseId, x.Version });
+        model.Entity<LicenseVersion>().HasOne<SoftwareLicense>().WithMany().HasForeignKey(x => x.LicenseId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<LicenseVersion>().Property(x => x.EnvelopeJson).IsConcurrencyToken();
         model.Entity<LicenseAssignment>().HasOne<SoftwareLicense>().WithMany().HasForeignKey(x => x.LicenseId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<LicenseAssignment>().HasOne<VaultResource>().WithMany().HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<AccessGrant>().HasIndex(x => new { x.TargetKind, x.TargetId });
@@ -36,7 +40,7 @@ public sealed class VaultDbContext(DbContextOptions<VaultDbContext> options) : D
         {
             foreach (var property in entity.GetProperties())
             {
-                if (property.ClrType == typeof(string) && property.Name is not "EnvelopeJson") property.SetMaxLength(property.Name == "DetailsJson" ? 4096 : 512);
+                if (property.ClrType == typeof(string) && property.Name is not ("EnvelopeJson" or "EventJson")) property.SetMaxLength(property.Name == "DetailsJson" ? 4096 : 512);
                 if (property.Name == "Revision") property.IsConcurrencyToken = true;
                 if (property.ClrType == typeof(DateTimeOffset) || property.ClrType == typeof(DateTimeOffset?))
                     property.SetValueConverter(new ValueConverter<DateTimeOffset, long>(value => value.UtcTicks,

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <!-- The demo has no reference to the production server, identity or storage libraries. -->
+    <Content Include="../../src/Valvra.Web/wwwroot/css/site.css" Link="wwwroot/css/site.css" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../src/Valvra.Web/wwwroot/css/compact.css" Link="wwwroot/css/compact.css" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../src/Valvra.Web/wwwroot/js/app.js" Link="wwwroot/js/app.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../src/Valvra.Web/wwwroot/js/navigation.js" Link="wwwroot/js/navigation.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../src/Valvra.Web/wwwroot/js/i18n.js" Link="wwwroot/js/i18n.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../src/Valvra.Web/wwwroot/i18n/*.json" Link="wwwroot/i18n/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Update="wwwroot/index.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

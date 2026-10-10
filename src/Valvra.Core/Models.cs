@@ -6,7 +6,9 @@ public enum VaultPermission
     None = 0, Metadata = 1, ReadSecret = 2, Modify = 4, ManageAccess = 8, TestCredential = 16
 }
 
-public enum TargetKind { Group, Resource }
+public enum TargetKind { Group, Resource, System }
+[Flags]
+public enum GlobalRole { None = 0, AccessAdministrator = 32, SystemAdministrator = 64, Auditor = 128 }
 public enum SubjectKind { User, Group }
 public enum AuditPhase { Event, Intent, Committed, Failed }
 
@@ -87,6 +89,17 @@ public sealed class SoftwareLicense
     public bool Deleted { get; set; }
 }
 
+public sealed class LicenseVersion
+{
+    public Guid LicenseId { get; set; }
+    public int Version { get; set; }
+    public string EnvelopeJson { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
+}
+
+public enum SecretChange { Preserve, Replace, Clear }
+
 public sealed class LicenseAssignment
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -113,4 +126,9 @@ public sealed class AuditRecord
     public string DetailsJson { get; set; } = "{}";
     public bool Delivered { get; set; }
     public string? ReceiptHash { get; set; }
+    public Guid InstallationId { get; set; }
+    public string EventJson { get; set; } = "";
+    public string PayloadHash { get; set; } = "";
+    public string SigningKeyId { get; set; } = "";
+    public byte[] Signature { get; set; } = [];
 }

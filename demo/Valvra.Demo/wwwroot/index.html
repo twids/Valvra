@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title data-i18n="Valvra · Syntetisk demo">Valvra · Syntetisk demo</title>
+    <link rel="stylesheet" href="/css/site.css" />
+    <link rel="stylesheet" href="/css/compact.css" />
+    <script src="/js/i18n.js" defer></script>
+    <script src="/js/navigation.js" defer></script>
+    <script src="/js/app.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main-content" data-i18n="Hoppa till huvudinnehållet">Hoppa till huvudinnehållet</a>
+    <aside class="sidebar">
+        <a class="brand" href="/" aria-label="Valvra startsida" data-i18n-aria-label="Valvra startsida"><span class="brand-mark">V</span>valvra<span class="brand-dot">.</span></a>
+        <p class="sidebar-caption" data-i18n="SYNTETISK DEMO">SYNTETISK DEMO</p>
+        <nav aria-label="Huvudmeny" data-i18n-aria-label="Huvudmeny">
+            <a class="nav-item active" data-view="vault" href="/resources"><span aria-hidden="true">◇</span><span data-i18n="Resurser">Resurser</span></a>
+            <a class="nav-item" data-view="groups" href="/groups"><span aria-hidden="true">▤</span><span data-i18n="Resursgrupper">Resursgrupper</span></a>
+            <a class="nav-item" data-view="licenses" href="/licenses"><span aria-hidden="true">▧</span><span data-i18n="Licensöversikt">Licensöversikt</span></a>
+            <a class="nav-item" data-view="audit" id="audit-nav" hidden href="/audit"><span aria-hidden="true">◷</span><span data-i18n="Auditlogg">Auditlogg</span></a>
+        </nav>
+        <div class="sidebar-footer"><span class="status-dot"></span><span data-i18n="Publika exempeldata">Publika exempeldata</span><p id="identity" data-i18n="Öppnar demo…">Öppnar demo…</p><span class="small" data-i18n="Öppen källkod · EUPL-1.2">Öppen källkod · EUPL-1.2</span></div>
+    </aside>
+    <main id="main-content" tabindex="-1">
+        <header class="topbar"><span><span>Demo</span> <span class="slash">/</span> <span id="breadcrumb" data-i18n="Resurser">Resurser</span></span><div class="language-control"><label for="language-select" data-i18n="Språk">Språk</label><select id="language-select" data-language-picker><option value="sv" lang="sv">Svenska</option><option value="en" lang="en">English</option></select></div><button class="quiet" id="refresh" data-i18n="Uppdatera">Uppdatera</button></header>
+        <div class="notice" role="note" data-i18n="DEMO · Fasta exempeldata. Inga riktiga lösenord, licenser, inloggningar eller databaser. Ändringar och installation är avstängda.">DEMO · Fasta exempeldata. Inga riktiga lösenord, licenser, inloggningar eller databaser. Ändringar och installation är avstängda.</div>
+        <div id="notice" class="notice" role="status" hidden></div>
+        <div id="page-error" class="notice error" role="alert" hidden></div>
+        <section class="page-heading"><div><p class="eyebrow">VALVRA DEMO</p><h1 id="page-title" tabindex="-1" data-i18n="Dina resurser">Dina resurser</h1><p id="page-description" data-i18n="Utforska gränssnittet med syntetiska exempel.">Utforska gränssnittet med syntetiska exempel.</p></div><div id="page-actions" class="actions"></div></section>
+        <section id="content" aria-labelledby="page-title"><div class="empty"><h2 data-i18n="Öppnar demo">Öppnar demo</h2><p data-i18n="Läser fasta exempeldata.">Läser fasta exempeldata.</p></div></section>
+        <footer class="main-footer" data-i18n="Syntetisk demo. Ingen riktig åtkomstkontroll, kryptering eller signerad audit körs här.">Syntetisk demo. Ingen riktig åtkomstkontroll, kryptering eller signerad audit körs här.</footer>
+    </main>
+    <dialog id="dialog" aria-labelledby="dialog-title" aria-modal="true"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title" tabindex="-1"></h2><button type="button" class="icon-button" id="close-dialog" aria-label="Stäng dialog" data-i18n-aria-label="Stäng dialog">×</button></div><div id="dialog-content"></div><p id="dialog-error" class="error" role="alert"></p><div id="dialog-actions" class="actions"></div></form></dialog>
+</body>
+</html>

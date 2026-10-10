@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Antiforgery;
 using Valvra.Core;
+using Valvra.Web.Localization;
 
 namespace Valvra.Web.Setup;
 
@@ -19,8 +20,9 @@ public static class SetupApi
             {
                 RequireToken(store, context);
                 var sid = identity.GetSubjectId(context.User) ?? throw new AccessDeniedException();
-                var result = await validator.ValidateAsync(body, sid, context.RequestAborted);
-                return Results.Ok(new { passed = result.Passed, checks = result.Checks });
+                var result = await validator.ValidateAsync(body, sid, context.RequestAborted, await store.InstallationIdAsync(context.RequestAborted), store.HasCheckpoint ? store.IntegrityDirectory : null);
+                var text = context.RequestServices.GetRequiredService<UiText>();
+                return Results.Ok(new { passed = result.Passed, checks = result.Checks.Select(x => Localize(x, text)) });
             }
             finally { SetupLock.Release(); }
         });
@@ -32,14 +34,22 @@ public static class SetupApi
             {
                 RequireToken(store, context);
                 var sid = identity.GetSubjectId(context.User) ?? throw new AccessDeniedException();
-                var result = await validator.ValidateAsync(body, sid, context.RequestAborted);
-                if (!result.Passed) return Results.BadRequest(new { error = "Installationskontrollerna måste passera innan konfigurationen sparas.", checks = result.Checks });
+                var result = await validator.ValidateAsync(body, sid, context.RequestAborted, await store.InstallationIdAsync(context.RequestAborted), store.HasCheckpoint ? store.IntegrityDirectory : null);
+                var text = context.RequestServices.GetRequiredService<UiText>();
+                if (!result.Passed) return Results.BadRequest(new { error = text.Get("Installationskontrollerna måste passera innan konfigurationen sparas."), checks = result.Checks.Select(x => Localize(x, text)) });
+                if (!store.HasCheckpoint) await validator.InitializeIntegrityAsync(result.Settings, store.IntegrityDirectory, context.RequestAborted);
+                if (!store.HasSettings) await validator.BootstrapAdministratorAsync(result.Settings, store.IntegrityDirectory, sid, context.TraceIdentifier, context.RequestAborted);
                 store.Save(result.Settings);
                 return Results.Ok(new { saved = true, restartRequired = true });
             }
             finally { SetupLock.Release(); }
         });
     }
+    private static object Localize(SetupCheck check, UiText text) => new
+    {
+        name = text.Get(check.Name), check.Passed, message = text.Get(check.Message),
+        nameKey = check.Name, messageKey = check.Message
+    };
     private static void RequireToken(SetupConfigurationStore store, HttpContext context)
     { if (!store.ValidateToken(context.Request.Headers["X-SETUP-TOKEN"].ToString())) throw new AccessDeniedException(); }
 }

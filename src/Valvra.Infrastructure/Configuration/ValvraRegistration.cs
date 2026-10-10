@@ -21,15 +21,25 @@ public sealed class VaultDatabaseOptions
 
 public static class ValvraRegistration
 {
-    public static IServiceCollection AddValvra(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddValvra(this IServiceCollection services, IConfiguration configuration, ProviderRegistry? modules = null)
     {
+        modules ??= ProviderRegistry.BuiltIn();
+        var identity = configuration.GetSection("Identity").Get<IdentitySelection>() ?? new(); modules.Validate(identity);
+        services.AddSingleton(modules); services.AddSingleton(identity);
         var database = configuration.GetSection("VaultDatabase").Get<VaultDatabaseOptions>() ?? new();
         var audit = configuration.GetSection("AuditDatabase").Get<AuditDatabaseOptions>() ?? new();
         var keys = configuration.GetSection("KeyProtection").Get<KeyProtectionOptions>() ?? new();
         var ad = configuration.GetSection("ActiveDirectory").Get<ActiveDirectoryOptions>() ?? new();
         var ldap = configuration.GetSection("LdapTests").Get<LdapTestOptions>() ?? new();
+        var integrity = configuration.GetSection("Integrity").Get<IntegrityOptions>() ?? new();
         services.AddSingleton(database); services.AddSingleton(audit); services.AddSingleton(keys);
         services.AddSingleton(ad); services.AddSingleton(ldap); services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(new DirectoryConfiguration(ad));
+        services.AddSingleton(integrity);
+        services.AddSingleton<IIntegritySigner, CertificateIntegritySigner>();
+        services.AddSingleton<IIntegrityCheckpointStore>(_ => new FileIntegrityCheckpointStore(Path.Combine(
+            Environment.GetEnvironmentVariable("VALVRA_CONFIG_DIR") ?? Path.Combine(AppContext.BaseDirectory, "App_Data"), "Integrity")));
+        services.AddScoped<VaultIntegrity>();
         services.AddDbContext<VaultDbContext>(options =>
         {
             switch (database.Provider)
@@ -39,9 +49,9 @@ public static class ValvraRegistration
                 default: throw new InvalidOperationException("Unsupported vault database provider.");
             }
         });
-        services.AddSingleton<IIdentityProvider, WindowsIdentityProvider>();
-        services.AddScoped<IDirectoryProvider>(_ => OperatingSystem.IsWindows()
-            ? new ActiveDirectoryProvider(ad) : throw new PlatformNotSupportedException("AD implementation requires Windows."));
+        services.AddSingleton<IIdentityProvider>(sp => modules.Login(identity.LoginProviderId).Create(sp));
+        services.AddScoped<IDirectoryProvider>(sp => modules.Directory(identity.DirectoryProviderId).Create(sp.GetRequiredService<DirectoryConfiguration>().Current));
+        services.AddScoped<GlobalRoleService>();
         services.AddScoped<ICredentialTester>(_ => OperatingSystem.IsWindows()
             ? new LdapCredentialTester(ldap) : throw new PlatformNotSupportedException("LDAP test implementation requires Windows."));
         services.AddSingleton<IKeyProtector, CertificateKeyProtector>();
@@ -49,7 +59,7 @@ public static class ValvraRegistration
         services.AddSingleton<IAuditSigner, CertificateAuditSigner>();
         services.AddScoped<IAuditTransport, DatabaseAuditTransport>();
         services.AddScoped<IAuditReader, AuditReader>(); services.AddScoped<AuditService>();
-        services.AddScoped<AccessService>(); services.AddScoped<VaultService>();
+        services.AddScoped<AccessService>(); services.AddScoped<VaultOperations>(); services.AddScoped<VaultService>();
         services.AddScoped<KeyRotationService>();
         services.AddSingleton<CredentialTestThrottle>(); services.AddScoped<CredentialTestService>();
         return services;
@@ -57,18 +67,23 @@ public static class ValvraRegistration
 
     public static void ValidateProduction(IConfiguration configuration)
     {
+        ProviderRegistry.BuiltIn().Validate(configuration.GetSection("Identity").Get<IdentitySelection>() ?? new());
         var vault = configuration.GetSection("VaultDatabase").Get<VaultDatabaseOptions>() ?? new();
         var audit = configuration.GetSection("AuditDatabase").Get<AuditDatabaseOptions>() ?? new();
         var ad = configuration.GetSection("ActiveDirectory").Get<ActiveDirectoryOptions>() ?? new();
         var keys = configuration.GetSection("KeyProtection").Get<KeyProtectionOptions>() ?? new();
+        var integrity = configuration.GetSection("Integrity").Get<IntegrityOptions>() ?? new();
+        if (integrity.InstallationId == Guid.Empty || audit.InstallationId != integrity.InstallationId
+            || string.IsNullOrWhiteSpace(integrity.SigningCertificateThumbprint)
+            || new[] { keys.ActiveThumbprint, audit.SigningCertificateThumbprint, integrity.SigningCertificateThumbprint }
+                .Select(x => x.Replace(" ", "", StringComparison.Ordinal).ToUpperInvariant()).Distinct().Count() != 3)
+            throw new InvalidOperationException("Configure installation identity and three separate encryption, audit and integrity certificates.");
         var vaultName = DatabaseName(vault.Provider, vault.ConnectionString);
         var auditName = DatabaseName(audit.Provider, audit.WriterConnectionString);
         var readName = DatabaseName(audit.Provider, audit.ReaderConnectionString);
-        if (vaultName == auditName || auditName != readName
-            || audit.WriterConnectionString == audit.ReaderConnectionString && string.IsNullOrWhiteSpace(audit.ReaderWindowsCredentials?.Username))
-            throw new InvalidOperationException("Vault and audit databases must be separate; audit reader and writer must target the same audit database with separate identities.");
+        if (vaultName == auditName || auditName != readName)
+            throw new InvalidOperationException("Vault and audit databases must be separate; audit reader and writer must target the same audit database.");
         if (string.IsNullOrWhiteSpace(ad.Server) || string.IsNullOrWhiteSpace(ad.BaseDn)
-            || string.IsNullOrWhiteSpace(ad.AccessAdministratorGroupSid) || string.IsNullOrWhiteSpace(ad.AuditorGroupSid)
             || string.IsNullOrWhiteSpace(keys.ActiveThumbprint) || string.IsNullOrWhiteSpace(audit.SigningCertificateThumbprint)
             || keys.ActiveThumbprint.Replace(" ", "", StringComparison.Ordinal).Equals(audit.SigningCertificateThumbprint.Replace(" ", "", StringComparison.Ordinal), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Configure AD groups and separate encryption/audit signing certificates.");
