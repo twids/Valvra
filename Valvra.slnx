@@ -7,4 +7,5 @@
     <Project Path="src/Valvra.Web/Valvra.Web.csproj" />
   </Folder>
   <Folder Name="/tests/"><Project Path="tests/Valvra.Tests/Valvra.Tests.csproj" /></Folder>
+  <Folder Name="/demo/"><Project Path="demo/Valvra.Demo/Valvra.Demo.csproj" /></Folder>
 </Solution>

@@ -1,0 +1,25 @@
+# Disposable integration-test databases. Synthetic data only. No persistent volumes,
+# external networks or remotely exposed ports. Password is supplied outside Git.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: valvra-test-postgres
+    environment:
+      POSTGRES_PASSWORD: ${VALVRA_TEST_PASSWORD:?Provide a disposable test password}
+    ports: ["127.0.0.1:15434:5432"]
+    tmpfs: ["/var/lib/postgresql/data:rw,size=536870912"]
+    mem_limit: 512m
+    cpus: 1
+    restart: "no"
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: valvra-test-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${VALVRA_TEST_PASSWORD:?Provide a disposable test password}
+      MSSQL_MEMORY_LIMIT_MB: "2048"
+    ports: ["127.0.0.1:15433:1433"]
+    tmpfs: ["/var/opt/mssql:rw,size=2147483648,uid=10001,gid=0,mode=0770"]
+    mem_limit: 3g
+    cpus: 2
+    restart: "no"

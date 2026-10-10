@@ -1,0 +1,51 @@
+/* Tätare arbetsyta. Behåll textstorlek, fokusmarkeringar och kontrollernas
+   minsta klickytor från site.css; minska främst den dekorativa luften. */
+.topbar { min-height: 60px; padding-block: 8px; }
+.page-heading { padding-block: 24px 18px; gap: 16px; }
+.page-heading h1 { margin-bottom: 8px; }
+.toolbar { gap: 10px; margin-bottom: 14px; }
+.actions { gap: 6px; }
+
+.cards {
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 12px;
+}
+.card { padding: 16px; border-radius: 10px; }
+.card-top { margin-bottom: 10px; }
+.resource-icon { width: 32px; height: 32px; margin-bottom: 0; }
+.card p { margin: 4px 0 10px; }
+.card .actions { margin-top: 10px; }
+
+.panel { margin-bottom: 16px; }
+.panel-heading { padding: 12px 16px; gap: 12px; }
+.panel-body { padding: 16px; }
+th { padding: 9px 16px; }
+td { padding: 10px 16px; }
+.group-item { padding: 10px 16px; gap: 10px; }
+.group-item p { margin-top: 2px; }
+.summary-grid { gap: 12px; margin-bottom: 16px; }
+.summary-card { padding: 14px; }
+.empty { padding: 32px 20px; }
+.main-footer { padding-block: 20px; }
+.audit-filters { gap: 0 14px; margin-bottom: 14px; }
+
+dialog { padding: 20px; }
+.dialog-heading { margin-bottom: 14px; }
+label { margin-top: 12px; }
+.hint { margin-block: 8px; }
+.setup-shell { padding-block: 24px; }
+.setup-header { padding-bottom: 18px; }
+.setup-intro { padding-block: 24px 18px; }
+.setup-steps { margin-bottom: 16px; }
+.setup-steps li { padding: 10px; }
+.connection-panel { padding: 16px; margin-block: 16px; }
+.setup-navigation { padding: 14px 16px; }
+.setup-check { padding-block: 10px; }
+
+@media (max-width: 650px) {
+    .topbar { min-height: 52px; }
+    .page-heading { padding-block: 20px 16px; }
+    .cards { grid-template-columns: 1fr; }
+    td, th { padding: 10px 12px; }
+    dialog { padding: 18px; }
+}

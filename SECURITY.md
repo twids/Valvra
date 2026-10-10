@@ -10,7 +10,7 @@ Include affected versions, reproduction steps using synthetic credentials, secur
 
 ## Supported versions
 
-The project is currently pre-release. There is no production support commitment yet. Security fixes target the current main branch; tagged supported releases and their maintenance periods will be documented before a stable release.
+Security fixes target the latest 1.0.x release and the default branch. Install the latest patch release; earlier preview versions are not maintained. This community project does not provide a production support SLA or a guaranteed maintenance period.
 
 ## Disclosure
 

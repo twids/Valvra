@@ -16,7 +16,7 @@ public sealed record RevealRequest(int? Version = null, bool Copy = false);
 public sealed record RestoreRequest(int Version, long Revision);
 public sealed record DeleteRequest(bool Deleted, long Revision);
 public sealed record LicenseRequest(Guid ResourceId, string Product, string Vendor, string PurchaseReference,
-    int Seats, DateTimeOffset? ExpiresAt, LicensePayload Payload, long Revision = 0);
+    int Seats, DateTimeOffset? ExpiresAt, LicensePayload? Payload, long Revision = 0, SecretChange SecretChange = SecretChange.Preserve);
 
 public static class VaultApi
 {
@@ -35,7 +35,7 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor =>
             {
                 await audit.RecordAsync(actor, "Session.Identified", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
-                return Results.Ok(new { actor.DisplayName, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor,
+                return Results.Ok(new { actor.DisplayName, actor.Provider, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor, actor.IsSystemAdministrator,
                     csrfToken = csrf.GetAndStoreTokens(ctx).RequestToken });
             }));
 
@@ -106,12 +106,16 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => Results.Ok(await vault.LicensesAsync(actor, resourceId, ctx.RequestAborted))));
         api.MapPost("/licenses", async (LicenseRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.SaveLicenseAsync(actor, null, body.ResourceId, body.Product,
-                body.Vendor, body.PurchaseReference, body.Seats, body.ExpiresAt, body.Payload, 0, ctx.TraceIdentifier, ctx.RequestAborted) })));
+                body.Vendor, body.PurchaseReference, body.Seats, body.ExpiresAt, body.Payload, 0, ctx.TraceIdentifier, ctx.RequestAborted, body.SecretChange) })));
         api.MapPost("/licenses/{id:guid}/update", async (Guid id, LicenseRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.SaveLicenseAsync(actor, id, body.ResourceId, body.Product,
-                body.Vendor, body.PurchaseReference, body.Seats, body.ExpiresAt, body.Payload, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted) })));
-        api.MapPost("/licenses/{id:guid}/reveal", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>
-            await current.RunAsync(ctx, async actor => Results.Ok(await vault.RevealLicenseAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted))));
+                body.Vendor, body.PurchaseReference, body.Seats, body.ExpiresAt, body.Payload, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted, body.SecretChange) })));
+        api.MapPost("/licenses/{id:guid}/reveal", async (Guid id, RevealRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
+            await current.RunAsync(ctx, async actor => Results.Ok(await vault.RevealLicenseAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted, body.Version))));
+        api.MapGet("/licenses/{id:guid}/versions", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>
+            await current.RunAsync(ctx, async actor => Results.Ok(await vault.LicenseVersionsAsync(actor, id, ctx.RequestAborted))));
+        api.MapPost("/licenses/{id:guid}/restore", async (Guid id, RestoreRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
+            await current.RunAsync(ctx, async actor => { await vault.RestoreLicenseVersionAsync(actor, id, body.Version, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
         api.MapGet("/licenses/{id:guid}/assignments", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await vault.AssignmentsAsync(actor, id, ctx.RequestAborted))));
         api.MapPost("/assignments", async (LicenseAssignment body, HttpContext ctx, CurrentActor current, VaultService vault) =>
@@ -120,13 +124,17 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => { await vault.UnassignLicenseAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
 
         api.MapGet("/audit", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, HttpContext ctx, CurrentActor current, IAuditReader reader) =>
-            await current.RunAsync(ctx, async actor => Results.Ok(await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0), ctx.RequestAborted))));
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, HttpContext ctx, CurrentActor current, IAuditReader reader) =>
+            await current.RunAsync(ctx, async actor => Results.Ok(await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
+                resourceId, groupId, includeSubgroups ?? true), ctx.RequestAborted))));
+        api.MapGet("/audit/targets", async (HttpContext ctx, CurrentActor current, IAuditReader reader) =>
+            await current.RunAsync(ctx, async actor => Results.Ok(await reader.ReadTargetsAsync(actor, ctx.RequestAborted))));
         api.MapGet("/audit/export", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit) =>
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit) =>
             await current.RunAsync(ctx, async actor =>
             {
-                var events = await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0), ctx.RequestAborted);
+                var events = await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
+                    resourceId, groupId, includeSubgroups ?? true), ctx.RequestAborted);
                 await audit.RecordAsync(actor, "Audit.Export", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
                 return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(events), "application/json", "valvra-audit.json");
             }));

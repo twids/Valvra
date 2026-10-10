@@ -3,7 +3,7 @@ using System.Security.Claims;
 namespace Valvra.Core;
 
 public sealed record Actor(string Provider, string SubjectId, string DisplayName,
-    IReadOnlySet<string> GroupIds, bool IsEnabled, bool IsAccessAdministrator, bool IsAuditor);
+    IReadOnlySet<string> GroupIds, bool IsEnabled, bool IsAccessAdministrator, bool IsAuditor, bool IsSystemAdministrator = false);
 public sealed record DirectorySubject(string Provider, string Id, string Name, SubjectKind Kind);
 
 public interface IIdentityProvider
@@ -32,19 +32,28 @@ public interface IKeyProtector
 
 public interface ISecretCipher
 {
-    string Encrypt<T>(T payload, Guid id, long version, string purpose);
-    T Decrypt<T>(string envelope, Guid id, long version, string purpose);
+    string Encrypt<T>(T payload, Guid id, long version, string purpose, Guid resourceId, Guid installationId);
+    T Decrypt<T>(string envelope, Guid id, long version, string purpose, Guid resourceId, Guid installationId);
     string Rewrap(string envelope);
 }
 
 public sealed record AuditEvent(Guid Id, Guid OperationId, DateTimeOffset Timestamp,
     string ActorProvider, string ActorId, string Action, Guid? TargetId,
-    AuditPhase Phase, string Outcome, string CorrelationId, string DetailsJson = "{}");
+    AuditPhase Phase, string Outcome, string CorrelationId, string DetailsJson = "{}", Guid InstallationId = default, int Format = 2, AuditScope? Scope = null);
+public sealed record AuditScopeGroup(Guid Id, string Name);
+public sealed record AuditScope(Guid? ResourceId, string? ResourceName, Guid GroupId, AuditScopeGroup[] GroupPath);
 public sealed record AuditReceipt(Guid EventId, string Hash);
+public sealed record SignedAuditEvent(AuditEvent Event, string PayloadHash, string SigningKeyId, byte[] Signature, byte[] Payload);
+
+public interface IAuditSigner
+{
+    SignedAuditEvent Sign(AuditEvent value);
+    bool Verify(SignedAuditEvent value);
+}
 
 public interface IAuditTransport
 {
-    Task<AuditReceipt> SendAsync(AuditEvent auditEvent, CancellationToken cancellationToken);
+    Task<AuditReceipt> SendAsync(SignedAuditEvent auditEvent, CancellationToken cancellationToken);
 }
 
 public enum CredentialTestResult { Success, Rejected, ConnectionFailed }

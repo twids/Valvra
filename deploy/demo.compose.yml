@@ -1,0 +1,16 @@
+services:
+  demo:
+    image: local/valvra-demo:security-review
+    container_name: valvra-demo
+    restart: unless-stopped
+    ports: ["127.0.0.1:15880:8080"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16777216"]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      DOTNET_EnableDiagnostics: "0"
