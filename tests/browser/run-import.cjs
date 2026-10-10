@@ -1,5 +1,6 @@
 const {spawn, spawnSync} = require('node:child_process');
 const path = require('node:path');
+const {stopProcess} = require('./stop-process.cjs');
 const root = path.resolve(__dirname,'../..');
 const build = spawnSync('dotnet',['build','tests/Valvra.Preview','-c','Release','-m:1','-p:OutDir='+path.join(root,'artifacts','import-preview')+path.sep],{cwd:root,stdio:'inherit'});
 if(build.error) { console.error(build.error.message); process.exit(1); }
@@ -50,7 +51,7 @@ async function main() {
             if (host.exitCode !== null || host.signalCode !== null) tests.kill();
         });
     } finally {
-        stop();
+        await Promise.all([stopProcess(tests), stopProcess(host)]);
         process.removeListener('SIGINT', stop);
         process.removeListener('SIGTERM', stop);
     }
