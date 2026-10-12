@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.2 – 2026-10-12
+
+- Add an explicit SQL Server **Trust server certificate** option to setup, disabled by default. TLS encryption remains mandatory; enabling the option bypasses certificate chain and hostname validation.
+- Add SQL Server **MultiSubnetFailover** and a bounded connection timeout (1–120 seconds, default 10) under advanced database connection options.
+- Apply the selected options consistently to database tests, temporary schema-installation connections and saved runtime connections. Separate audit readers can use independent options; shared readers inherit the writer's settings.
+- Include Swedish/English help, a review of the selected options, provider-switch handling and regression coverage. PostgreSQL continues to require full certificate validation.
+
+Package: `Valvra-1.2.2-win-x64.zip` and `SHA256SUMS.txt`. No database schema changes or data conversion are required. Existing installations retain their connection settings. Preserve protected installation state, checkpoints and certificates; follow the in-place upgrade checklist.
+
 ## 1.2.1 – 2026-10-12
 
 - Update direct and transitive NuGet dependencies to current stable versions, including Npgsql, SQL Server client libraries, identity libraries, Serilog and test tooling.

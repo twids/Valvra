@@ -351,6 +351,50 @@ test('installation guide: database test works before AD and certificates and cle
     await expect(page.getByRole('button', {name: 'Save and finish setup', exact: true})).toBeDisabled();
 });
 
+test('installation guide: advanced database options are explicit and follow the provider', async ({page}) => {
+    await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: true, csrfToken: 'synthetic'}}));
+    let payload;
+    await page.route('**/api/setup/test-databases', route => {
+        payload = route.request().postDataJSON();
+        return route.fulfill({json: {checks: []}});
+    });
+    await page.goto('/setup');
+    await page.locator('#setup-code').fill('synthetic-code');
+    await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
+    await page.locator('[data-language-picker]').selectOption('en');
+    for (const prefix of ['vault', 'writer']) await page.locator('#setup-' + prefix + 'Server').fill('sql.example.invalid');
+    await page.getByRole('button', {name: 'Test database', exact: true}).click();
+    await expect.poll(() => payload?.vault.trustServerCertificate).toBe(false);
+    expect(payload.vault.multiSubnetFailover).toBe(false);
+    expect(payload.vault.connectTimeoutSeconds).toBe(10);
+    const advanced = page.locator('#setup-vaultTrustServerCertificate').locator('xpath=ancestor::details');
+    await advanced.locator('summary').click();
+    await page.locator('#setup-vaultTrustServerCertificate').check();
+    await page.locator('#setup-vaultMultiSubnetFailover').check();
+    await page.locator('#setup-vaultConnectTimeoutSeconds').fill('45');
+    await page.locator('#setup-provision').check();
+    for (const prefix of ['vaultAdmin', 'auditAdmin']) await page.locator('#setup-' + prefix + 'Authentication').selectOption('Windows');
+    await page.getByRole('button', {name: 'Test database', exact: true}).click();
+    await expect.poll(() => payload?.vault.trustServerCertificate).toBe(true);
+    expect(payload.vault.multiSubnetFailover).toBe(true);
+    expect(payload.vault.connectTimeoutSeconds).toBe(45);
+    expect(payload.vaultProvisioning.trustServerCertificate).toBe(true);
+    expect(payload.vaultProvisioning.multiSubnetFailover).toBe(true);
+    expect(payload.vaultProvisioning.connectTimeoutSeconds).toBe(45);
+    expect(payload.auditReader).toEqual(payload.auditWriter);
+    await audit(page);
+    await page.locator('#setup-vaultProvider').selectOption('PostgreSql');
+    await expect(page.locator('#setup-vaultTrustServerCertificate')).toBeHidden();
+    await expect(page.locator('#setup-vaultTrustServerCertificate')).not.toBeChecked();
+    await page.getByRole('button', {name: 'Test database', exact: true}).click();
+    await expect.poll(() => payload?.vault.provider).toBe('PostgreSql');
+    expect(payload.vault.trustServerCertificate).toBe(false);
+    expect(payload.vault.multiSubnetFailover).toBe(false);
+    await page.locator('#setup-vaultProvider').selectOption('SqlServer');
+    await expect(page.locator('#setup-vaultTrustServerCertificate')).toBeVisible();
+    await expect(page.locator('#setup-vaultTrustServerCertificate')).not.toBeChecked();
+});
+
 test('installation guide: current service account hides credentials for runtime and schema setup', async ({page}) => {
     await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: true, csrfToken: 'synthetic'}}));
     await page.goto('/setup');

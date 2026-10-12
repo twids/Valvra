@@ -54,8 +54,19 @@
         if (prefix !== "reader") card.append(node("p", t("Integrated Security använder Windows-kontot som kör Valvra (IIS-apppoolens tjänstekonto), inte personen som använder installationsguiden. Inget kontolösenord behöver anges."), "hint"));
         field(card, prefix + "Username", t("Databasanvändare (vid lösenord eller PostgreSQL-roll)"));
         field(card, prefix + "Password", t("Databaslösenord"), "", "password");
+        const advanced = optional(card, t("Avancerade anslutningsval"));
+        const timeout = field(advanced, prefix + "ConnectTimeoutSeconds", t("Anslutningstimeout (sekunder)"), "10", "number", t("1–120 sekunder. Gäller anslutningen, inte tiden för databasfrågor."));
+        timeout.min = "1"; timeout.max = "120"; timeout.required = true;
+        const sqlOptions = node("div"); advanced.append(sqlOptions);
+        field(sqlOptions, prefix + "TrustServerCertificate", "Trust server certificate", "", "checkbox", t("Anslutningen krypteras, men servercertifikatets giltighet och namn kontrolleras inte. Använd endast för en server du litar på. Avmarkerat som standard."));
+        field(sqlOptions, prefix + "MultiSubnetFailover", "MultiSubnetFailover", "", "checkbox", t("För SQL Server Always On eller failover-kluster via TCP. Avmarkerat som standard."));
         const update = () => {
             const postgres = fields[prefix + "Provider"].value === "PostgreSql";
+            sqlOptions.hidden = postgres;
+            for (const suffix of ["TrustServerCertificate", "MultiSubnetFailover"]) {
+                fields[prefix + suffix].disabled = postgres;
+                if (postgres) fields[prefix + suffix].checked = false;
+            }
             updateCredentials(card, prefix, postgres);
             const port = fields[prefix + "Port"];
             port.disabled = !postgres;
@@ -63,12 +74,15 @@
             card.querySelector('label[for="' + port.id + '"]').hidden = !postgres;
             i18n.setText(card.querySelector("#setup-" + prefix + "Server-help"), postgres
                 ? t("Använd serverns fullständiga DNS-namn. Ett betrott TLS-certifikat krävs.")
-                : t("SQL Server: ange serverns DNS-namn, server\\instans eller server,port. Ett betrott TLS-certifikat krävs."));
+                : t("SQL Server: ange serverns DNS-namn, server\\instans eller server,port. Certifikatval finns under avancerade anslutningsval."));
         };
         fields[prefix + "Authentication"].addEventListener("change", update); fields[prefix + "Provider"].addEventListener("change", update); update(); parent.append(card);
     }
     function value(key) { return fields[key].value.trim(); }
     function database(prefix) { return { provider: value(prefix + "Provider"), server: value(prefix + "Server"), database: value(prefix + "Database"), port: Number(value(prefix + "Port")),
+        trustServerCertificate: value(prefix + "Provider") === "SqlServer" && fields[prefix + "TrustServerCertificate"].checked,
+        multiSubnetFailover: value(prefix + "Provider") === "SqlServer" && fields[prefix + "MultiSubnetFailover"].checked,
+        connectTimeoutSeconds: Number(value(prefix + "ConnectTimeoutSeconds")),
         authentication: value(prefix + "Authentication"), username: fields[prefix + "Username"].disabled ? "" : value(prefix + "Username"), password: fields[prefix + "Password"].disabled ? "" : fields[prefix + "Password"].value }; }
     function request() {
         const vault = database("vault"), writer = database("writer"), separateReader = fields.separateReader.checked, reader = separateReader ? database("reader") : writer;
@@ -124,6 +138,7 @@
         if (separateReader.checked) {
             updateCredentials(readerFields, "reader", fields.readerProvider.value === "PostgreSql");
             fields.readerPort.disabled = fields.readerProvider.value !== "PostgreSql";
+            for (const suffix of ["TrustServerCertificate", "MultiSubnetFailover"]) fields["reader" + suffix].disabled = fields.readerProvider.value !== "SqlServer";
         } else readerFields.querySelectorAll('input[type="password"]').forEach(input => input.value = "");
     };
     separateReader.addEventListener("change", updateReader); updateReader();
@@ -218,7 +233,15 @@
         rows.forEach((entries, index) => {
             const card = node("section", undefined, "connection-panel"); card.append(node("h3", sections[index].querySelector("h2").textContent), editButton(index));
             const list = node("dl"); entries.forEach(([label, text]) => list.append(node("dt", label), node("dd", text || t("Saknas")))); card.append(list);
-            if (index === 1) card.append(node("p", fields.provision.checked ? t("Installera / uppdatera scheman med tillfälliga installationskonton") : t("Schemainstallation är inte vald."), "hint"));
+            if (index === 1) {
+                for (const prefix of ["vault", "writer", ...(fields.separateReader.checked ? ["reader"] : [])]) {
+                    const db = database(prefix);
+                    card.append(node("p", [t(prefix === "vault" ? "Valvdatabas" : prefix === "writer" ? "Auditdatabas (SELECT och INSERT)" : "Audit – läskoppling (endast SELECT)"),
+                        t("Anslutningstimeout (sekunder)") + ": " + db.connectTimeoutSeconds,
+                        db.provider === "SqlServer" ? "TrustServerCertificate=" + db.trustServerCertificate + "; MultiSubnetFailover=" + db.multiSubnetFailover : "SSL Mode=VerifyFull"].join(" · "), "hint"));
+                }
+                card.append(node("p", fields.provision.checked ? t("Installera / uppdatera scheman med tillfälliga installationskonton") : t("Schemainstallation är inte vald."), "hint"));
+            }
             review.append(card);
         });
     }

@@ -97,9 +97,9 @@ public static class ValvraRegistration
         if (provider == "SqlServer")
         {
             var builder = new SqlConnectionStringBuilder(connectionString);
-            if (string.IsNullOrWhiteSpace(builder.InitialCatalog) || builder.TrustServerCertificate
+            if (string.IsNullOrWhiteSpace(builder.InitialCatalog)
                 || !(builder.Encrypt.Equals(SqlConnectionEncryptOption.Mandatory) || builder.Encrypt.Equals(SqlConnectionEncryptOption.Strict)))
-                throw new InvalidOperationException("SQL Server requires an explicit database, encryption and trusted certificate validation.");
+                throw new InvalidOperationException("SQL Server requires an explicit database and encryption.");
             return "sql|" + builder.DataSource.ToUpperInvariant() + "|" + builder.InitialCatalog.ToUpperInvariant();
         }
         if (provider == "PostgreSql")
