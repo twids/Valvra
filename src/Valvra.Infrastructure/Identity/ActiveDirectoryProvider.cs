@@ -96,14 +96,8 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
             || string.IsNullOrWhiteSpace(options.BaseDn) || options.Port is < 1 or > 65535
             || options.TimeoutSeconds is < 1 or > 30)
             throw new VaultUnavailableException("Active Directory är inte korrekt konfigurerat.");
-        var connection = new LdapConnection(new LdapDirectoryIdentifier(options.Server, options.Port),
-            CredentialCache.DefaultNetworkCredentials, AuthType.Negotiate)
-        { Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds) };
-        connection.SessionOptions.ProtocolVersion = 3;
-        connection.SessionOptions.SecureSocketLayer = true;
-        connection.SessionOptions.Signing = true;
-        connection.SessionOptions.Sealing = true;
-        connection.SessionOptions.ReferralChasing = ReferralChasingOptions.None;
+        var connection = LdapsConnection.Create(options.Server, options.Port,
+            CredentialCache.DefaultNetworkCredentials, options.TimeoutSeconds);
         try { connection.Bind(); return connection; }
         catch { connection.Dispose(); throw; }
     }

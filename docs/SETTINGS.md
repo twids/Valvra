@@ -6,6 +6,8 @@
 
 The system administrator can change the server, lookup base, user search base and security group search base. **Advanced connection** contains the LDAPS port and timeout. A trusted TLS certificate is required; certificate validation cannot be disabled. The connection uses the service's Windows identity and stores no LDAP password.
 
+AD lookups and approved LDAP credential tests use Negotiate authentication over LDAPS. TLS supplies transport integrity and confidentiality; SASL signing/sealing options are not applied to the SSL session because Windows rejects that combination.
+
 | Field | Purpose |
 | --- | --- |
 | Lookup base (`BaseDn`) | Signed-in account and current group memberships, including nested groups and the primary security group. |
