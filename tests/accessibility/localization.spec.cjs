@@ -149,7 +149,9 @@ test('validated setup results switch language without discarding configuration o
     await page.getByRole('button',{name:'Next →',exact:true}).click();
     for(const field of ['vaultServer','writerServer']) await page.locator('#setup-'+field).fill('synthetic.example.invalid');
     await page.getByRole('button',{name:'Next →',exact:true}).click();
-    for(const field of ['adServer','baseDn','encryptionThumbprint','auditThumbprint','integrityThumbprint']) await page.locator('#setup-'+field).fill('synthetic');
+    for(const field of ['adServer','baseDn']) await page.locator('#setup-'+field).fill('synthetic');
+    await page.getByRole('button',{name:'Next →',exact:true}).click();
+    for(const field of ['encryptionThumbprint','auditThumbprint','integrityThumbprint']) await page.locator('#setup-'+field).fill('synthetic');
     await page.getByRole('button',{name:'Next →',exact:true}).click();
     await page.getByRole('button',{name:'Test connections and permissions',exact:true}).click();
     await expect(page.locator('.setup-check strong')).toHaveText('Passed: Configuration'); expect(requestLanguage).toBe('en');
