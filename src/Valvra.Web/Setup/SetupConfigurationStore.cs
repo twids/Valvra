@@ -31,8 +31,39 @@ public sealed class SetupConfigurationStore(string directory)
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("Valvra.Configuration.v1");
     private string SettingsPath => Path.Combine(directory, "installation.bin");
     private string BootstrapPath => Path.Combine(directory, "setup-token.sha256");
+    private string DraftPath => Path.Combine(directory, "setup-draft.bin");
+    private static readonly byte[] DraftEntropy = Encoding.UTF8.GetBytes("Valvra.SetupDraft.v1");
     public bool HasSettings => File.Exists(SettingsPath);
     public bool CanConfigure => File.Exists(BootstrapPath);
+    public SetupDraft? ReadDraft()
+    {
+        lock (writeLock)
+        {
+            if (!CanConfigure || !File.Exists(DraftPath)) return null;
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Configuration protection requires Windows DPAPI.");
+            var plaintext = ProtectedData.Unprotect(File.ReadAllBytes(DraftPath), DraftEntropy, DataProtectionScope.LocalMachine);
+            try { return JsonSerializer.Deserialize<SetupDraft>(plaintext)?.Sanitized(); }
+            finally { CryptographicOperations.ZeroMemory(plaintext); }
+        }
+    }
+    public void SaveDraft(SetupDraft draft)
+    {
+        lock (writeLock)
+        {
+            if (!CanConfigure) throw new AccessDeniedException();
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Configuration protection requires Windows DPAPI.");
+            var plaintext = JsonSerializer.SerializeToUtf8Bytes(draft.Sanitized());
+            try
+            {
+                var protectedBytes = ProtectedData.Protect(plaintext, DraftEntropy, DataProtectionScope.LocalMachine);
+                var temporary = DraftPath + ".new";
+                using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+                { file.Write(protectedBytes); file.Flush(true); }
+                File.Move(temporary, DraftPath, overwrite: true);
+            }
+            finally { CryptographicOperations.ZeroMemory(plaintext); }
+        }
+    }
     public InstallationSettings? ReadSettings()
     { using var stream = Load(); return stream is null ? null : JsonSerializer.Deserialize<InstallationSettings>(stream); }
     public async Task<Guid> InstallationIdAsync(CancellationToken ct)
@@ -82,6 +113,7 @@ public sealed class SetupConfigurationStore(string directory)
             using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
             { file.Write(protectedBytes); file.Flush(true); }
             File.Move(temporary, SettingsPath, overwrite: true);
+            File.Delete(DraftPath);
             File.Delete(BootstrapPath);
         }
         finally { CryptographicOperations.ZeroMemory(plaintext); }

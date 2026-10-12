@@ -109,6 +109,13 @@
         }
         return result;
     }
+    const excludedDraftFields = new Set(["code", "vaultPassword", "writerPassword", "readerPassword", "readerWindowsPassword", "vaultAdminPassword", "auditAdminPassword"]);
+    function draft() {
+        return { step, fields: Object.fromEntries(Object.entries(fields)
+            .filter(([key, input]) => !excludedDraftFields.has(key) && input.type !== "password")
+            .map(([key, input]) => [key, input.type === "checkbox" ? String(input.checked) : input.value])) };
+    }
+    async function saveDraft() { await post("draft", draft()); }
     function show(focus = false) {
         sections.forEach((s, i) => s.hidden = i !== step); Array.from($("steps").children).forEach((s, i) => { s.classList.toggle("current", i === step); const button = s.querySelector("button"); if (i === step) button.setAttribute("aria-current", "step"); else button.removeAttribute("aria-current"); });
         $("previous").disabled = step === 0; $("next").hidden = step === sections.length - 1;
@@ -166,6 +173,7 @@
         testDatabases.disabled = true; databaseResults.setAttribute("aria-busy", "true");
         databaseResults.replaceChildren(node("p", t("Testar databasanslutningar…")));
         try {
+            await saveDraft();
             const result = await post("test-databases", {vault, auditWriter, auditReader, useSeparateAuditReader, auditReaderWindowsCredentials, provisionSchemas, vaultProvisioning, auditProvisioning});
             if (revision === databaseRevision) renderChecks(result.checks, databaseResults);
         } catch (error) {
@@ -271,7 +279,7 @@
         if (invalid) { step = sections.findIndex(s => s.contains(invalid)); show(); invalid.reportValidity(); return; }
         const testedRevision = revision; passed = false;
         validate.disabled = finish.disabled = true; results.setAttribute("aria-busy", "true"); notice(fields.provision.checked ? t("Förbereder scheman och testar säkerhetsinställningar…") : t("Testar anslutningar och säkerhetsinställningar…"));
-        try { const result = await post("validate"); if (testedRevision !== revision) return; renderChecks(result.checks);
+        try { const body = request(); await saveDraft(); const result = await post("validate", body); if (testedRevision !== revision) return; renderChecks(result.checks);
             passed = result.passed; finish.disabled = !passed; if (passed) { fields.provision.checked = false; adminFields.hidden = true; fields.vaultAdminPassword.value = fields.auditAdminPassword.value = ""; } notice(passed ? t("Alla kontroller passerade. Spara konfigurationen för att slutföra.") : t("Åtgärda de markerade kontrollerna och försök igen."), !passed);
             renderReview();
         } catch (error) { if (testedRevision === revision) { if (error.checks) renderChecks(error.checks); notice(error.message, true); } } finally { validate.disabled = false; results.setAttribute("aria-busy", "false"); }
@@ -290,6 +298,41 @@
     $("setup-form").addEventListener("submit", event => event.preventDefault());
     const invalidate = () => { revision++; passed = false; finish.disabled = true; results.replaceChildren(); $("setup-notice").hidden = true; };
     $("setup-form").addEventListener("input", invalidate); $("setup-form").addEventListener("change", invalidate);
+    const draftActions = node("div", undefined, "actions");
+    const save = node("button", t("Spara utkast"), "button"); save.type = "button";
+    const restore = node("button", t("Läs in sparat utkast"), "button"); restore.type = "button";
+    draftActions.append(save, restore);
+    const draftPanel = node("div", undefined, "panel-body");
+    draftPanel.append(draftActions, node("p", t("Spara när som helst och fortsätt senare med installationskoden. Utkast sparas även före tester. Inga lösenord eller installationskoder sparas i utkast."), "hint"));
+    $("setup-form").insertBefore(draftPanel, $("setup-fields"));
+    async function draftAction(action) {
+        if (value("code").length !== 64) { step = 0; show(true); fields.code.focus(); notice(t("Ange installationskoden med 64 tecken för att spara eller läsa in ett utkast."), true); return; }
+        save.disabled = restore.disabled = true;
+        try { await action(); } catch (error) { notice(error.message, true); }
+        finally { save.disabled = restore.disabled = false; }
+    }
+    save.addEventListener("click", () => draftAction(async () => {
+        await saveDraft(); notice(t("Utkastet är sparat krypterat på servern. Installationen är inte slutförd."));
+    }));
+    restore.addEventListener("click", () => draftAction(async () => {
+        const loadedRevision = revision;
+        const result = await post("draft/load", {});
+        if (loadedRevision !== revision) return;
+        if (!result.draft) { notice(t("Det finns inget sparat utkast.")); return; }
+        const apply = () => {
+            for (const [key, saved] of Object.entries(result.draft.fields)) {
+                if (!fields[key] || excludedDraftFields.has(key) || fields[key].type === "password") continue;
+                if (fields[key].type === "checkbox") fields[key].checked = saved === "true";
+                else fields[key].value = saved;
+            }
+        };
+        apply();
+        // Recompute dependent visibility before restoring credential values.
+        Object.values(fields).forEach(input => input.dispatchEvent(new Event("change", {bubbles: true})));
+        apply(); Object.values(fields).forEach(input => { if (input.type === "password" && input !== fields.code) input.value = ""; });
+        invalidate(); step = Math.max(0, Math.min(4, result.draft.step)); show(true);
+        notice(t("Utkastet är inläst. Kör kontrollerna igen innan installationen slutförs."));
+    }));
     document.addEventListener("valvra:languagechange", () => { if (step === sections.length - 1) renderReview(); });
     show();
     fetch("/api/setup/status", { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }).then(response => { if (!response.ok) throw new Error(t("Windows-inloggningen kunde inte verifieras.")); return response.json(); }).then(status => {

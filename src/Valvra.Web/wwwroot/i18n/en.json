@@ -583,5 +583,12 @@
   "Anslutning och autentisering lyckades.": "Connection and authentication succeeded.",
   "Kunde inte ansluta. Kontrollera server, databas, TLS och kontots åtkomst.": "Could not connect. Check the server, database, TLS and account access.",
   "Aktuellt tjänstekonto (Integrated Security)": "Current service account (Integrated Security)",
-  "Integrated Security använder Windows-kontot som kör Valvra (IIS-apppoolens tjänstekonto), inte personen som använder installationsguiden. Inget kontolösenord behöver anges.": "Integrated Security uses the Windows account running Valvra (the IIS application pool service account), rather than the person using setup. No account password is needed."
+  "Integrated Security använder Windows-kontot som kör Valvra (IIS-apppoolens tjänstekonto), inte personen som använder installationsguiden. Inget kontolösenord behöver anges.": "Integrated Security uses the Windows account running Valvra (the IIS application pool service account), rather than the person using setup. No account password is needed.",
+  "Spara utkast": "Save draft",
+  "Läs in sparat utkast": "Load saved draft",
+  "Spara när som helst och fortsätt senare med installationskoden. Utkast sparas även före tester. Inga lösenord eller installationskoder sparas i utkast.": "Save at any time and resume later using the setup code. A draft is also saved before tests. No passwords or setup codes are saved in drafts.",
+  "Ange installationskoden med 64 tecken för att spara eller läsa in ett utkast.": "Enter the 64-character setup code to save or load a draft.",
+  "Utkastet är sparat krypterat på servern. Installationen är inte slutförd.": "The draft is saved encrypted on the server. Setup is not complete.",
+  "Det finns inget sparat utkast.": "There is no saved draft.",
+  "Utkastet är inläst. Kör kontrollerna igen innan installationen slutförs.": "Draft loaded. Run the checks again before finishing setup."
 }
