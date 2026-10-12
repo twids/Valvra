@@ -46,24 +46,88 @@ public sealed class SetupRequest
     public DatabaseSetupInput? VaultProvisioning { get; set; }
     public DatabaseSetupInput? AuditProvisioning { get; set; }
 }
-public sealed record SetupCheck(string Name, bool Passed, string Message);
+public sealed record SetupCheck(string Name, bool Passed, string Message, string? Details = null);
 public sealed record SetupValidation(InstallationSettings Settings, IReadOnlyList<SetupCheck> Checks)
 {
     public bool Passed => Checks.All(x => x.Passed);
 }
 
-public sealed class SetupValidator(IWebHostEnvironment environment)
+public sealed class SetupValidator(IWebHostEnvironment environment,
+    Valvra.Web.Diagnostics.ApplicationDiagnostics? diagnostics = null, IHttpContextAccessor? httpContext = null)
 {
+    public async Task<IReadOnlyList<SetupCheck>> TestDatabasesAsync(SetupRequest request, CancellationToken ct)
+    {
+        var checks = new List<SetupCheck>();
+        async Task Check(string name, DatabaseSetupInput? input, WindowsConnectionCredentials? credentials = null)
+        {
+            try
+            {
+                if (input is null) throw new VaultValidationException("Installationsanslutningar krävs.");
+                var connectionString = Connection(input);
+                await WindowsCredentialRunner.RunAsync(credentials, async () =>
+                {
+                    // Do not pool connections authenticated as a temporary reader identity.
+                    if (!string.IsNullOrWhiteSpace(credentials?.Username))
+                        connectionString = input.Provider == "SqlServer"
+                            ? new SqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString
+                            : new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
+                    await using var connection = Open(input.Provider, connectionString);
+                    await connection.OpenAsync(ct);
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT 1";
+                    command.CommandTimeout = 10;
+                    await command.ExecuteScalarAsync(ct);
+                    return true;
+                });
+                checks.Add(new(name, true, "Anslutning och autentisering lyckades."));
+                diagnostics?.SetupCheck(name, true, httpContext?.HttpContext?.TraceIdentifier);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                diagnostics?.SetupCheck(name, false, httpContext?.HttpContext?.TraceIdentifier);
+                diagnostics?.Failure("Setup.DatabaseConnection", ex, httpContext?.HttpContext?.TraceIdentifier);
+                checks.Add(new(name, false, "Kunde inte ansluta. Kontrollera server, databas, TLS och kontots åtkomst.",
+                    SetupErrorDetails.Format(ex, [request.Vault.Password, request.AuditWriter.Password, request.AuditReader.Password,
+                        request.VaultProvisioning?.Password, request.AuditProvisioning?.Password,
+                        request.AuditReaderWindowsCredentials?.Password,
+                        httpContext?.HttpContext?.Request.Headers["X-SETUP-TOKEN"].ToString()])));
+            }
+        }
+        await Check("Valvdatabas", request.Vault);
+        await Check("Auditdatabas (SELECT och INSERT)", request.AuditWriter);
+        if (request.UseSeparateAuditReader)
+            await Check("Audit – läskoppling (endast SELECT)", request.AuditReader,
+                request.AuditReader.Authentication == "Windows" ? request.AuditReaderWindowsCredentials : null);
+        if (request.ProvisionSchemas)
+        {
+            await Check("Valvets installationskonto", request.VaultProvisioning);
+            await Check("Auditdatabasens installationskonto", request.AuditProvisioning);
+        }
+        return checks;
+    }
+
     public async Task<SetupValidation> ValidateAsync(SetupRequest request, string currentSid, CancellationToken ct, Guid? installationId = null, string? existingCheckpointDirectory = null)
     {
         var settings = Build(request);
         if (installationId is { } stableId) settings.Integrity.InstallationId = settings.AuditDatabase.InstallationId = stableId;
         var checks = new List<SetupCheck>();
-        async Task Check(string name, Func<Task> check, string success, string failure)
+        async Task Check(string name, Func<Task> check, string success, string failure, Func<Exception, string>? describeFailure = null)
         {
-            try { await check(); checks.Add(new(name, true, success)); }
+            try
+            {
+                await check(); checks.Add(new(name, true, success));
+                diagnostics?.SetupCheck(name, true, httpContext?.HttpContext?.TraceIdentifier);
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
-            { checks.Add(new(name, false, failure)); }
+            {
+                diagnostics?.SetupCheck(name, false, httpContext?.HttpContext?.TraceIdentifier);
+                diagnostics?.Failure("Setup." + name, ex, httpContext?.HttpContext?.TraceIdentifier);
+                checks.Add(new(name, false, describeFailure?.Invoke(ex) ?? failure, SetupErrorDetails.Format(ex,
+                    [request.Vault.Password, request.AuditWriter.Password, request.AuditReader.Password,
+                        request.VaultProvisioning?.Password, request.AuditProvisioning?.Password,
+                        request.AuditReaderWindowsCredentials?.Password,
+                        httpContext?.HttpContext?.Request.Headers["X-SETUP-TOKEN"].ToString()])));
+            }
         }
         await Check("Konfiguration", () =>
         {
@@ -78,7 +142,7 @@ public sealed class SetupValidator(IWebHostEnvironment environment)
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
             var actor = await ProviderRegistry.BuiltIn().Directory(settings.Identity.DirectoryProviderId).Create(settings.ActiveDirectory).ResolveAsync(currentSid, ct);
             if (!actor.IsEnabled) throw new AccessDeniedException();
-        }, "Ditt personkonto är aktivt och kan verifieras. Första installatören blir administratör.", "Kontrollera LDAPS-certifikat, katalogläsrätt och ditt personkonto.");
+        }, "Ditt personkonto är aktivt och kan verifieras. Första installatören blir administratör.", "Kontrollera LDAPS-certifikat, katalogläsrätt och ditt personkonto.", SetupDirectoryDiagnostics.Describe);
         await Check("Krypteringscertifikat", () =>
         {
             var protector = new CertificateKeyProtector(settings.KeyProtection);

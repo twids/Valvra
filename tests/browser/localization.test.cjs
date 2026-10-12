@@ -29,8 +29,10 @@ test('catalogs cover the same keys and preserve all formatting parameters',()=>{
 test('every explicitly localized browser label exists in both catalogs',()=>{
     for(const file of ['js/app.js','js/settings.js','js/import.js','js/setup.js','../Pages/Index.cshtml','../Pages/Setup.cshtml','../../../demo/Valvra.Demo/wwwroot/index.html']) {
         const source=fs.readFileSync(root+file,'utf8');
-        for(const match of source.matchAll(/(?:\bt\(|data-i18n(?:-aria-label|-placeholder)?=)"([^"\n]*)"/g))
-            assert.ok(Object.hasOwn(catalogs.en,match[1]),file+': '+match[1]);
+        for(const match of source.matchAll(/(?:\bt\(|data-i18n(?:-aria-label|-placeholder)?=)"([^"\n]*)"/g)) {
+            const key = file.endsWith('.js') ? JSON.parse('"'+match[1]+'"') : match[1];
+            assert.ok(Object.hasOwn(catalogs.en,key),file+': '+key);
+        }
     }
 });
 test('browser language fallback, unsupported values and cookie precedence are deterministic',async()=>{

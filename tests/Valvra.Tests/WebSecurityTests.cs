@@ -26,6 +26,24 @@ namespace Valvra.Tests;
 public sealed class WebSecurityTests
 {
     [Fact]
+    public async Task DiagnosticCorrelationIsServerGeneratedAndMatchesErrorBody()
+    {
+        await using var host = new TestWebHost();
+        using var client = host.Client("outsider");
+        client.DefaultRequestHeaders.Add("X-Correlation-ID", "untrusted-client-value");
+        using var denied = await client.GetAsync("/api/health");
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        var correlation = Assert.Single(denied.Headers.GetValues("X-Correlation-ID"));
+        Assert.NotEqual("untrusted-client-value", correlation);
+        using var json = JsonDocument.Parse(await denied.Content.ReadAsStringAsync());
+        Assert.Equal(correlation, json.RootElement.GetProperty("correlationId").GetString());
+        using var anonymous = host.Client(null);
+        using var challenge = await anonymous.GetAsync("/api/resources");
+        Assert.Equal(HttpStatusCode.Unauthorized, challenge.StatusCode);
+        Assert.NotEmpty(Assert.Single(challenge.Headers.GetValues("X-Correlation-ID")));
+    }
+
+    [Fact]
     public async Task DeepLinksRequireAuthenticationAndDoNotRewriteApiOrStaticRoutes()
     {
         await using var host = new TestWebHost(); using var anonymous = host.Client(null); using var authenticated = host.Client("user");
@@ -49,8 +67,44 @@ public sealed class WebSecurityTests
         await using var host = new TestWebHost(); using var client = host.Client("user");
         await host.AddCsrfAsync(client);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/validate", new SetupRequest())).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/test-databases", new SetupRequest())).StatusCode);
         client.DefaultRequestHeaders.Add("X-SETUP-TOKEN", new string('0', 64));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/test-databases", new SetupRequest())).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/finish", new SetupRequest())).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(false, false, 2)]
+    [InlineData(true, false, 3)]
+    [InlineData(false, true, 4)]
+    [InlineData(true, true, 5)]
+    public async Task DatabaseTestChecksSelectedConnectionsWithoutDirectoryCertificatesOrProvisioning(bool separateReader, bool provision, int expectedChecks)
+    {
+        await using var host = new TestWebHost(); using var client = host.Client("user");
+        var store = host.Services.GetRequiredService<SetupConfigurationStore>();
+        var token = store.Initialize();
+        client.DefaultRequestHeaders.Add("X-SETUP-TOKEN", token);
+        var request = new SetupRequest { UseSeparateAuditReader = separateReader, ProvisionSchemas = provision };
+        // Invalid connection settings fail immediately without any network access.
+        // Every selected account still gets its own result, with no AD/certificate prerequisite.
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/setup/test-databases", request)).StatusCode);
+        await host.AddCsrfAsync(client);
+        client.DefaultRequestHeaders.Add("X-Valvra-Language", "en");
+        var auditBefore = host.Transport.Events.ToArray();
+        using var response = await client.PostAsJsonAsync("/api/setup/test-databases", request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(body.RootElement.GetProperty("passed").GetBoolean());
+        var checks = body.RootElement.GetProperty("checks").EnumerateArray().ToArray();
+        Assert.Equal(expectedChecks, checks.Length);
+        Assert.All(checks, check =>
+        {
+            Assert.False(check.GetProperty("passed").GetBoolean());
+            Assert.StartsWith("Could not connect.", check.GetProperty("message").GetString());
+            Assert.NotEmpty(check.GetProperty("details").GetString()!);
+        });
+        Assert.True(store.ValidateToken(token)); Assert.False(store.HasSettings); Assert.False(store.HasCheckpoint);
+        Assert.Equal(auditBefore, host.Transport.Events.ToArray());
     }
 
     [Fact]
@@ -58,6 +112,7 @@ public sealed class WebSecurityTests
     {
         await using var host = new TestWebHost(); using var client = host.Client(null);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/resources")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/setup/test-databases", new SetupRequest())).StatusCode);
     }
 
     [Fact]
