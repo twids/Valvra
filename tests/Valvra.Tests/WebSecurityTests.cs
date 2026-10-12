@@ -67,6 +67,8 @@ public sealed class WebSecurityTests
         await using var host = new TestWebHost(); using var client = host.Client("user");
         await host.AddCsrfAsync(client);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/validate", new SetupRequest())).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/draft", new SetupDraft())).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/draft/load", new { })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/test-databases", new SetupRequest())).StatusCode);
         client.DefaultRequestHeaders.Add("X-SETUP-TOKEN", new string('0', 64));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/test-databases", new SetupRequest())).StatusCode);
@@ -105,6 +107,32 @@ public sealed class WebSecurityTests
         });
         Assert.True(store.ValidateToken(token)); Assert.False(store.HasSettings); Assert.False(store.HasCheckpoint);
         Assert.Equal(auditBefore, host.Transport.Events.ToArray());
+    }
+
+    [Fact]
+    public async Task SetupDraftRequiresCsrfAndCodeAndResumesWithoutValidation()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await using var host = new TestWebHost(); using var client = host.Client("user");
+        var store = host.Services.GetRequiredService<SetupConfigurationStore>();
+        var code = store.Initialize(); client.DefaultRequestHeaders.Add("X-SETUP-TOKEN", code);
+        var draft = new SetupDraft { Step = 1, Fields = new() { ["hosts"] = "", ["vaultServer"] = "partial", ["vaultPassword"] = "excluded" } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/setup/draft", draft)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/setup/draft/load", new { })).StatusCode);
+        await host.AddCsrfAsync(client);
+        using var saved = await client.PostAsJsonAsync("/api/setup/draft", draft);
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        using var loaded = await client.PostAsJsonAsync("/api/setup/draft/load", new { });
+        Assert.Equal(HttpStatusCode.OK, loaded.StatusCode); Assert.Contains("no-store", loaded.Headers.CacheControl!.ToString());
+        var body = await loaded.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("partial", body.GetProperty("draft").GetProperty("fields").GetProperty("vaultServer").GetString());
+        Assert.False(body.GetProperty("draft").GetProperty("fields").TryGetProperty("vaultPassword", out _));
+        Assert.True(store.ValidateToken(code)); Assert.False(store.HasSettings); Assert.False(store.HasCheckpoint);
+        client.DefaultRequestHeaders.Remove("X-SETUP-TOKEN");
+        client.DefaultRequestHeaders.Add("X-SETUP-TOKEN", new string('0', 64));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync("/api/setup/draft/load", new { })).StatusCode);
+        using var anonymous = host.Client(null);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/setup/draft/load", new { })).StatusCode);
     }
 
     [Fact]

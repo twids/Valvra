@@ -23,6 +23,60 @@ async function noPageOverflow(page) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 }
 
+test.beforeEach(async ({page}) => {
+    await page.route('**/api/setup/draft', route => route.fulfill({json: {saved: true}}));
+});
+
+test('installation guide: incomplete drafts survive reload without passwords and save before failed tests', async ({page}) => {
+    let savedDraft, saves = 0;
+    await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: true, csrfToken: 'synthetic'}}));
+    await page.route('**/api/setup/draft', route => {
+        savedDraft = route.request().postDataJSON(); saves++;
+        return route.fulfill({json: {saved: true}});
+    });
+    await page.route('**/api/setup/draft/load', route => route.fulfill({json: {draft: savedDraft}}));
+    await page.route('**/api/setup/test-databases', route => {
+        expect(savedDraft.fields.vaultServer).toBe('unfinished.example.test');
+        return route.fulfill({json: {passed: false, checks: [{name: 'Valvdatabas', passed: false, message: 'Synthetic failure'}]}});
+    });
+    await page.goto('/setup');
+    await page.locator('#setup-code').fill('a'.repeat(64));
+    await page.getByRole('button', {name: '2 · Databaser', exact: true}).click();
+    await page.locator('#setup-vaultServer').fill('unfinished.example.test');
+    await page.locator('#setup-vaultAuthentication').selectOption('Password');
+    await page.locator('#setup-vaultUsername').fill('synthetic-user');
+    await page.locator('#setup-vaultPassword').fill('must-never-be-in-draft');
+    await page.locator('#setup-provision').check();
+    await page.locator('#setup-vaultAdminPassword').fill('temporary-secret');
+    await page.getByRole('button', {name: 'Spara utkast', exact: true}).click();
+    await expect(page.getByRole('status')).toContainText('Utkastet är sparat');
+    expect(savedDraft.step).toBe(1);
+    expect(savedDraft.fields.vaultServer).toBe('unfinished.example.test');
+    expect(Object.keys(savedDraft.fields).some(key => /password|code/i.test(key))).toBe(false);
+    expect(JSON.stringify(savedDraft)).not.toContain('must-never');
+    await page.reload();
+    await page.locator('#setup-code').fill('a'.repeat(64));
+    await page.getByRole('button', {name: 'Läs in sparat utkast', exact: true}).click();
+    await expect(page.getByRole('heading', {name: 'Anslut databaserna', exact: true})).toBeFocused();
+    await expect(page.locator('#setup-vaultServer')).toHaveValue('unfinished.example.test');
+    await expect(page.locator('#setup-vaultUsername')).toHaveValue('synthetic-user');
+    await expect(page.locator('#setup-vaultPassword')).toBeEnabled();
+    await expect(page.locator('#setup-vaultPassword')).toHaveValue('');
+    await expect(page.locator('#setup-vaultAdminPassword')).toBeVisible();
+    await expect(page.locator('#setup-vaultAdminPassword')).toHaveValue('');
+    await expect(page.locator('#setup-code')).toHaveValue('a'.repeat(64));
+    await audit(page);
+    await page.locator('#setup-provision').uncheck();
+    await page.locator('#setup-writerServer').fill('audit.example.test');
+    await page.getByRole('button', {name: 'Testa databaser', exact: true}).click();
+    await expect(page.locator('#setup-database-results')).toContainText('Synthetic failure');
+    expect(saves).toBe(2);
+    await page.locator('[data-language-picker]').selectOption('en');
+    await expect(page.getByRole('button', {name: 'Save draft', exact: true})).toBeVisible();
+    await page.getByRole('button', {name: '5 · Review and save', exact: true}).click();
+    await expect(page.getByRole('button', {name: 'Save and finish setup', exact: true})).toBeDisabled();
+});
+
 test('resource overview: WCAG rules, first-tab skip link and visible focus', async ({page}) => {
     await page.goto('/');
     await expect(page.getByRole('link', {name: 'Öppna resurs · Databasplattform'})).toBeVisible();

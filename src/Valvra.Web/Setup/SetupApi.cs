@@ -12,6 +12,30 @@ public static class SetupApi
         var group = app.MapGroup("/api/setup").RequireAuthorization();
         group.MapGet("/status", (SetupConfigurationStore store, IAntiforgery csrf, HttpContext context) =>
             Results.Ok(new { installed = store.HasSettings, canConfigure = store.CanConfigure, csrfToken = csrf.GetAndStoreTokens(context).RequestToken }));
+        group.MapPost("/draft/load", async (SetupConfigurationStore store, HttpContext context) =>
+        {
+            RequireToken(store, context);
+            await SetupLock.WaitAsync(context.RequestAborted);
+            try
+            {
+                RequireToken(store, context);
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(new { draft = store.ReadDraft() });
+            }
+            finally { SetupLock.Release(); }
+        });
+        group.MapPost("/draft", async (SetupDraft body, SetupConfigurationStore store, HttpContext context) =>
+        {
+            RequireToken(store, context);
+            await SetupLock.WaitAsync(context.RequestAborted);
+            try
+            {
+                RequireToken(store, context);
+                store.SaveDraft(body);
+                return Results.Ok(new { saved = true });
+            }
+            finally { SetupLock.Release(); }
+        });
         group.MapPost("/test-databases", async (SetupRequest body, SetupConfigurationStore store, SetupValidator validator, HttpContext context) =>
         {
             RequireToken(store, context);

@@ -22,9 +22,9 @@ For Kerberos SSO with a custom IIS service identity, the AD administrator must r
 
 ### 2. Publish and install
 
-Download `Valvra-1.2.3-win-x64.zip` from [release 1.2.3](https://github.com/twids/Valvra/releases/tag/v1.2.3) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.x, 1.1.0, 1.2.0, 1.2.1 or 1.2.2 requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-to-123) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
+Download `Valvra-1.2.4-win-x64.zip` from [release 1.2.4](https://github.com/twids/Valvra/releases/tag/v1.2.4) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.x, 1.1.0, 1.2.0, 1.2.1, 1.2.2 or 1.2.3 requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-to-124) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
 
-To build from source instead, use tag `v1.2.3` and the .NET 10 SDK from the repository root:
+To build from source instead, use tag `v1.2.4` and the .NET 10 SDK from the repository root:
 
 ```powershell
 dotnet restore
@@ -66,6 +66,8 @@ Open `https://valvra.example.se/setup` from a domain-joined client with Windows 
 3. Enter the LDAPS server, directory lookup base and the three certificate thumbprints. If needed, enter separate search bases for individual user accounts and security groups, and an approved LDAP test server.
 4. For a new database, choose to install schemas using **temporary installation accounts**. These accounts are not stored. Then grant the runtime accounts the documented database roles and test again without schema installation.
 5. Click **Test connections and permissions**. Once all checks pass, click **Save and finish setup**.
+
+Use **Save draft** at any step, even with incomplete settings or failed checks. To resume after a reload or restart, enter the setup code and click **Load saved draft**. Drafts are also saved before connection tests and are encrypted on the server with Windows DPAPI. No passwords or setup codes are saved in drafts; re-enter passwords when resuming. Saving a draft does not complete installation or consume the code. Finishing setup removes the draft and still requires all checks to pass.
 
 Restart the `Valvra` IIS application pool and open the website again. The one-time code has now been consumed. Configuration is stored with DPAPI encryption in `App_Data`, with NTFS permissions restricted to the service and server administrators.
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.4 – 2026-10-12
+
+- Save incomplete setup settings as an encrypted server-side draft from any step, without requiring connection or validation checks to pass.
+- Load a saved draft using Windows sign-in and the setup code, restoring settings and the current step after a reload or restart.
+- Save drafts automatically before database tests and full setup validation. Exclude all passwords and setup codes in both the browser and server; re-enter passwords when resuming.
+- Keep drafts separate from active configuration: saving does not consume the setup code or complete installation. Finishing still requires successful checks and removes the draft.
+- Add Swedish/English guidance and regression coverage for protection, authorization, password exclusion, reload/resume and failed checks.
+
+Package: `Valvra-1.2.4-win-x64.zip` and `SHA256SUMS.txt`. No database schema changes or data conversion are required. Preserve protected installation state, checkpoints and certificates; follow the in-place upgrade checklist.
+
 ## 1.2.3 – 2026-10-12
 
 - Fix Active Directory setup failing before authentication at `LdapSessionOptions.Signing`. Windows rejects SASL signing/sealing options on an SSL session; LDAPS continues to require TLS and certificate validation with Negotiate authentication.

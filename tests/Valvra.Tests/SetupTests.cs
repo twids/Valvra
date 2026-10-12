@@ -11,6 +11,49 @@ namespace Valvra.Tests;
 
 public sealed class SetupTests
 {
+    [Fact]
+    public void DraftsKeepIncompleteSettingsButExcludeAllPasswordsAndCodes()
+    {
+        var draft = new SetupDraft { Step = 99, Fields = new()
+        {
+            ["vaultServer"] = "unfinished,", ["hosts"] = "", ["code"] = "private-code",
+            ["vaultPassword"] = "vault-secret", ["writerPassword"] = "writer-secret",
+            ["readerPassword"] = "reader-secret", ["readerWindowsPassword"] = "windows-secret",
+            ["vaultAdminPassword"] = "admin-secret", ["auditAdminPassword"] = "audit-admin-secret",
+            ["unknown"] = "ignored", ["vaultAdminUsername"] = "installer"
+        }};
+        var sanitized = draft.Sanitized();
+        Assert.Equal(4, sanitized.Step);
+        Assert.Equal(3, sanitized.Fields.Count);
+        Assert.Equal("unfinished,", sanitized.Fields["vaultServer"]);
+        Assert.Equal("", sanitized.Fields["hosts"]);
+        Assert.Equal("installer", sanitized.Fields["vaultAdminUsername"]);
+    }
+
+    [Fact]
+    public void ProtectedDraftSurvivesReloadWithoutCompletingInstallation()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var directory = Path.Combine(Path.GetTempPath(), "valvra-draft-test-" + Guid.NewGuid());
+        try
+        {
+            var store = new SetupConfigurationStore(directory); var code = store.Initialize();
+            Assert.Null(store.ReadDraft());
+            store.SaveDraft(new() { Step = 2, Fields = new() { ["adServer"] = "draft.example.test", ["vaultPassword"] = "excluded-secret" } });
+            var reloaded = new SetupConfigurationStore(directory);
+            Assert.True(reloaded.ValidateToken(code)); Assert.False(reloaded.HasSettings); Assert.False(reloaded.HasCheckpoint);
+            var draft = reloaded.ReadDraft()!;
+            Assert.Equal(2, draft.Step); Assert.Equal("draft.example.test", Assert.Single(draft.Fields).Value);
+            Assert.DoesNotContain("draft.example.test", System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(directory, "setup-draft.bin"))));
+            store.SaveDraft(new() { Step = 3, Fields = new() { ["hosts"] = "new.example.test" } });
+            Assert.Equal(3, reloaded.ReadDraft()!.Step);
+            store.Save(new());
+            Assert.Null(reloaded.ReadDraft()); Assert.False(File.Exists(Path.Combine(directory, "setup-draft.bin")));
+            Assert.Throws<AccessDeniedException>(() => reloaded.SaveDraft(new()));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     private static SetupRequest SharedRequest() => new()
     {
         AllowedHosts = "valvra.example.test",

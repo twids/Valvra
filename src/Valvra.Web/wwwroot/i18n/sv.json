@@ -583,5 +583,12 @@
   "Anslutning och autentisering lyckades.": "Anslutning och autentisering lyckades.",
   "Kunde inte ansluta. Kontrollera server, databas, TLS och kontots åtkomst.": "Kunde inte ansluta. Kontrollera server, databas, TLS och kontots åtkomst.",
   "Aktuellt tjänstekonto (Integrated Security)": "Aktuellt tjänstekonto (Integrated Security)",
-  "Integrated Security använder Windows-kontot som kör Valvra (IIS-apppoolens tjänstekonto), inte personen som använder installationsguiden. Inget kontolösenord behöver anges.": "Integrated Security använder Windows-kontot som kör Valvra (IIS-apppoolens tjänstekonto), inte personen som använder installationsguiden. Inget kontolösenord behöver anges."
+  "Integrated Security använder Windows-kontot som kör Valvra (IIS-apppoolens tjänstekonto), inte personen som använder installationsguiden. Inget kontolösenord behöver anges.": "Integrated Security använder Windows-kontot som kör Valvra (IIS-apppoolens tjänstekonto), inte personen som använder installationsguiden. Inget kontolösenord behöver anges.",
+  "Spara utkast": "Spara utkast",
+  "Läs in sparat utkast": "Läs in sparat utkast",
+  "Spara när som helst och fortsätt senare med installationskoden. Utkast sparas även före tester. Inga lösenord eller installationskoder sparas i utkast.": "Spara när som helst och fortsätt senare med installationskoden. Utkast sparas även före tester. Inga lösenord eller installationskoder sparas i utkast.",
+  "Ange installationskoden med 64 tecken för att spara eller läsa in ett utkast.": "Ange installationskoden med 64 tecken för att spara eller läsa in ett utkast.",
+  "Utkastet är sparat krypterat på servern. Installationen är inte slutförd.": "Utkastet är sparat krypterat på servern. Installationen är inte slutförd.",
+  "Det finns inget sparat utkast.": "Det finns inget sparat utkast.",
+  "Utkastet är inläst. Kör kontrollerna igen innan installationen slutförs.": "Utkastet är inläst. Kör kontrollerna igen innan installationen slutförs."
 }
