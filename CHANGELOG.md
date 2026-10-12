@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.3 – 2026-10-12
+
+- Fix Active Directory setup failing before authentication at `LdapSessionOptions.Signing`. Windows rejects SASL signing/sealing options on an SSL session; LDAPS continues to require TLS and certificate validation with Negotiate authentication.
+- Apply the same fix to approved LDAP credential tests through shared connection configuration, and dispose connections if configuration fails.
+- Add Windows regression tests for service and explicit credentials that reproduce the original exception before the fix.
+
+Package: `Valvra-1.2.3-win-x64.zip` and `SHA256SUMS.txt`. No database schema changes or data conversion are required. Preserve protected installation state, checkpoints and certificates; follow the in-place upgrade checklist. After updating, retry the AD setup check against your domain controller.
+
 ## 1.2.2 – 2026-10-12
 
 - Add an explicit SQL Server **Trust server certificate** option to setup, disabled by default. TLS encryption remains mandatory; enabling the option bypasses certificate chain and hostname validation.

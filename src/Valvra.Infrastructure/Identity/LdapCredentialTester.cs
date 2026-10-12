@@ -28,14 +28,8 @@ public sealed class LdapCredentialTester(LdapTestOptions options) : ICredentialT
         if (string.IsNullOrWhiteSpace(profile.Server) || profile.Server.Contains('/') || profile.Port is < 1 or > 65535
             || profile.TimeoutSeconds is < 1 or > 30) throw new VaultValidationException("Ogiltig LDAP-profil.");
         cancellationToken.ThrowIfCancellationRequested();
-        using var connection = new LdapConnection(new LdapDirectoryIdentifier(profile.Server, profile.Port),
-            new NetworkCredential(credential.Username, credential.Password, profile.Domain), AuthType.Negotiate)
-        { Timeout = TimeSpan.FromSeconds(profile.TimeoutSeconds) };
-        connection.SessionOptions.ProtocolVersion = 3;
-        connection.SessionOptions.SecureSocketLayer = true;
-        connection.SessionOptions.Signing = true;
-        connection.SessionOptions.Sealing = true;
-        connection.SessionOptions.ReferralChasing = ReferralChasingOptions.None;
+        using var connection = LdapsConnection.Create(profile.Server, profile.Port,
+            new NetworkCredential(credential.Username, credential.Password, profile.Domain), profile.TimeoutSeconds);
         try { connection.Bind(); return CredentialTestResult.Success; }
         catch (LdapException ex) when (ex.ErrorCode == 49) { return CredentialTestResult.Rejected; }
         catch (Exception ex) when (ex is LdapException or DirectoryOperationException) { return CredentialTestResult.ConnectionFailed; }
