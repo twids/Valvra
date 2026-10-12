@@ -22,9 +22,9 @@ For Kerberos SSO with a custom IIS service identity, the AD administrator must r
 
 ### 2. Publish and install
 
-Download `Valvra-1.2.0-win-x64.zip` from [release 1.2.0](https://github.com/twids/Valvra/releases/tag/v1.2.0) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.x or 1.1.0 requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-to-120) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
+Download `Valvra-1.2.1-win-x64.zip` from [release 1.2.1](https://github.com/twids/Valvra/releases/tag/v1.2.1) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.x, 1.1.0 or 1.2.0 requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-to-121) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
 
-To build from source instead, use tag `v1.2.0` and the .NET 10 SDK from the repository root:
+To build from source instead, use tag `v1.2.1` and the .NET 10 SDK from the repository root:
 
 ```powershell
 dotnet restore
