@@ -1,4 +1,10 @@
 {
+  "Avancerade anslutningsval": "Avancerade anslutningsval",
+  "Anslutningstimeout (sekunder)": "Anslutningstimeout (sekunder)",
+  "1–120 sekunder. Gäller anslutningen, inte tiden för databasfrågor.": "1–120 sekunder. Gäller anslutningen, inte tiden för databasfrågor.",
+  "Anslutningen krypteras, men servercertifikatets giltighet och namn kontrolleras inte. Använd endast för en server du litar på. Avmarkerat som standard.": "Anslutningen krypteras, men servercertifikatets giltighet och namn kontrolleras inte. Använd endast för en server du litar på. Avmarkerat som standard.",
+  "För SQL Server Always On eller failover-kluster via TCP. Avmarkerat som standard.": "För SQL Server Always On eller failover-kluster via TCP. Avmarkerat som standard.",
+  "SQL Server: ange serverns DNS-namn, server\\instans eller server,port. Certifikatval finns under avancerade anslutningsval.": "SQL Server: ange serverns DNS-namn, server\\instans eller server,port. Certifikatval finns under avancerade anslutningsval.",
   "Identitet och Active Directory": "Identitet och Active Directory",
   "Du loggar in med ditt personkonto i webbläsaren. Valvras IIS-tjänstekonto ansluter till katalogen och läser användare och grupper.": "Du loggar in med ditt personkonto i webbläsaren. Valvras IIS-tjänstekonto ansluter till katalogen och läser användare och grupper.",
   "Ange domänkontrollanten och sökbasen som omfattar dina användare och grupper. Katalogen kontrolleras från servern i sista steget.": "Ange domänkontrollanten och sökbasen som omfattar dina användare och grupper. Katalogen kontrolleras från servern i sista steget.",

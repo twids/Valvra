@@ -35,9 +35,9 @@ The command removes a prepared checkpoint only if the database's exact hash stil
 
 ## Changing the installation
 
-### Update to 1.2.1
+### Update to 1.2.2
 
-Use `Valvra-1.2.1-win-x64.zip` and follow the complete [in-place upgrade checklist](#in-place-upgrade-checklist) below. Version 1.2.1 updates application and test dependencies and requires **no database schema changes or data conversion** from 1.0.x, 1.1.0 or 1.2.0. See [the dependency baseline](DEPENDENCIES.md) for reviewed versions and the .NET 10 compatibility exception. Version 1.2.0 introduced diagnostic file logging and setup troubleshooting. Logging is enabled by default under `App_Data/Logs`; ensure the application pool identity has write permission, keep logs outside the web root, and review size and retention settings below. After upgrading, also verify an import with synthetic data in a group with the intended inherited access; see [the import guide](IMPORT.md).
+Use `Valvra-1.2.2-win-x64.zip` and follow the complete [in-place upgrade checklist](#in-place-upgrade-checklist) below. Version 1.2.2 adds advanced database connection options to setup and requires **no database schema changes or data conversion** from 1.0.x, 1.1.0, 1.2.0 or 1.2.1. See [the dependency baseline](DEPENDENCIES.md) for reviewed versions and the .NET 10 compatibility exception. Version 1.2.0 introduced diagnostic file logging and setup troubleshooting. Logging is enabled by default under `App_Data/Logs`; ensure the application pool identity has write permission, keep logs outside the web root, and review size and retention settings below. After upgrading, also verify an import with synthetic data in a group with the intended inherited access; see [the import guide](IMPORT.md).
 
 ### Update from 1.0.0 to 1.0.1
 
@@ -56,7 +56,7 @@ This procedure updates an existing Windows/IIS installation on the **same Window
 3. Download the target release ZIP and its `SHA256SUMS.txt`. In PowerShell, calculate the ZIP's hash, for example:
 
    ```powershell
-   Get-FileHash -LiteralPath 'C:\Temp\Valvra-1.2.1-win-x64.zip' -Algorithm SHA256
+   Get-FileHash -LiteralPath 'C:\Temp\Valvra-1.2.2-win-x64.zip' -Algorithm SHA256
    ```
 
    Compare the complete hash with the entry for that ZIP in `SHA256SUMS.txt`. Stop if they differ.

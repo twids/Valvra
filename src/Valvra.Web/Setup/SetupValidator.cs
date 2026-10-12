@@ -25,6 +25,9 @@ public sealed class DatabaseSetupInput
     public string Authentication { get; set; } = "Windows";
     public string Username { get; set; } = "";
     public string Password { get; set; } = "";
+    public bool TrustServerCertificate { get; set; }
+    public bool MultiSubnetFailover { get; set; }
+    public int ConnectTimeoutSeconds { get; set; } = 10;
 }
 public sealed class SetupRequest
 {
@@ -275,19 +278,23 @@ public sealed class SetupValidator(IWebHostEnvironment environment,
     {
         if (string.IsNullOrWhiteSpace(input.Server) || string.IsNullOrWhiteSpace(input.Database)
             || input.Server.Length > 256 || input.Database.Length > 128 || input.Username.Length > 256 || input.Password.Length > 1024
+            || input.ConnectTimeoutSeconds is < 1 or > 120
             || input.Authentication is not ("Windows" or "Password")) throw new VaultValidationException("Ogiltiga databasinställningar.");
         if (input.Provider == "SqlServer")
         {
             var sql = new SqlConnectionStringBuilder { DataSource = input.Server, InitialCatalog = input.Database,
-                IntegratedSecurity = input.Authentication == "Windows", Encrypt = SqlConnectionEncryptOption.Mandatory, TrustServerCertificate = false, ConnectTimeout = 10 };
+                IntegratedSecurity = input.Authentication == "Windows", Encrypt = SqlConnectionEncryptOption.Mandatory,
+                TrustServerCertificate = input.TrustServerCertificate, MultiSubnetFailover = input.MultiSubnetFailover,
+                ConnectTimeout = input.ConnectTimeoutSeconds };
             if (!sql.IntegratedSecurity) { sql.UserID = input.Username; sql.Password = input.Password; }
             return sql.ConnectionString;
         }
         if (input.Provider == "PostgreSql")
         {
             if (input.Port is < 1 or > 65535) throw new VaultValidationException("Ogiltig databasport.");
+            if (input.TrustServerCertificate || input.MultiSubnetFailover) throw new VaultValidationException("Ogiltiga databasinställningar.");
             var pg = new NpgsqlConnectionStringBuilder { Host = input.Server, Port = input.Port, Database = input.Database,
-                SslMode = SslMode.VerifyFull, Timeout = 10 };
+                SslMode = SslMode.VerifyFull, Timeout = input.ConnectTimeoutSeconds };
             if (!string.IsNullOrWhiteSpace(input.Username)) pg.Username = input.Username;
             if (input.Authentication == "Password") pg.Password = input.Password;
             return pg.ConnectionString;

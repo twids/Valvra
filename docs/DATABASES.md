@@ -6,6 +6,14 @@ Windows SSO identifies the web user. Database operations run as **the service's 
 
 For MSSQL, use `Integrated Security=true;Encrypt=true;TrustServerCertificate=false`. Run the IIS pool as a domain identity, preferably dMSA or gMSA. SQL Server must recognize the account, and the database certificate must be trusted and match the server's DNS name. Never connect as a SQL Server administrator during normal operation.
 
+Setup provides **Advanced connection options** for each database connection:
+
+- **Trust server certificate** (SQL Server only, off by default): sets `TrustServerCertificate=true`. Encryption remains mandatory, but certificate chain and hostname validation are bypassed. Enable only when deliberately accepting this risk for a server you trust, for example one using SQL Server's generated certificate. Trusting the internal CA and configuring a matching server certificate remains the preferred configuration.
+- **MultiSubnetFailover** (SQL Server only, off by default): enables parallel TCP connection attempts for Always On listeners and failover cluster instances. Use the listener endpoint supplied by your DBA.
+- **Connection timeout**: 1–120 seconds, default 10. This controls connection establishment, not query execution time.
+
+The selected options apply to database tests, saved runtime connections and temporary schema-installation connections. A shared audit reader inherits the writer's options; a separate reader has its own settings. PostgreSQL continues to require `SSL Mode=VerifyFull`.
+
 dMSA was introduced in **Windows Server 2025** and requires the Windows/AD environment to be prepared for this account type and the IIS host to be authorized to use the account. Follow Microsoft's [dMSA instructions](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/delegated-managed-service-accounts/delegated-managed-service-accounts-overview) before installing Valvra. `Install-Iis.ps1` uses an empty password for managed service accounts whose names end in `$`; the script does not create dMSA in AD or configure its Windows policy. Verify IIS sign-in, SQL Integrated Security and the HTTP SPN with the AD/DBA administrator. Operation with an actual dMSA account has not yet been verified in the project's test environment.
 
 PostgreSQL can use password authentication or SSPI/GSSAPI with the service's Windows identity. For the latter, the DBA must configure PostgreSQL's `pg_hba.conf`, Kerberos/SSPI and account mapping; specify the appropriate PostgreSQL role during setup. TLS requires `SSL Mode=VerifyFull`. Merely choosing Windows in the web interface is insufficient if the database server has not been prepared for SSPI/GSSAPI.

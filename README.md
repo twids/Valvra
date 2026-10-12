@@ -12,7 +12,7 @@ The interface and installation wizard are available in **Swedish and English**. 
 
 - A domain-joined Windows Server with IIS, **Windows Authentication** and an up-to-date [.NET 10 Hosting Bundle](https://dotnet.microsoft.com/download/dotnet/10.0).
 - A DNS name and a trusted HTTPS certificate for the website.
-- MSSQL or PostgreSQL with a trusted TLS certificate. Create two empty databases: **Valvra** and **ValvraAudit**.
+- MSSQL or PostgreSQL with TLS. Certificate validation is enabled by default; SQL Server setup offers an explicit **Trust server certificate** exception (see [database connection options](docs/DATABASES.md#connection-model)). Create two empty databases: **Valvra** and **ValvraAudit**.
 - A Windows service account, preferably **dMSA** in a prepared Windows Server 2025/AD environment, or gMSA, with directory read access in AD. For MSSQL, the vault and both audit connections use the same account through **Integrated Security**, without an account password in Valvra. See [environment requirements and database roles](docs/DATABASES.md).
 - An active individual user account for the installer. The account that completes setup using the server's one-time code receives access and system administration permissions; global permissions are subsequently granted only to individual user accounts.
 
@@ -22,9 +22,9 @@ For Kerberos SSO with a custom IIS service identity, the AD administrator must r
 
 ### 2. Publish and install
 
-Download `Valvra-1.2.1-win-x64.zip` from [release 1.2.1](https://github.com/twids/Valvra/releases/tag/v1.2.1) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.x, 1.1.0 or 1.2.0 requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-to-121) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
+Download `Valvra-1.2.2-win-x64.zip` from [release 1.2.2](https://github.com/twids/Valvra/releases/tag/v1.2.2) and extract it on the server. The package contains the application, `Install-Iis.ps1`, SQL scripts and documentation. Check the file's SHA-256 against the release's `SHA256SUMS.txt`. A fresh installation requires an empty vault; conversion of earlier preview data is not included. Updating from 1.0.x, 1.1.0, 1.2.0 or 1.2.1 requires no schema change: follow [the operations guide](docs/OPERATIONS.md#update-to-122) and preserve the protected configuration, integrity checkpoints and certificates. See [the changelog](CHANGELOG.md).
 
-To build from source instead, use tag `v1.2.1` and the .NET 10 SDK from the repository root:
+To build from source instead, use tag `v1.2.2` and the .NET 10 SDK from the repository root:
 
 ```powershell
 dotnet restore

@@ -127,6 +127,54 @@ public sealed class SetupTests
         Assert.False(connection.TrustServerCertificate); Assert.Equal("server;TrustServerCertificate=true", connection.DataSource);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SqlConnectionOptionsSurviveSetupAndProductionValidation(bool separateReader)
+    {
+        var request = SharedRequest();
+        request.Vault.TrustServerCertificate = true;
+        request.Vault.MultiSubnetFailover = true;
+        request.Vault.ConnectTimeoutSeconds = 45;
+        request.AuditWriter.TrustServerCertificate = true;
+        request.UseSeparateAuditReader = separateReader;
+        request.AuditReader = new() { Server = "sql.example.test", Database = "ValvraAudit" };
+        var settings = SetupValidator.Build(request);
+        var vault = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(settings.VaultDatabase.ConnectionString);
+        Assert.True(vault.TrustServerCertificate); Assert.True(vault.MultiSubnetFailover);
+        Assert.Equal(45, vault.ConnectTimeout);
+        Assert.Equal(Microsoft.Data.SqlClient.SqlConnectionEncryptOption.Mandatory, vault.Encrypt);
+        Assert.True(new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(settings.AuditDatabase.WriterConnectionString).TrustServerCertificate);
+        Assert.Equal(!separateReader, new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(settings.AuditDatabase.ReaderConnectionString).TrustServerCertificate);
+        using var stream = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(settings));
+        ValvraRegistration.ValidateProduction(new ConfigurationBuilder().AddJsonStream(stream).Build());
+        vault.Encrypt = Microsoft.Data.SqlClient.SqlConnectionEncryptOption.Optional;
+        settings.VaultDatabase.ConnectionString = vault.ConnectionString;
+        using var invalid = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(settings));
+        Assert.Throws<InvalidOperationException>(() => ValvraRegistration.ValidateProduction(new ConfigurationBuilder().AddJsonStream(invalid).Build()));
+    }
+
+    [Theory]
+    [InlineData("SqlServer", 0)]
+    [InlineData("SqlServer", 121)]
+    [InlineData("PostgreSql", 0)]
+    [InlineData("PostgreSql", 121)]
+    public void ConnectionTimeoutMustBeBounded(string provider, int timeout) =>
+        Assert.Throws<VaultValidationException>(() => SetupValidator.Connection(new()
+        { Provider = provider, Server = "db.example.test", Database = "Valvra", ConnectTimeoutSeconds = timeout }));
+
+    [Fact]
+    public void PostgresKeepsCertificateValidationAndRejectsSqlOnlyOptions()
+    {
+        var input = new DatabaseSetupInput { Provider = "PostgreSql", Server = "db.example.test", Database = "Valvra", ConnectTimeoutSeconds = 30 };
+        var connection = new Npgsql.NpgsqlConnectionStringBuilder(SetupValidator.Connection(input));
+        Assert.Equal(Npgsql.SslMode.VerifyFull, connection.SslMode); Assert.Equal(30, connection.Timeout);
+        input.TrustServerCertificate = true;
+        Assert.Throws<VaultValidationException>(() => SetupValidator.Connection(input));
+        input.TrustServerCertificate = false; input.MultiSubnetFailover = true;
+        Assert.Throws<VaultValidationException>(() => SetupValidator.Connection(input));
+    }
+
     [Fact]
     public async Task ProtectedSettingsDoNotExposePlaintextAndConsumeBootstrap()
     {
