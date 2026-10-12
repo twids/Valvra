@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.1 – 2026-10-12
+
+- Update direct and transitive NuGet dependencies to current stable versions, including Npgsql, SQL Server client libraries, identity libraries, Serilog and test tooling.
+- Centralize reviewed NuGet versions and enable transitive pinning in `Directory.Packages.props`. Retain the latest .NET 10-compatible MSBuild packages (18.9.6); 18.10.1 requires .NET 11. See [the dependency baseline](docs/DEPENDENCIES.md).
+- Update Playwright and its matching Chromium, and pin current stable GitHub checkout and artifact actions by commit.
+- Include npm in weekly Dependabot update checks alongside NuGet and GitHub Actions.
+
+Package: `Valvra-1.2.1-win-x64.zip` and `SHA256SUMS.txt`. No database schema changes or data conversion are required. Preserve protected installation state, checkpoints and certificates; follow the in-place upgrade checklist.
+
 ## 1.2.0 – 2026-10-12
 
 - Add configurable Serilog JSON diagnostic files with daily/size rotation and bounded retention.
