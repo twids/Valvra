@@ -12,6 +12,19 @@ public static class SetupApi
         var group = app.MapGroup("/api/setup").RequireAuthorization();
         group.MapGet("/status", (SetupConfigurationStore store, IAntiforgery csrf, HttpContext context) =>
             Results.Ok(new { installed = store.HasSettings, canConfigure = store.CanConfigure, csrfToken = csrf.GetAndStoreTokens(context).RequestToken }));
+        group.MapPost("/test-databases", async (SetupRequest body, SetupConfigurationStore store, SetupValidator validator, HttpContext context) =>
+        {
+            RequireToken(store, context);
+            await SetupLock.WaitAsync(context.RequestAborted);
+            try
+            {
+                RequireToken(store, context);
+                var checks = await validator.TestDatabasesAsync(body, context.RequestAborted);
+                var text = context.RequestServices.GetRequiredService<UiText>();
+                return Results.Ok(new { passed = checks.All(x => x.Passed), checks = checks.Select(x => Localize(x, text)) });
+            }
+            finally { SetupLock.Release(); }
+        });
         group.MapPost("/validate", async (SetupRequest body, SetupConfigurationStore store, SetupValidator validator, IIdentityProvider identity, HttpContext context) =>
         {
             RequireToken(store, context);
@@ -48,7 +61,7 @@ public static class SetupApi
     private static object Localize(SetupCheck check, UiText text) => new
     {
         name = text.Get(check.Name), check.Passed, message = text.Get(check.Message),
-        nameKey = check.Name, messageKey = check.Message
+        nameKey = check.Name, messageKey = check.Message, details = check.Details
     };
     private static void RequireToken(SetupConfigurationStore store, HttpContext context)
     { if (!store.ValidateToken(context.Request.Headers["X-SETUP-TOKEN"].ToString())) throw new AccessDeniedException(); }

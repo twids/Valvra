@@ -156,13 +156,22 @@ test('installation guide: labels, help, validation, step focus and completion', 
     // Expose the setup UI only in this isolated browser test. No real installation
     // request is sent; the server's setup authorization is covered by C# tests.
     await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: true, csrfToken: 'synthetic'}}));
-    let setupRequest;
+    let setupRequest, validationFails = true, finishFails = true;
+    const originalError = 'LdapException: Invalid credentials\nLDAP error code: 49\n80090308: data 52e <script>window.setupErrorExecuted=true</script> ' + 'diagnostic'.repeat(35);
+    const failedCheck = {name: 'Active Directory', passed: false, message: 'Kontrollera LDAPS-certifikat, katalogläsrätt och ditt personkonto.', details: originalError};
     await page.route('**/api/setup/validate', route => {
         setupRequest = route.request().postDataJSON();
+        if (validationFails) return route.fulfill({json: {passed: false, checks: [failedCheck]}});
         return route.fulfill({json: {passed: true, checks: [{name: 'Syntetisk kontroll', passed: true, message: 'Endast webbläsartest.'}]}});
     });
-    await page.route('**/api/setup/finish', route => route.fulfill({json: {}}));
+    await page.route('**/api/setup/finish', route => finishFails
+        ? route.fulfill({status: 400, json: {error: 'Installationskontrollerna måste passera innan konfigurationen sparas.', checks: [failedCheck]}})
+        : route.fulfill({json: {}}));
     await page.goto('/setup');
+    const preparation = page.getByRole('link', {name: 'Förbered servern och kör installationsskriptet', exact: true});
+    await expect(preparation).toHaveAttribute('href', 'https://github.com/twids/Valvra/blob/master/README.md#installation--windows-and-iis');
+    await expect(preparation).toHaveAttribute('target', '_blank');
+    await expect(preparation).toHaveAttribute('rel', 'noopener noreferrer');
     await audit(page);
     await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
     await expect(page.getByLabel('Installationskod (obligatoriskt)')).toBeFocused();
@@ -172,25 +181,223 @@ test('installation guide: labels, help, validation, step focus and completion', 
     await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
     await expect(page.getByRole('heading', {name: 'Anslut databaserna', exact: true})).toBeFocused();
     await expect(page.locator('[aria-current="step"]')).toHaveText('2 · Databaser');
+    const databaseGuide = page.getByRole('link', {name: 'Databaser, Windows-inloggning och databasroller', exact: true});
+    await expect(databaseGuide).toHaveAttribute('href', 'https://github.com/twids/Valvra/blob/master/docs/DATABASES.md');
+    await page.locator('[data-language-picker]').selectOption('en');
+    await expect(page.getByRole('link', {name: 'Databases, Windows sign-in and database roles', exact: true})).toBeVisible();
+    await expect(page.locator('#setup-fields').getByText('The guides are in English on GitHub and open in a new tab. Your entries stay here.', {exact: true}).filter({visible: true})).toBeVisible();
+    await expect(page.locator('#setup-code')).toHaveValue('synthetic-code');
+    await page.locator('[data-language-picker]').selectOption('sv');
     await expect(page.getByLabel('Använd separat auditläsare (valfritt)', {exact: true})).not.toBeChecked();
     await expect(page.locator('#setup-readerServer')).toBeDisabled();
     await expect(page.locator('#setup-readerWindowsPassword')).toBeHidden();
+    for (const prefix of ['vault', 'writer']) {
+        const port = page.locator('#setup-' + prefix + 'Port');
+        await expect(port).toBeHidden();
+        await expect(page.locator('label[for="setup-' + prefix + 'Port"]')).toBeHidden();
+        await expect(page.locator('#setup-' + prefix + 'Server-help')).toContainText('server,port');
+        await page.locator('#setup-' + prefix + 'Provider').selectOption('PostgreSql');
+        await expect(port).toBeVisible();
+        await expect(port).toBeEnabled();
+        await expect(port).toHaveValue('5432');
+        await port.fill('5433');
+        await page.locator('#setup-' + prefix + 'Provider').selectOption('SqlServer');
+        await expect(port).toBeHidden();
+        await expect(port).toBeDisabled();
+        await page.locator('#setup-' + prefix + 'Provider').selectOption('PostgreSql');
+        await expect(port).toHaveValue('5433');
+        await page.locator('#setup-' + prefix + 'Provider').selectOption('SqlServer');
+    }
     for (const field of ['vaultServer', 'writerServer']) await page.locator('#setup-' + field).fill('synthetic.example.invalid');
     await audit(page);
     await page.setViewportSize({width: 320, height: 800});
     await noPageOverflow(page);
     await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
-    for (const field of ['adServer', 'baseDn', 'encryptionThumbprint', 'auditThumbprint', 'integrityThumbprint']) await page.locator('#setup-' + field).fill('synthetic');
+    await expect(page.getByRole('heading', {name: 'Identitet och Active Directory', exact: true})).toBeFocused();
+    await expect(page.locator('#setup-encryptionThumbprint')).toBeHidden();
+    for (const field of ['adServer', 'baseDn']) await page.locator('#setup-' + field).fill('synthetic');
     await audit(page);
     await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
+    await expect(page.getByRole('heading', {name: 'Certifikat och nyckelskydd', exact: true})).toBeFocused();
+    await expect(page.locator('#setup-adServer')).toBeHidden();
+    for (const field of ['encryptionThumbprint', 'auditThumbprint', 'integrityThumbprint']) await page.locator('#setup-' + field).fill('synthetic');
+    await expect(page.getByRole('link', {name: 'Installationsskript och certifikat', exact: true})).toHaveAttribute('href', 'https://github.com/twids/Valvra/blob/master/README.md#2-publish-and-install');
+    await audit(page);
+    await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
+    await expect(page.locator('.setup-review')).toContainText('synthetic.example.invalid');
+    await expect(page.locator('.setup-review')).not.toContainText('synthetic-code');
+    await page.getByRole('button', {name: 'Ändra Identitet och Active Directory', exact: true}).click();
+    await expect(page.locator('#setup-adServer')).toHaveValue('synthetic');
+    await page.getByRole('button', {name: '5 · Kontrollera och spara', exact: true}).click();
     await page.getByRole('button', {name: 'Testa anslutningar och rättigheter', exact: true}).click();
+    await expect(page.locator('.setup-error-details')).toHaveText(originalError);
+    await expect(page.locator('.setup-check').getByRole('button', {name: 'Ändra Identitet och Active Directory', exact: true})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Spara och slutför installationen', exact: true})).toBeDisabled();
+    expect(await page.evaluate(() => window.setupErrorExecuted)).toBeUndefined();
+    await noPageOverflow(page);
+    await page.locator('[data-language-picker]').selectOption('en');
+    await expect(page.locator('.setup-error-details')).toHaveText(originalError);
+    await page.locator('[data-language-picker]').selectOption('sv');
+    await audit(page);
+    validationFails = false;
+    await page.getByRole('button', {name: 'Testa anslutningar och rättigheter', exact: true}).click();
+    await expect(page.locator('.setup-error-details')).toHaveCount(0);
+    await expect(page.getByRole('link', {name: 'Backup och återställning', exact: true})).toHaveAttribute('href', 'https://github.com/twids/Valvra/blob/master/docs/OPERATIONS.md#what-must-be-backed-up');
     await expect(page.getByRole('status')).toContainText('Alla kontroller passerade');
     expect(setupRequest.useSeparateAuditReader).toBe(false);
     expect(setupRequest.auditReader).toEqual(setupRequest.auditWriter);
     expect(setupRequest.auditReaderWindowsCredentials).toBeNull();
     await audit(page);
     await page.getByRole('button', {name: 'Spara och slutför installationen', exact: true}).click();
+    await expect(page.locator('.setup-error-details')).toHaveText(originalError);
+    await expect(page.getByRole('button', {name: 'Spara och slutför installationen', exact: true})).toBeDisabled();
+    finishFails = false;
+    await page.getByRole('button', {name: 'Testa anslutningar och rättigheter', exact: true}).click();
+    await page.getByRole('button', {name: 'Spara och slutför installationen', exact: true}).click();
     await expect(page.getByRole('heading', {name: 'Installationen är sparad'})).toBeFocused();
+    await audit(page);
+});
+
+test('installation guide: edits invalidate validation, including a pending response', async ({page}) => {
+    await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: true, csrfToken: 'synthetic'}}));
+    let release, pending, requests = 0;
+    await page.route('**/api/setup/validate', async route => {
+        pending = new Promise(resolve => { release = resolve; });
+        requests++;
+        await pending;
+        await route.fulfill({json: {passed: true, checks: [{name: 'Synthetic check', passed: true, message: 'Synthetic only'}]}});
+    });
+    await page.goto('/setup');
+    await page.locator('#setup-code').fill('synthetic-code');
+    await page.getByRole('button', {name: '2 · Databaser', exact: true}).click();
+    for (const key of ['vaultServer', 'writerServer']) await page.locator('#setup-' + key).fill('synthetic.example.invalid');
+    await page.getByRole('button', {name: '3 · Identitet', exact: true}).click();
+    for (const key of ['adServer', 'baseDn']) await page.locator('#setup-' + key).fill('synthetic');
+    await page.locator('[data-language-picker]').selectOption('en');
+    await expect(page.getByRole('heading', {name: 'Identity and Active Directory', exact: true})).toBeVisible();
+    await page.screenshot({path: 'artifacts/setup-identity.png', fullPage: true});
+    await page.getByRole('button', {name: '4 · Certificates', exact: true}).click();
+    for (const key of ['encryptionThumbprint', 'auditThumbprint', 'integrityThumbprint']) await page.locator('#setup-' + key).fill('synthetic-' + key);
+    await page.screenshot({path: 'artifacts/setup-certificates.png', fullPage: true});
+    await page.getByRole('button', {name: '5 · Review and save', exact: true}).click();
+    await page.screenshot({path: 'artifacts/setup-review.png', fullPage: true});
+    const testButton = page.getByRole('button', {name: 'Test connections and permissions', exact: true});
+    const save = page.getByRole('button', {name: 'Save and finish setup', exact: true});
+    await testButton.click();
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await page.getByRole('button', {name: '2 · Databases', exact: true}).click();
+    await page.locator('#setup-vaultProvider').selectOption('PostgreSql');
+    release();
+    await page.getByRole('button', {name: '5 · Review and save', exact: true}).click();
+    await expect(testButton).toBeEnabled();
+    await expect(save).toBeDisabled();
+    await expect(page.locator('.setup-check')).toHaveCount(0);
+    await testButton.click();
+    await expect.poll(() => requests).toBe(2);
+    release();
+    await expect(save).toBeEnabled();
+    await page.getByRole('button', {name: '3 · Identity', exact: true}).click();
+    await page.locator('#setup-adServer').fill('changed.example.invalid');
+    await page.getByRole('button', {name: '5 · Review and save', exact: true}).click();
+    await expect(save).toBeDisabled();
+    await expect(page.locator('.setup-review')).toContainText('changed.example.invalid');
+    await expect(page.locator('.setup-check')).toHaveCount(0);
+});
+
+test('installation guide: database test works before AD and certificates and clears stale results', async ({page}) => {
+    await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: true, csrfToken: 'synthetic'}}));
+    let payload, succeed = false;
+    await page.route('**/api/setup/test-databases', route => {
+        payload = route.request().postDataJSON();
+        return route.fulfill({json: {passed: succeed, checks: [
+            {nameKey: 'Valvdatabas', passed: true, messageKey: 'Anslutning och autentisering lyckades.'},
+            {nameKey: 'Auditdatabas (SELECT och INSERT)', passed: succeed,
+                messageKey: succeed ? 'Anslutning och autentisering lyckades.' : 'Kunde inte ansluta. Kontrollera server, databas, TLS och kontots åtkomst.',
+                details: succeed ? null : 'Synthetic TLS failure <script>window.databaseErrorExecuted=true</script>'}
+        ]}});
+    });
+    await page.goto('/setup');
+    await page.locator('#setup-code').fill('synthetic-code');
+    await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
+    await page.locator('[data-language-picker]').selectOption('en');
+    for (const prefix of ['vault', 'writer']) await page.locator('#setup-' + prefix + 'Server').fill('synthetic.example.invalid');
+    await page.getByRole('button', {name: 'Test database', exact: true}).click();
+    const results = page.locator('#setup-database-results');
+    await expect(results.locator('.setup-check.passed')).toHaveCount(1);
+    await expect(results.locator('.setup-check.failed')).toHaveCount(1);
+    await expect(results).toContainText('Could not connect.');
+    await expect(results.locator('pre')).toContainText('<script>');
+    expect(await page.evaluate(() => window.databaseErrorExecuted)).toBeUndefined();
+    expect(payload.vault.authentication).toBe('Windows');
+    expect(payload.vault.username).toBe(''); expect(payload.vault.password).toBe('');
+    expect(payload.useSeparateAuditReader).toBe(false);
+    expect(payload).not.toHaveProperty('activeDirectory'); expect(payload).not.toHaveProperty('keyProtection');
+    await audit(page);
+    await page.locator('#setup-writerAuthentication').selectOption('Password');
+    await expect(page.locator('.setup-check')).toHaveCount(0);
+    await page.locator('#setup-writerUsername').fill('synthetic-account');
+    await page.locator('#setup-writerPassword').fill('synthetic-password');
+    succeed = true;
+    await page.getByRole('button', {name: 'Test database', exact: true}).click();
+    await expect(results.locator('.setup-check.passed')).toHaveCount(2);
+    expect(payload.auditWriter.username).toBe('synthetic-account');
+    expect(payload.auditWriter.password).toBe('synthetic-password');
+    await expect(page.locator('#setup-adServer')).toHaveValue('');
+    await page.getByRole('button', {name: 'Next →', exact: true}).click();
+    for (const field of ['adServer', 'baseDn']) await page.locator('#setup-' + field).fill('synthetic');
+    await page.getByRole('button', {name: 'Next →', exact: true}).click();
+    for (const field of ['encryptionThumbprint', 'auditThumbprint', 'integrityThumbprint']) await page.locator('#setup-' + field).fill('synthetic');
+    await page.getByRole('button', {name: 'Next →', exact: true}).click();
+    await expect(page.getByRole('button', {name: 'Save and finish setup', exact: true})).toBeDisabled();
+});
+
+test('installation guide: current service account hides credentials for runtime and schema setup', async ({page}) => {
+    await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: true, csrfToken: 'synthetic'}}));
+    await page.goto('/setup');
+    await page.locator('#setup-code').fill('synthetic');
+    await page.getByRole('button', {name: 'Nästa →', exact: true}).click();
+    await page.locator('[data-language-picker]').selectOption('en');
+    for (const prefix of ['vault', 'writer']) {
+        const authentication = page.locator('#setup-' + prefix + 'Authentication');
+        await expect(authentication.locator('option:checked')).toHaveText('Current service account (Integrated Security)');
+        await expect(page.locator('#setup-' + prefix + 'Username')).toBeHidden();
+        await expect(page.locator('#setup-' + prefix + 'Password')).toBeHidden();
+    }
+    await page.locator('#setup-provision').check();
+    for (const prefix of ['vault', 'writer', 'vaultAdmin', 'auditAdmin']) {
+        const authentication = page.locator('#setup-' + prefix + 'Authentication');
+        const username = page.locator('#setup-' + prefix + 'Username');
+        const password = page.locator('#setup-' + prefix + 'Password');
+        await authentication.selectOption('Password');
+        await username.fill('synthetic-user');
+        await password.fill('synthetic-password');
+        await authentication.selectOption('Windows');
+        for (const input of [username, password]) {
+            await expect(input).toBeHidden();
+            await expect(input).toBeDisabled();
+            await expect(input).toHaveValue('');
+            await expect(page.locator('label[for="' + await input.getAttribute('id') + '"]')).toBeHidden();
+        }
+    }
+    // PostgreSQL still allows an explicit database role with integrated authentication.
+    await page.locator('#setup-vaultProvider').selectOption('PostgreSql');
+    for (const prefix of ['vault', 'vaultAdmin']) {
+        await expect(page.locator('#setup-' + prefix + 'Username')).toBeVisible();
+        await expect(page.locator('#setup-' + prefix + 'Username')).toBeEnabled();
+        await expect(page.locator('#setup-' + prefix + 'Password')).toBeHidden();
+    }
+    await page.locator('#setup-vaultProvider').selectOption('SqlServer');
+    await page.locator('#setup-separateReader').check();
+    await expect(page.locator('#setup-readerUsername')).toBeDisabled();
+    await expect(page.locator('#setup-readerUsername')).toBeHidden();
+    await audit(page);
+});
+
+test('installation guide: preparation remains available before a setup code is generated', async ({page}) => {
+    await page.route('**/api/setup/status', route => route.fulfill({json: {canConfigure: false, installed: false}}));
+    await page.goto('/setup');
+    await expect(page.locator('#setup-form')).toBeHidden();
+    await expect(page.getByRole('link', {name: 'Förbered servern och kör installationsskriptet', exact: true})).toBeVisible();
     await audit(page);
 });
 
@@ -204,6 +411,10 @@ test('installation guide: separate reader is optional and clears its password wh
     await expect(page.locator('#setup-readerServer')).toBeEnabled();
     await expect(page.locator('#setup-readerServer')).toHaveAttribute('required', '');
     await expect(page.locator('#setup-readerPassword')).toBeDisabled();
+    await expect(page.locator('#setup-readerPort')).toBeHidden();
+    await page.locator('#setup-readerProvider').selectOption('PostgreSql');
+    await expect(page.locator('#setup-readerPort')).toBeVisible();
+    await expect(page.locator('#setup-readerPort')).toBeEnabled();
     await page.locator('#setup-readerWindowsPassword').fill('synthetic-not-a-real-password');
     await audit(page);
     await choice.uncheck();

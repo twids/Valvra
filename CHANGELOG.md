@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 – 2026-10-12
+
+- Add configurable Serilog JSON diagnostic files with daily/size rotation and bounded retention.
+- Record lifecycle, setup checks, request timing/status and correlation IDs, with safe exception types, stack locations and database/LDAP error codes. Exclude secret-bearing messages and request data.
+- Document log permissions, troubleshooting, configuration and sink failure behavior.
+- Add a separate database connection test, expandable redacted setup errors, and targeted Active Directory troubleshooting guidance in Swedish and English.
+- Update CI actions and test dependencies; assign import-test ports dynamically and bound preview process shutdown.
+
+Package: `Valvra-1.2.0-win-x64.zip` and `SHA256SUMS.txt`. No database schema changes or data conversion are required. Preserve protected installation files, integrity checkpoints and certificates. Diagnostic logging is enabled by default under `App_Data/Logs`; ensure the application pool identity can write there and review retention settings.
+
 ## 1.1.0 – 2026-10-06
 
 - Add a password import wizard for UTF-8 CSV/TSV, with delimiter detection, editable column mappings and a preview that does not display secrets.
