@@ -138,6 +138,7 @@ test('synthetic demo ships English catalogs and English secret dialogs',async({p
 });
 
 test('validated setup results switch language without discarding configuration or successful checks',async({page})=>{
+    await page.route('**/api/setup/draft',route=>route.fulfill({json:{saved:true}}));
     await page.route('**/api/setup/status',route=>route.fulfill({json:{canConfigure:true,csrfToken:'synthetic'}}));
     let requestLanguage;
     await page.route('**/api/setup/validate',route=>{
