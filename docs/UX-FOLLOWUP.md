@@ -7,7 +7,7 @@ Scope: seven findings from the independent Astra review of merged commit `49659e
 | Duplicate global-role display names | Implemented | Display name plus sAMAccountName, stable SID/provider submission. Independent review; 28 backend, 41 Node, 13 browser checks passed; required CI passed. |
 | Password editing after focus loss replaces optional secret fields with blanks | Implemented | Preserve/Replace contract; metadata edits require no secret read; blur resets replacement to Preserve; explicit audited read for replacement. Fresh Modify authorization, revision checks and encrypted history retained. |
 | Successful mutation acknowledgement lost after focus loss | Implemented | Separate dialog-instance and secret-read epochs; successful forms retire with safe acknowledgement; pending duplicate submissions blocked; old completion leaves newer dialogs intact. Independent review; 26 backend, 41 Node, 11 existing browser checks and three new safety checks passed after required-label correction. |
-| Ambiguous license assignments and immediate reclaim/context loss | Pending | |
+| Ambiguous license assignments and immediate reclaim/context loss | Implemented | License-scoped Modify-authorized user search, display/account names with stable-ID fallback, explicit full-path resource selection, reclaim confirmation and refreshed parent return. Review corrected inactive-fieldset validation. 16 backend, 41 Node, 20 existing accessibility checks and two assignment workflows passed. |
 | License overview request fan-out and all-or-nothing failure | Pending | |
 | License expiry date shifts during edit/save | Pending | |
 | Audit export/paging move when new events arrive | Pending | |

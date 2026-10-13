@@ -720,5 +720,12 @@
   "Läs sparade värden för ersättning": "Read saved values for replacement",
   "Välj ersättning först.": "Select replacement first.",
   "Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen.": "Metadata can be saved without reading the password. Replacement changes username, password and notes together; empty optional fields are cleared. Focus loss switches back to preserving stored values.",
-  "Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas.": "You do not have read permission. Metadata can be edited while preserving secrets. If you choose replacement, enter all secret values you want to save."
+  "Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas.": "You do not have read permission. Metadata can be edited while preserving secrets. If you choose replacement, enter all secret values you want to save.",
+  "Licensen är inte tillgänglig.": "The license is unavailable.",
+  "Alla platser är tilldelade. Återta en tilldelning innan du lägger till en ny.": "All seats are assigned. Reclaim an assignment before adding another.",
+  "Bekräfta återtagning": "Confirm reclaim",
+  "Återta {seats} platser från {recipient}?": "Reclaim {seats} seats from {recipient}?",
+  "Inga tilldelningar ännu.": "No assignments yet.",
+  "Tilldela platser": "Assign seats",
+  "Återta platser": "Reclaim seats"
 }

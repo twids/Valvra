@@ -547,7 +547,7 @@
         body.append(node("p", t("Testet använder det aktuella sparade kontot och lösenordet. Ett misslyckat försök kan bidra till kontolåsning i AD.")));
         hint(body, t("Ett bind-försök utförs utan automatiska återförsök. Kontot kan testas högst en gång per fem minuter i denna tjänsteinstans."));
     }
-    function directoryPicker(parent) {
+    function directoryPicker(parent,options={}) {
         const picker = node("fieldset"); picker.append(node("legend", t("Mottagare"))); parent.append(picker); parent = picker;
         const kind = select(parent, t("Typ"), [["0", t("Användare")], ["1", t("AD-grupp")]]); const query = field(parent, t("Sök i Active Directory"), "text"); query.minLength = 2; query.maxLength = 128;
         const results = select(parent, t("Välj träff"), [["", t("Sök och välj en träff")]]); let subjects = [];
@@ -564,10 +564,10 @@
             const epoch = searchEpoch;
             search.disabled = true; results.setAttribute("aria-busy", "true");
             try {
-                const found = await api(`/directory?query=${encodeURIComponent(text)}&kind=${kind.value}`);
+                const found = await api((options.searchPath||"/directory")+`?query=${encodeURIComponent(text)}&kind=${kind.value}`);
                 if (epoch !== searchEpoch || !results.isConnected || !$("dialog").open) return;
                 subjects = found;
-                subjects.forEach(subject => { const o = node("option", subject.name + " · " + subject.id); o.value = subject.id; results.append(o); });
+                subjects.forEach(subject => { const o = node("option", subject.name + (subject.samAccountName?" · "+subject.samAccountName:"")+" · " + subject.id); o.value = subject.id; results.append(o); });
                 status.textContent = subjects.length ? subjects.length + t(" träffar. Välj en träff i listan.") : t("Inga träffar");
                 results.focus();
             } catch (error) { if (epoch === searchEpoch && results.isConnected) status.textContent = error.message; }
@@ -579,6 +579,7 @@
         results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : ""; });
         const pick = () => { const selected = subjects.find(x => x.id === results.value); if (!selected) throw new Error(t("Sök och välj en användare eller grupp först.")); return selected; };
         pick.onlyUsers = enabled => { if (enabled && kind.value !== "0") { kind.value = "0"; reset(); } kind.disabled = enabled; };
+        pick.clear=reset;
         return pick;
     }
     function identityLabel(access, row) {
@@ -775,25 +776,38 @@
             return [String(version.version), date(version.createdAt), version.createdBy, actions];
         }));
     }
-    async function assignmentDialog(license, resource) {
-        const epoch = ++dialogEpoch;
-        const assignments = await api(`/licenses/${license.id}/assignments`); if (!canDisplay(epoch)) return;
-        const body = dialog(t("Tilldelningar · ") + license.product);
-        hint(body, t("{assigned} av {seats} platser tilldelade.", {assigned: license.assignedSeats, seats: license.seats}));
-        if (resource?.permissions & 4) body.append(button(t("+ Tilldela platser"), () => {
-            let mode, pick, target, seats; const form = dialog(t("Tilldela licensplatser"), t("Tilldela"), async () => {
+    async function assignmentDialog(license, resource,feedback) {
+        resource=state.resources.find(x=>x.id===license.resourceId);
+        const loaded=await metadataDialog(t("Tilldelningar · ")+license.product,async()=>{
+            const [rows,licenses]=await Promise.all([api(`/licenses/${license.id}/assignments`),api(`/resources/${license.resourceId}/licenses`)]);
+            const current=licenses.find(x=>x.id===license.id);if(!current)throw new Error(t("Licensen är inte tillgänglig."));return{rows,current};
+        },()=>assignmentDialog(license,resource));if(!loaded)return;
+        const {body,value:{rows:assignments,current}}=loaded;license=current;
+        const assigned=assignments.reduce((sum,x)=>sum+x.seats,0),available=Math.max(0,license.seats-assigned);
+        if(feedback){const result=node("p",feedback,"notice");result.setAttribute("role","status");body.append(result);}
+        hint(body, t("{assigned} av {seats} platser tilldelade.", {assigned,seats:license.seats}));
+        const returnToOverview=()=>assignmentDialog(license,resource);
+        if (resource?.permissions & 4) {const add=button(t("+ Tilldela platser"), () => {
+            let mode, pick, target, seats; const form = dialog(t("Tilldela licensplatser"), t("Tilldela platser"), async () => {
+                if(mode.value==="resource"&&!target.value)throw new Error(t("Välj en destinationsresurs"));
                 const subject = mode.value === "user" ? pick() : null;
                 await api("/assignments", { licenseId: license.id, resourceId: mode.value === "resource" ? target.value : null,
-                    userProvider: subject?.provider || null, userId: subject?.id || null, seats: Number(seats.value) }); await render();
-            });
+                    userProvider: subject?.provider || null, userId: subject?.id || null, seats: Number(seats.value) }); await load();
+            },{back:returnToOverview,afterSave:message=>assignmentDialog(license,resource,message)});
             mode = select(form, t("Tilldela till"), [["user", t("Användare")], ["resource", t("Resurs")]]);
-            const users = node("div"); pick = directoryPicker(users); users.querySelector("select").disabled = true; form.append(users);
-            const resources = node("div"); target = select(resources, t("Resurs"), state.resources.filter(x => x.permissions & 1).map(x => [x.id, x.name])); form.append(resources); resources.hidden = true;
-            mode.addEventListener("change", () => { users.hidden = mode.value !== "user"; resources.hidden = mode.value !== "resource"; });
-            seats = field(form, t("Antal platser"), "number", "1", true); seats.min = "1"; seats.max = String(license.seats);
-        }));
-        table(body, [t("Tilldelad till"), t("Platser"), t("Datum"), ""], assignments.map(x => [x.userId || state.resources.find(r => r.id === x.resourceId)?.name || x.resourceId, String(x.seats), date(x.createdAt),
-            resource?.permissions & 4 ? button(t("Återta"), async () => { await api(`/assignments/${x.id}/remove`, {}); await render(); closeDialog(); }) : ""]));
+            const users = node("div"); pick = directoryPicker(users,{searchPath:`/licenses/${license.id}/people`});pick.onlyUsers(true);form.append(users);
+            const resources = node("div"); target = select(resources, t("Resurs"), [["",t("Välj en destinationsresurs")],...state.resources.filter(x=>x.permissions&1).map(x=>[x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],"");form.append(resources);resources.hidden=true;target.disabled=true;
+            mode.addEventListener("change",()=>{pick.clear();target.value="";users.hidden=mode.value!=="user";users.querySelector("fieldset").disabled=users.hidden;resources.hidden=mode.value!=="resource";target.disabled=mode.value!=="resource";target.required=!target.disabled;});
+            seats = field(form, t("Antal platser"), "number", "1", true); seats.min = "1"; seats.max = String(available);
+        });add.disabled=!available;body.append(add);if(!available)hint(body,t("Alla platser är tilldelade. Återta en tilldelning innan du lägger till en ny."));}
+        table(body, [t("Tilldelad till"), t("Platser"), t("Datum"), ""], assignments.map(x => {
+            const target=state.resources.find(r=>r.id===x.resourceId),label=x.userId?(x.userName||x.userId)+(x.samAccountName?" · "+x.samAccountName:""):(target?groupPath(target.groupId).map(g=>g.name).concat(target.name).join(" / "):x.resourceId);
+            const identity=node("div");identity.append(node("strong",label),node("p",x.userId?(x.userProvider+" · "+x.userId):x.resourceId,"hint audit-id"));
+            return[identity,String(x.seats),date(x.createdAt),resource?.permissions&4?button(t("Återta platser"),()=>{
+                const confirmation=dialog(t("Bekräfta återtagning"),t("Återta platser"),async()=>{await api(`/assignments/${x.id}/remove`,{});await load();},{back:returnToOverview,afterSave:message=>assignmentDialog(license,resource,message)});
+                hint(confirmation,t("Återta {seats} platser från {recipient}?",{seats:x.seats,recipient:label}));
+            },"danger"):""];
+        })).classList.add("mobile-records");if(!assignments.length)hint(body,t("Inga tilldelningar ännu."));
     }
     function auditScopeLabel(view) {
         if (!view.signatureValid) return t("Auditkontext kan inte verifieras.");

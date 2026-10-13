@@ -86,7 +86,9 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
     public Task RestoreLicenseVersionAsync(Actor actor, Guid id, int version, long revision, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.RestoreLicenseVersionAsync(actor, id, version, revision, correlation, ct), ct);
 
-    public Task<IReadOnlyList<LicenseAssignment>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct) =>
+    public Task<IReadOnlyList<DirectorySubject>> LicensePeopleAsync(Actor actor,Guid licenseId,string query,CancellationToken ct)=>
+        integrity.RunAsync(()=>operations.LicensePeopleAsync(actor,licenseId,query,ct),ct);
+    public Task<IReadOnlyList<LicenseAssignmentView>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct) =>
         integrity.RunAsync(() => operations.AssignmentsAsync(actor, licenseId, ct), ct);
 
     public Task<Guid> AssignLicenseAsync(Actor actor, LicenseAssignment assignment, string correlation, CancellationToken ct) =>

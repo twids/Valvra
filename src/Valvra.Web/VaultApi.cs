@@ -121,6 +121,8 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => { await vault.RestoreLicenseVersionAsync(actor, id, body.Version, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
         api.MapGet("/licenses/{id:guid}/assignments", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await vault.AssignmentsAsync(actor, id, ctx.RequestAborted))));
+        api.MapGet("/licenses/{id:guid}/people",async(Guid id,string query,HttpContext ctx,CurrentActor current,VaultService vault)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await vault.LicensePeopleAsync(actor,id,query,ctx.RequestAborted))));
         api.MapPost("/assignments", async (LicenseAssignment body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.AssignLicenseAsync(actor, body, ctx.TraceIdentifier, ctx.RequestAborted) })));
         api.MapPost("/assignments/{id:guid}/remove", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>

@@ -15,6 +15,7 @@ public sealed record SecretView(Guid Id, string Title, int CurrentVersion, long 
 public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, string CreatedBy);
 public sealed record LicenseView(Guid Id, Guid ResourceId, string Product, string Vendor, string PurchaseReference,
     int Seats, int AssignedSeats, DateTimeOffset? ExpiresAt, long Revision, int CurrentVersion);
+public sealed record LicenseAssignmentView(Guid Id,Guid LicenseId,string? UserProvider,string? UserId,Guid? ResourceId,int Seats,DateTimeOffset CreatedAt,string? UserName=null,string? SamAccountName=null);
 public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList<ResourceOwner> Owners, IReadOnlyList<DirectorySubject>? Subjects = null,
     VaultPermission EffectivePermissions = VaultPermission.None);
 
@@ -390,11 +391,29 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
             license.Seats, license.ExpiresAt, change == SecretChange.Clear ? null : payload, revision, correlation, ct, change);
     }
 
-    public async Task<IReadOnlyList<LicenseAssignment>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct)
+    public async Task<IReadOnlyList<DirectorySubject>> LicensePeopleAsync(Actor actor,Guid licenseId,string query,CancellationToken ct)
+    {
+        var license=await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==licenseId&&!x.Deleted,ct)??throw new AccessDeniedException();
+        await access.RequireAsync(actor,TargetKind.Resource,license.ResourceId,VaultPermission.Modify,ct);
+        if(query.Trim().Length is <2 or >128)throw new VaultValidationException("Ange 2–128 tecken för katalogsökning.");
+        return await directory.SearchAsync(query.Trim(),SubjectKind.User,ct);
+    }
+    public async Task<IReadOnlyList<LicenseAssignmentView>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct)
     {
         var license = await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x => x.Id == licenseId && !x.Deleted, ct) ?? throw new AccessDeniedException();
         await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Metadata, ct);
-        return await db.Assignments.AsNoTracking().Where(x => x.LicenseId == licenseId).ToListAsync(ct);
+        var rows=await db.Assignments.AsNoTracking().Where(x=>x.LicenseId==licenseId).ToListAsync(ct);
+        var names=new Dictionary<(string,string),DirectorySubject>();
+        using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(TimeSpan.FromSeconds(5));
+        foreach(var (provider,id) in rows.Where(x=>x.UserProvider is not null&&x.UserId is not null).Select(x=>(x.UserProvider!,x.UserId!)).Distinct().Take(100)){
+            if(provider!=directory.ProviderId||budget.IsCancellationRequested)continue;
+            try{var subject=await directory.FindAsync(id,SubjectKind.User,budget.Token);if(subject is null)continue;
+                if(subject.Provider!=provider||subject.Id!=id||subject.Kind!=SubjectKind.User)throw new AccessDeniedException();names[(provider,id)]=subject;}
+            catch(Exception error)when(error is VaultUnavailableException or LdapException or DirectoryOperationException){break;}
+            catch(OperationCanceledException)when(!ct.IsCancellationRequested){break;}
+        }
+        ct.ThrowIfCancellationRequested();
+        return rows.Select(x=>{names.TryGetValue((x.UserProvider??"",x.UserId??""),out var subject);return new LicenseAssignmentView(x.Id,x.LicenseId,x.UserProvider,x.UserId,x.ResourceId,x.Seats,x.CreatedAt,subject?.Name,subject?.SamAccountName);}).ToArray();
     }
 
     public async Task<Guid> AssignLicenseAsync(Actor actor, LicenseAssignment assignment, string correlation, CancellationToken ct)
