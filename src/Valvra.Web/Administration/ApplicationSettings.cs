@@ -118,6 +118,12 @@ public static class SettingsApi
     public static void MapSettingsApi(this WebApplication app)
     {
         var api = app.MapGroup("/api/settings").RequireAuthorization();
+        api.MapGet("/certificates", (HttpContext ctx, CurrentActor current, Valvra.Infrastructure.Security.KeyProtectionOptions keys,
+            Valvra.Infrastructure.Auditing.AuditDatabaseOptions audit, Valvra.Infrastructure.Security.IntegrityOptions integrity) =>
+            current.RunAsync(ctx, actor => {
+                if (!actor.IsAccessAdministrator && !actor.IsSystemAdministrator) throw new AccessDeniedException();
+                return Task.FromResult(Results.Ok(CertificateStatus.Read(keys, audit, integrity)));
+            }));
         api.MapGet("/directory", (HttpContext ctx, CurrentActor current, ApplicationSettingsService settings) =>
             current.RunAsync(ctx, async actor => Results.Ok(await settings.ReadAsync(actor, ctx.RequestAborted))));
         api.MapGet("/providers", (HttpContext ctx, CurrentActor current, GlobalRoleService globals, ProviderRegistry modules) =>

@@ -4,6 +4,7 @@ const routes = require('../../src/Valvra.Web/wwwroot/js/navigation.js');
 
 test('all views and group/resource contexts round-trip using stable identifiers',()=>{
     for(const route of [{view:'vault'},{view:'groups'},{view:'licenses'},{view:'audit'},{view:'settings'},
+        {view:'settings',section:'people'},{view:'settings',section:'import'},{view:'settings',section:'directory'},{view:'settings',section:'certificates'},{view:'settings',section:'about'},
         {view:'vault',resourceId:'abc-123'},{view:'groups',groupId:'def-456'},
         {view:'groups',groupId:'def-456',resourceId:'abc-123'}])
         assert.deepEqual(routes.parse(routes.url(route)),route);
@@ -13,7 +14,7 @@ test('all views and group/resource contexts round-trip using stable identifiers'
 test('unknown routes, encoded delimiters, query data and excess path segments are rejected',()=>{
     for(const path of ['/api/session','/setup','/resources/a/extra','/groups/a/licenses/b',
         '/groups/a/resources','//evil.example','/resources/../audit','/resources/%2f','/resources/a?password=value',
-        '/resources/'+ 'x'.repeat(129)]) assert.equal(routes.parse(path),null,path);
+        '/resources/'+ 'x'.repeat(129),'/settings/unknown','/settings/about/extra']) assert.equal(routes.parse(path),null,path);
 });
 test('unsafe resource identifiers and unsupported resource contexts cannot produce links',()=>{
     for(const route of [{view:'vault',resourceId:'<script>'},{view:'vault',resourceId:'a/b'},

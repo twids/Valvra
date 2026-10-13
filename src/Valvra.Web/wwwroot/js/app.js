@@ -41,11 +41,14 @@
     function resolveRoute(route) {
         const previousGroup = state.group?.id;
         state.view = route?.view || "vault";
+        state.settingsSection = route?.section || (state.session.isAccessAdministrator ? "people" : "directory");
         state.group = route?.groupId ? state.groups.find(group => group.id === route.groupId) || null : null;
         state.resource = route?.resourceId ? state.resources.find(resource => resource.id === route.resourceId) || null : null;
         routeUnavailable = !route || !!route.groupId && !state.group || !!route.resourceId && !state.resource
             || route.view === "audit" && !state.session.isAuditor
             || route.view === "settings" && !state.session.isSystemAdministrator && !state.session.isAccessAdministrator
+            || route.view === "settings" && state.settingsSection === "directory" && !state.session.isSystemAdministrator
+            || route.view === "settings" && state.settingsSection === "import" && !state.session.isAccessAdministrator
             || !!state.group && !!state.resource && !groupIds(state.group.id, true).has(state.resource.groupId);
         if (previousGroup !== state.group?.id) { state.groupSearch = ""; state.groupIncludeSubgroups = true; }
     }
@@ -185,7 +188,8 @@
         if (state.view === "vault") { if (state.resource) await resourcePage(); else resourcesPage(); }
         else if (state.view === "groups") { if (state.resource) await resourcePage(); else if (state.group) groupPage(); else groupsPage(); }
         else if (state.view === "licenses") await licenseOverview();
-        else if (state.view === "settings") await window.ValvraSettings.render({state, api, node, button, field, panel, table, hint, heading, dialog, notice, t, render, refreshSession, isCurrent: () => settingsEpoch === renderEpoch});
+        else if (state.view === "settings") await window.ValvraSettings.render({state, api, node, button, field, panel, table, hint, heading, dialog, notice, t, render, refreshSession, routeLink,
+            openImport:() => window.ValvraImport.open({state, api, node, button, field, select, hint, table, dialog, notice, load, t}), isCurrent: () => settingsEpoch === renderEpoch});
         else await auditPage();
     }
     function appendImportAction() {

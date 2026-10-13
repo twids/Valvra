@@ -37,6 +37,7 @@ public static class VaultApi
             {
                 await audit.RecordAsync(actor, "Session.Identified", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
                 return Results.Ok(new { actor.DisplayName, actor.Provider, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor, actor.IsSystemAdministrator,
+                    applicationVersion = BuildInformation.Version, build = BuildInformation.Build,
                     csrfToken = csrf.GetAndStoreTokens(ctx).RequestToken });
             }));
 
