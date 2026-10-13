@@ -157,7 +157,7 @@ test('saving returns focus to the page heading when the original row was replace
     await page.getByRole('button', {name: 'Spara', exact: true}).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
     await expect(page.getByRole('heading', {name: 'Databasplattform', exact: true})).toBeFocused();
-    await expect(page.locator('#notice')).toContainText('sparats och auditerats');
+    await expect(page.locator('#notice')).toContainText('Klart och auditerat: Ändra licens');
 });
 
 test('focus-loss security retains metadata, clears secret fields and avoids live-region disclosure', async ({page}) => {

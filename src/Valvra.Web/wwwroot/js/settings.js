@@ -109,7 +109,7 @@
                     })));
                     if (!people.length) status.textContent = t("Inga träffar");
                 };
-                const searchButton = button(t("Sök"), runSearch);
+                const searchButton = button(t("Sök"), runSearch, "", false);
                 search.addEventListener("input", () => { searchEpoch++; subject = null; results.replaceChildren(); status.textContent = ""; });
                 search.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); searchButton.click(); } });
                 body.append(searchButton, results, status);

@@ -46,7 +46,7 @@ test('late directory response cannot restore recipients from an old query', asyn
     const search = page.getByLabel('Search Active Directory', {exact:true});
     const oldRequest = page.waitForRequest('**/api/directory?query=Old&kind=0');
     await search.fill('Old'); await search.press('Enter'); await oldRequest;
-    await search.fill('New'); await search.press('Enter');
+    await search.fill('New'); await page.getByRole('button', {name:'Search', exact:true}).click();
     const results = page.getByLabel('Select result', {exact:true});
     await expect(results).toContainText('New');
     const oldResponse = page.waitForResponse('**/api/directory?query=Old&kind=0'); release(); await oldResponse;

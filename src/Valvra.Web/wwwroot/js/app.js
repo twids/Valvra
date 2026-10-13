@@ -13,11 +13,12 @@
     let dialogEpoch = 0;
     let revealedDialog = false;
     let dialogOpener;
+    let noticeTimer;
     const focusHeading = () => $("page-title").focus();
     const canDisplay = epoch => epoch === dialogEpoch && !document.hidden && document.hasFocus();
     let lastActivity = Date.now();
     const node = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) i18n.setText(n, text); if (className) n.className = className; return n; };
-    const button = (text, action, style = "") => { const n = node("button", text, "button " + style); n.type = "button"; n.addEventListener("click", () => safely(action)); return n; };
+    const button = (text, action, style = "", guard = true) => { const n = node("button", text, "button " + style); n.type = "button"; let running = false; n.addEventListener("click", () => safely(async () => { if (!guard) return action(); if (running) return; running = true; n.setAttribute("aria-disabled", "true"); try { await action(); } finally { running = false; n.removeAttribute("aria-disabled"); } })); return n; };
     function routeLink(text, route, style = "") {
         const link = node("a", text, "button " + style); link.href = navigation.url(route); bindRouteLink(link); return link;
     }
@@ -48,6 +49,7 @@
         if (previousGroup !== state.group?.id) { state.groupSearch = ""; state.groupIncludeSubgroups = true; }
     }
     async function navigate(path, { traversal = false, initial = false } = {}) {
+        clearNotice();
         const route = navigation.parse(path);
         rememberView(); closeDialog(); resolveRoute(route);
         const canonical = route ? navigation.url(route) : path;
@@ -65,7 +67,18 @@
     const has = bit => !!(state.resource && (state.resource.permissions & bit));
     const date = value => value ? new Date(value).toLocaleString(i18n.locale) : "—";
     const rights = value => [[1, "Metadata"], [2, t("Läsa")], [4, t("Ändra")], [8, t("Behörigheter")], [16, "LDAP-test"]].filter(([bit]) => value & bit).map(([, name]) => name).join(", ");
-    function notice(message, error = false) { const target = $(error ? "page-error" : "notice"); $(error ? "notice" : "page-error").hidden = true; i18n.setText(target, message); target.hidden = false; }
+    function clearNotice() { clearTimeout(noticeTimer); $("notice").hidden = true; }
+    function notice(message, error = false) {
+        clearNotice();
+        const target = $(error ? "page-error" : "notice"); $(error ? "notice" : "page-error").hidden = true;
+        const text = node("span", message);
+        const dismiss = button(t("Stäng meddelande"), () => { target.hidden = true; focusHeading(); }, "quiet");
+        target.replaceChildren(text, dismiss); target.hidden = false;
+        if (!error) {
+            const expire = () => { if (target.contains(document.activeElement) || target.matches(":hover")) noticeTimer = setTimeout(expire, 1000); else target.hidden = true; };
+            noticeTimer = setTimeout(expire, 10000);
+        }
+    }
     async function safely(action) { try { await action(); } catch (error) { const message = error.message || t("Operationen misslyckades."); if ($("dialog").open) $("dialog-error").textContent = message; else notice(message, true); } }
     async function api(path, body) {
         const options = { credentials: "same-origin", cache: "no-store", headers: { "Accept": "application/json", "X-Valvra-Language": i18n.language } };
@@ -104,12 +117,12 @@
         closeDialog(); dialogOpener = opener; $("dialog-title").textContent = title; $("dialog-error").textContent = "";
         const content = $("dialog-content");
         delete content.dataset.importCleared;
-        const actions = $("dialog-actions"); actions.append(button(t("Avbryt"), closeDialog));
+        const actions = $("dialog-actions"); actions.append(button(t(submit ? "Avbryt" : "Stäng dialog"), closeDialog));
         if (submit) { const save = node("button", submitLabel, "button primary"); save.type = "submit"; actions.append(save); }
         $("dialog-form").onsubmit = async event => {
             event.preventDefault(); if (!submit || !$("dialog").open || document.hidden || !document.hasFocus()) return;
             const controls = Array.from(actions.querySelectorAll("button")); controls.forEach(x => x.disabled = true);
-            try { const message = await submit(); if (message === false) return; closeDialog(); notice(message === undefined ? t("Ändringen har sparats och auditerats.") : message); }
+            try { const message = await submit(); if (message === false) return; closeDialog(); notice(message === undefined ? t("Klart och auditerat: {action}.", {action: String(title)}) : message); }
             catch (error) { $("dialog-error").textContent = error.message; }
             finally { controls.forEach(x => x.disabled = false); updateSecretSubmitState(); }
         };
@@ -133,7 +146,8 @@
     function heading(title, description, actions = []) { i18n.setText($("page-title"), title); document.title = title + " · Valvra"; i18n.setText($("page-description"), description); $("page-actions").replaceChildren(...actions); }
     function table(parent, headers, rows) {
         const wrap = node("div", undefined, "table-wrap"); const grid = node("table"); const head = node("thead"); const tr = node("tr");
-        const title = parent.querySelector("h2,h3")?.textContent || $("dialog-title").textContent || $("page-title").textContent;
+        const title = parent.querySelector("h2,h3")?.textContent || parent.closest("section")?.querySelector("h2,h3")?.textContent
+            || (parent.closest("dialog") ? $("dialog-title").textContent : $("page-title").textContent);
         wrap.tabIndex = 0; wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", title + t(" – tabell, kan rullas i sidled"));
         grid.append(node("caption", title, "visually-hidden"));
         headers.forEach(x => { const th = node("th", x || t("Åtgärder")); th.scope = "col"; tr.append(th); }); head.append(tr); grid.append(head); const body = node("tbody");
@@ -439,7 +453,7 @@
             } catch (error) { if (epoch === searchEpoch && results.isConnected) status.textContent = error.message; }
             finally { if (epoch === searchEpoch) { search.disabled = false; results.removeAttribute("aria-busy"); } }
         };
-        const search = button(t("Sök"), runSearch); parent.append(search);
+        const search = button(t("Sök"), runSearch, "", false); parent.append(search);
         query.addEventListener("input", reset); kind.addEventListener("change", reset);
         query.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); if (!search.disabled) safely(runSearch); } });
         results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : ""; });

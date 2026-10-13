@@ -1,4 +1,6 @@
 {
+  "Stäng meddelande": "Stäng meddelande",
+  "Klart och auditerat: {action}.": "Klart och auditerat: {action}.",
   "Avancerade anslutningsval": "Avancerade anslutningsval",
   "Anslutningstimeout (sekunder)": "Anslutningstimeout (sekunder)",
   "1–120 sekunder. Gäller anslutningen, inte tiden för databasfrågor.": "1–120 sekunder. Gäller anslutningen, inte tiden för databasfrågor.",

@@ -1,4 +1,6 @@
 {
+  "Stäng meddelande": "Dismiss message",
+  "Klart och auditerat: {action}.": "Completed and audited: {action}.",
   "Avancerade anslutningsval": "Advanced connection options",
   "Anslutningstimeout (sekunder)": "Connection timeout (seconds)",
   "1–120 sekunder. Gäller anslutningen, inte tiden för databasfrågor.": "1–120 seconds. Applies to connecting, not database query execution.",

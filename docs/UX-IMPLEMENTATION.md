@@ -5,7 +5,7 @@ Scope: all 22 findings in [UX review](UX-REVIEW.md). Work is based on released 1
 | Batch | Findings | State | Validation |
 | --- | --- | --- | --- |
 | Safe directory recipient selection | UX-03, UX-04, recipient-type part of UX-13 | Implemented | Independent security review: no blockers. Preview build, syntax checks, permission/settings browser tests. Explicit recipient POST and delayed-response regressions included. |
-| Feedback and dialog infrastructure | UX-01, UX-18, shared pending/Close behavior | Pending | |
+| Feedback and dialog infrastructure | UX-01, UX-18, shared pending/Close behavior | Implemented | Independent review findings corrected; 27 browser checks passed and 11 affected checks rerun after corrections. Dismissible/expiring success, persistent errors, text-only rendering, scoped table names, duplicate action guard. |
 | Readable and understandable permissions | UX-02, UX-05, UX-06, UX-07, remainder UX-13 | Pending | |
 | Administrator import and diagnostics | UX-08, UX-09 | Pending | |
 | Administration navigation, version, certificates | UX-10, UX-20, UX-21 | Pending | |
