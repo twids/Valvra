@@ -95,8 +95,9 @@
                 const search = field(body, t("Sök personkonto"), "text"); search.minLength = 2; search.maxLength = 128;
                 const results = node("div"), status = node("p"); status.setAttribute("role", "status");
                 let searchEpoch = 0;
-                body.append(button(t("Sök"), async () => {
+                const runSearch = async () => {
                     const epoch = ++searchEpoch;
+                    subject = null; results.replaceChildren(); status.textContent = "";
                     if (search.value.trim().length < 2) throw new Error(t("Ange 2–128 tecken för katalogsökning."));
                     const people = await api("/settings/people?query=" + encodeURIComponent(search.value.trim()));
                     if (epoch !== searchEpoch || !results.isConnected) return;
@@ -107,7 +108,11 @@
                         checks[0][1].focus();
                     })));
                     if (!people.length) status.textContent = t("Inga träffar");
-                }), results, status);
+                };
+                const searchButton = button(t("Sök"), runSearch);
+                search.addEventListener("input", () => { searchEpoch++; subject = null; results.replaceChildren(); status.textContent = ""; });
+                search.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); searchButton.click(); } });
+                body.append(searchButton, results, status);
             }
             const rights = node("fieldset"); rights.append(node("legend", t("Rättigheter"))); body.append(rights);
             roleLabels.forEach(([bit, label]) => { const row = node("div", undefined, "check-row"), input = field(row, t(label), "checkbox"); input.checked = !!(existing?.roles & bit); checks.push([bit, input]); rights.append(row); });

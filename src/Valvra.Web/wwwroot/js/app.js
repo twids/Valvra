@@ -415,12 +415,37 @@
         hint(body, t("Ett bind-försök utförs utan automatiska återförsök. Kontot kan testas högst en gång per fem minuter i denna tjänsteinstans."));
     }
     function directoryPicker(parent) {
-        const kind = select(parent, t("Typ"), [["0", t("Användare")], ["1", t("AD-grupp")]]); const query = field(parent, t("Sök i Active Directory"), "text"); query.maxLength = 128;
+        const kind = select(parent, t("Typ"), [["0", t("Användare")], ["1", t("AD-grupp")]]); const query = field(parent, t("Sök i Active Directory"), "text"); query.minLength = 2; query.maxLength = 128;
         const results = select(parent, t("Välj träff"), [["", t("Sök och välj en träff")]]); let subjects = [];
         const status = node("p", undefined, "hint"); status.setAttribute("role", "status"); parent.append(status);
-        parent.append(button(t("Sök"), async () => { subjects = await api(`/directory?query=${encodeURIComponent(query.value)}&kind=${kind.value}`); results.replaceChildren(); subjects.forEach(subject => { const o = node("option", subject.name); o.value = subject.id; results.append(o); }); if (!subjects.length) { const o = node("option", t("Inga träffar")); o.value = ""; results.append(o); } status.textContent = subjects.length + t(" träffar. Välj en träff i listan."); }));
-        kind.addEventListener("change", () => { subjects = []; results.replaceChildren(); });
-        return () => { const selected = subjects.find(x => x.id === results.value); if (!selected) throw new Error(t("Sök och välj en användare eller grupp först.")); return selected; };
+        let searchEpoch = 0;
+        const reset = () => {
+            searchEpoch++; subjects = []; results.replaceChildren(node("option", t("Sök och välj en träff"))); results.options[0].value = "";
+            status.textContent = ""; search.disabled = false; results.removeAttribute("aria-busy");
+        };
+        const runSearch = async () => {
+            reset();
+            const text = query.value.trim();
+            if (text.length < 2 || text.length > 128) { status.textContent = t("Ange 2–128 tecken för katalogsökning."); query.focus(); return; }
+            const epoch = searchEpoch;
+            search.disabled = true; results.setAttribute("aria-busy", "true");
+            try {
+                const found = await api(`/directory?query=${encodeURIComponent(text)}&kind=${kind.value}`);
+                if (epoch !== searchEpoch || !results.isConnected || !$("dialog").open) return;
+                subjects = found;
+                subjects.forEach(subject => { const o = node("option", subject.name + " · " + subject.id); o.value = subject.id; results.append(o); });
+                status.textContent = subjects.length ? subjects.length + t(" träffar. Välj en träff i listan.") : t("Inga träffar");
+                results.focus();
+            } catch (error) { if (epoch === searchEpoch && results.isConnected) status.textContent = error.message; }
+            finally { if (epoch === searchEpoch) { search.disabled = false; results.removeAttribute("aria-busy"); } }
+        };
+        const search = button(t("Sök"), runSearch); parent.append(search);
+        query.addEventListener("input", reset); kind.addEventListener("change", reset);
+        query.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); if (!search.disabled) safely(runSearch); } });
+        results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : ""; });
+        const pick = () => { const selected = subjects.find(x => x.id === results.value); if (!selected) throw new Error(t("Sök och välj en användare eller grupp först.")); return selected; };
+        pick.onlyUsers = enabled => { if (enabled && kind.value !== "0") { kind.value = "0"; reset(); } kind.disabled = enabled; };
+        return pick;
     }
     async function accessDialog(kind, target) {
         const epoch = ++dialogEpoch;
@@ -451,7 +476,7 @@
         [[2, t("Läsa hemligheter")], [4, t("Ändra innehåll")], [8, t("Hantera behörigheter")], [16, t("Testa mot LDAP")]].forEach(([bit, label]) => { const row = node("div", undefined, "check-row"); const input = field(row, label, "checkbox"); input.value = "on"; checks.push({ bit, input }); permissions.append(row); });
         const times = node("div", undefined, "field-row"); const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         start = field(times, t("Från"), "datetime-local", localDate(new Date())); expiry = field(times, t("Till"), "datetime-local", localDate(new Date(Date.now() + 3600000))); body.append(times); times.hidden = true;
-        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; times.hidden = !temp; start.required = expiry.required = temp; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; }); });
+        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; pick.onlyUsers(temp); times.hidden = !temp; start.required = expiry.required = temp; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; }); });
         hint(body, t("Metadataåtkomst ingår. Vid tillfällig rätt är Från och Till obligatoriska. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."));
     }
     function ownerDialog(kind, target) {
