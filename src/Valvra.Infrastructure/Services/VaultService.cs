@@ -1,5 +1,6 @@
 using Valvra.Infrastructure.Security;
 using System.Text.Json;
+using System.DirectoryServices.Protocols;
 using Microsoft.EntityFrameworkCore;
 using Valvra.Core;
 using Valvra.Infrastructure.Auditing;
@@ -14,7 +15,8 @@ public sealed record SecretView(Guid Id, string Title, int CurrentVersion, long 
 public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, string CreatedBy);
 public sealed record LicenseView(Guid Id, Guid ResourceId, string Product, string Vendor, string PurchaseReference,
     int Seats, int AssignedSeats, DateTimeOffset? ExpiresAt, long Revision, int CurrentVersion);
-public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList<ResourceOwner> Owners);
+public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList<ResourceOwner> Owners, IReadOnlyList<DirectorySubject>? Subjects = null,
+    VaultPermission EffectivePermissions = VaultPermission.None);
 
 public sealed class VaultOperations(VaultDbContext db, AccessService access, AuditService audit, ISecretCipher cipher, TimeProvider clock,
     IDirectoryProvider directory, VaultIntegrity integrity)
@@ -200,7 +202,26 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
             || kind == TargetKind.Resource && x.TargetKind == TargetKind.Resource && x.TargetId == id).ToListAsync(ct);
         var owners = await db.Owners.AsNoTracking().Where(x => x.TargetKind == TargetKind.Group && path.Contains(x.TargetId)
             || kind == TargetKind.Resource && x.TargetKind == TargetKind.Resource && x.TargetId == id).ToListAsync(ct);
-        return new(grants, owners);
+        var subjects = new List<DirectorySubject>();
+        using var lookupBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        lookupBudget.CancelAfter(TimeSpan.FromSeconds(5));
+        var identities = grants.Select(x => (x.Provider, x.SubjectId, x.SubjectKind))
+            .Concat(owners.Select(x => (x.Provider, x.SubjectId, x.SubjectKind))).Distinct().Take(100);
+        foreach (var (provider, subjectId, subjectKind) in identities)
+        {
+            if (provider != directory.ProviderId || lookupBudget.IsCancellationRequested) continue;
+            try
+            {
+                var subject = await directory.FindAsync(subjectId, subjectKind, lookupBudget.Token);
+                if (subject is null) continue;
+                if (subject.Provider != provider || subject.Id != subjectId || subject.Kind != subjectKind) throw new AccessDeniedException();
+                subjects.Add(subject);
+            }
+            catch (Exception error) when (error is VaultUnavailableException or LdapException or DirectoryOperationException) { break; } // Names are optional; keep access rows manageable during directory outages.
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { break; }
+        }
+        ct.ThrowIfCancellationRequested();
+        return new(grants, owners, subjects, await access.EffectiveAsync(actor, kind, id, ct));
     }
 
     public async Task<Guid> GrantAsync(Actor actor, AccessGrant grant, string correlation, CancellationToken ct)

@@ -75,3 +75,25 @@ test('global role search Enter searches and changing text clears the chosen pers
     await search.fill('different'); await page.getByRole('button', {name:'Save', exact:true}).click();
     await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Select'); expect(writes).toBe(0);
 });
+
+test('cancel and save return to permissions, revoke requires confirmation, names render as text', async ({page}) => {
+    let revokes = 0;
+    await page.route('**/api/access/1/*', async route => {
+        const response = await route.fetch(); const access = await response.json();
+        access.subjects = [{provider:'ad', id:'user', kind:0, name:'<img src=x onerror=alert(1)> Example Person'}];
+        await route.fulfill({response,json:access});
+    });
+    await page.route('**/api/grants/*/revoke', route => { revokes++; return route.fulfill({status:204}); });
+    await grant(page); await page.getByRole('button',{name:'← Back',exact:true}).click();
+    const permissions = page.getByRole('dialog',{name:'Permissions · Databasplattform',exact:true});
+    await expect(permissions).toBeVisible(); await expect(permissions).toContainText('Example Person');
+    await expect(permissions.locator('img')).toHaveCount(0);
+    await permissions.getByRole('button',{name:/^Revoke/}).click();
+    await expect(page.getByRole('dialog',{name:'Revoke access · Databasplattform',exact:true})).toBeVisible();
+    expect(revokes).toBe(0);
+    await page.getByRole('button',{name:'← Back',exact:true}).click(); expect(revokes).toBe(0);
+    await permissions.getByRole('button',{name:/^Revoke/}).click();
+    await page.getByRole('button',{name:'Revoke',exact:true}).click();
+    await expect(permissions).toBeVisible(); expect(revokes).toBe(1);
+    await expect(permissions.getByRole('status')).toContainText('Completed and audited');
+});

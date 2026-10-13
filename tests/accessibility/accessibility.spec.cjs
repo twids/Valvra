@@ -119,6 +119,8 @@ test('resource tables and password/license dialogs satisfy automated WCAG rules'
         if (name === 'Behörigheter') {
             await page.getByRole('button', {name: '+ Tilldela åtkomst', exact: true}).click();
             await audit(page);
+            await page.keyboard.press('Escape');
+            await expect(page.getByRole('dialog', {name: 'Behörigheter · Databasplattform', exact:true})).toBeVisible();
         }
         await page.keyboard.press('Escape');
         await expect(page.getByRole('dialog')).not.toBeVisible();
