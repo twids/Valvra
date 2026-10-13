@@ -174,6 +174,7 @@
         if (selected !== undefined && selected !== null) s.value = selected; parent.append(l, s); return s;
     }
     function hint(parent, text) { parent.append(node("p", text, "hint")); }
+    function controlGroup(parent){const group=node("div",undefined,"filter-control");parent.append(group);return group;}
     function empty(parent, title, text) { const box = node("div", undefined, "empty"); box.append(node("h2", title), node("p", text)); parent.append(box); }
     function heading(title, description, actions = []) { i18n.setText($("page-title"), title); document.title = title + " · Valvra"; i18n.setText($("page-description"), description); $("page-actions").replaceChildren(...actions); }
     function table(parent, headers, rows) {
@@ -237,7 +238,7 @@
         const content = $("content");
         if (!state.resources.length) { empty(content, t("Inga resurser ännu"), state.session.isAccessAdministrator ? t("Skapa en resursgrupp, lägg till resurser och tilldela åtkomst för att öppna valvet.") : t("Be en resursägare eller behörighetsadministratör tilldela dig åtkomst.")); return; }
         const toolbar = node("div", undefined, "toolbar"); const search = node("input"); search.placeholder = t("Sök bland dina resurser…"); search.setAttribute("aria-label", t("Sök resurser")); search.value = state.resourceSearch; toolbar.append(search);
-        const filter = select(toolbar, t("Resursgrupp"), [["", t("Alla grupper")], ...sortedGroups(state.groups).map(x => [x.id, groupPath(x.id).map(g => g.name).join(" / ")])], state.resourceGroup);
+        const filter = select(controlGroup(toolbar), t("Resursgrupp"), [["", t("Alla grupper")], ...sortedGroups(state.groups).map(x => [x.id, groupPath(x.id).map(g => g.name).join(" / ")])], state.resourceGroup);
         const tree = node("div", undefined, "check-row"); const descendants = field(tree, t("Inkludera undergrupper"), "checkbox"); descendants.checked = state.resourceIncludeSubgroups; descendants.disabled = !filter.value; toolbar.append(tree); content.append(toolbar);
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); content.append(count);
         const cards = node("div", undefined, "cards"); content.append(cards);
@@ -254,8 +255,8 @@
         toolbar.append(button(t("Rensa filter"),()=>{search.value="";filter.value="";descendants.checked=true;descendants.disabled=true;state.resourceSearch="";state.resourceGroup="";state.resourceIncludeSubgroups=true;paint();search.focus();})); paint();
     }
     function browseControls(toolbar, paint) {
-        const layout=select(toolbar,t("Visning"),[["cards",t("Kort")],["list",t("Kompakt lista")]],state.resourceLayout);
-        const sort=select(toolbar,t("Sortering"),[["name",t("Namn A–Ö")],["reverse",t("Namn Ö–A")],["group",t("Resursgrupp")]],state.resourceSort);
+        const layout=select(controlGroup(toolbar),t("Visning"),[["cards",t("Kort")],["list",t("Kompakt lista")]],state.resourceLayout);
+        const sort=select(controlGroup(toolbar),t("Sortering"),[["name",t("Namn A–Ö")],["reverse",t("Namn Ö–A")],["group",t("Resursgrupp")]],state.resourceSort);
         layout.addEventListener("change",()=>{state.resourceLayout=layout.value;paint();});sort.addEventListener("change",()=>{state.resourceSort=sort.value;paint();});
     }
     function resourceCollection(parent, resources, level="h2") {
@@ -693,9 +694,9 @@
         if (epoch !== renderEpoch) return;
         const expiring=x=>x.expiresAt&&new Date(x.expiresAt)<new Date(Date.now()+30*86400000);
         const stats=node("div",undefined,"summary-grid"),toolbar=node("div",undefined,"toolbar"); $("content").append(stats,toolbar);
-        const search=field(toolbar,t("Sök licenser"),"search",state.licenseFilters.search||"");
-        const filter=select(toolbar,t("Licensfilter"),[["all",t("Alla")],["assigned",t("Med tilldelade platser")],["expiring",t("Utgångna eller förfaller inom 30 dagar")],["full",t("Inga lediga platser")]],state.licenseFilters.filter||"all");
-        const sort=select(toolbar,t("Sortera"),[["product",t("Produkt")],["expiry",t("Giltig till")],["available",t("Lediga platser")],["resource",t("Resurs")]],state.licenseFilters.sort||"product");
+        const search=field(controlGroup(toolbar),t("Sök licenser"),"search",state.licenseFilters.search||"");
+        const filter=select(controlGroup(toolbar),t("Licensfilter"),[["all",t("Alla")],["assigned",t("Med tilldelade platser")],["expiring",t("Utgångna eller förfaller inom 30 dagar")],["full",t("Inga lediga platser")]],state.licenseFilters.filter||"all");
+        const sort=select(controlGroup(toolbar),t("Sortera"),[["product",t("Produkt")],["expiry",t("Giltig till")],["available",t("Lediga platser")],["resource",t("Resurs")]],state.licenseFilters.sort||"product");
         const section=panel($("content"),t("Programlicenser")),count=node("p",undefined,"hint"),results=node("div");count.setAttribute("role","status");section.append(count,results);
         const summaries=[];
         const paint=()=>{
@@ -798,8 +799,8 @@
         const from = filter(t("Från"), "datetime-local"), to = filter(t("Till (exklusive)"), "datetime-local");
         const actor = filter(t("Aktörens ID"), "text"), action = filter(t("Operation"), "text"); $("content").append(toolbar);
         const actorChoices=targets.actors||[],actionChoices=targets.actions||[];
-        const actorChoice=select(toolbar,t("Registrerade aktörer"),[["",t("Välj eller ange ID nedan")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
-        const operationChoice=select(toolbar,t("Registrerade operationer"),[["",t("Välj eller ange kod nedan")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
+        const actorChoice=select(controlGroup(toolbar),t("Registrerade aktörer"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
+        const operationChoice=select(controlGroup(toolbar),t("Registrerade operationer"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
         actorChoice.disabled=operationChoice.disabled=targetsUnavailable;
         hint(toolbar,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
         const targetFilter = (label, options) => {
@@ -820,7 +821,8 @@
         let actorProvider=saved.actorProvider||"";
         const read=()=>({from:from.value,to:to.value,actor:actor.value,actorProvider,action:action.value,resource:resource.value,group:group.value,descendants:descendants.checked});
         let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0;
-        actorChoice.value=String(actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider)+1);operationChoice.value=action.value;
+        const selectedActor=actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider);
+        actorChoice.value=selectedActor<0?"":String(selectedActor+1);operationChoice.value=action.value;
         const panelNode = panel($("content"), t("Händelser")); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
         const remember=()=>{state.auditFilters={...read(),offset:applied.offset,applied:{...applied}};dirty.textContent=t("Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.");
             dirty.hidden=Object.entries(read()).every(([key,value])=>applied[key]===value);};

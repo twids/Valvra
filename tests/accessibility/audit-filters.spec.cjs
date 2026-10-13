@@ -57,7 +57,7 @@ test('group-only filtering works with subgroup checkbox and pagination', async (
 
 test('recorded actors resolve names and apply exact provider and operation while boundaries disable paging',async({page})=>{
     await page.goto('/audit');
-    const choice=page.getByLabel('Registrerade aktörer',{exact:true});await expect(choice.locator('option')).toHaveCount(2);
+    const choice=page.getByLabel('Registrerade aktörer',{exact:true});await expect(choice.locator('option')).toHaveCount(2);await expect(choice).toHaveValue('');
     await choice.selectOption('1');await page.getByLabel('Registrerade operationer',{exact:true}).selectOption('Secret.Create');
     const response=page.waitForResponse(r=>r.url().includes('/api/audit?'));
     await page.getByRole('button',{name:'Filtrera',exact:true}).click();const received=await response;

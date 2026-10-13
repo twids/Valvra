@@ -69,3 +69,4 @@ dialog:has(.permissions-overview){width:min(1100px,calc(100vw - 32px));max-width
 .settings-panel > p, .settings-panel > form {margin: 1rem;}
 .settings-form details {margin: 1rem 0;}
 .settings-form summary {cursor: pointer; margin-bottom: .8rem;}
+.toolbar{align-items:end}.toolbar>.filter-control{flex:1 1 180px;min-width:0;max-width:100%}.filter-control>label{display:block;margin-bottom:6px}.filter-control>input,.filter-control>select{width:100%;min-width:0;max-width:100%}.audit-filters>.hint{grid-column:1/-1}

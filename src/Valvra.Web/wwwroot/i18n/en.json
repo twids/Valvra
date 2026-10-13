@@ -709,5 +709,7 @@
   "Åtkomst nekad": "Access denied",
   "Exportera auditlogg": "Export audit log",
   "Fälten töms om {seconds} sekunder.": "Fields clear in {seconds} seconds.",
-  "Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata.": "Reading stopped when the page lost focus. Retry to read current metadata."
+  "Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata.": "Reading stopped when the page lost focus. Retry to read current metadata.",
+  "Välj registrerad aktör": "Select a recorded actor",
+  "Välj registrerad operation": "Select a recorded operation"
 }
