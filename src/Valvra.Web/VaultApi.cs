@@ -131,17 +131,22 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => { await vault.UnassignLicenseAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
 
         api.MapGet("/audit", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider, HttpContext ctx, CurrentActor current, IAuditReader reader) =>
-            await current.RunAsync(ctx, async actor => Results.Ok(await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
-                resourceId, groupId, includeSubgroups ?? true, actorProvider), ctx.RequestAborted))));
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader,AuditSnapshotStore snapshots) =>
+            await current.RunAsync(ctx, async actor => {
+                var query=new AuditQuery(from,to,actorId,action,targetId,offset??0,resourceId,groupId,includeSubgroups??true,actorProvider);
+                if(query.Offset is <0 or >1000000)throw new VaultValidationException("Ogiltig sidposition.");
+                var token=snapshotId??snapshots.Create(actor,query,await reader.ReadSnapshotAsync(actor,query,ctx.RequestAborted));
+                var page=snapshots.Page(actor,token,query);ctx.Response.Headers["X-Valvra-Audit-Snapshot"]=page.Id.ToString();
+                ctx.Response.Headers["X-Valvra-Audit-Captured"]=page.CapturedAt.ToString("O");ctx.Response.Headers["X-Valvra-Audit-Expires"]=page.ExpiresAt.ToString("O");return Results.Ok(page.Events);
+            }));
         api.MapGet("/audit/targets", async (HttpContext ctx, CurrentActor current, IAuditReader reader, IDirectoryProvider directory) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await AuditPresentation.NamesAsync(actor,await reader.ReadTargetsAsync(actor, ctx.RequestAborted),directory,ctx.RequestAborted))));
         api.MapGet("/audit/export", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit) =>
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit,AuditSnapshotStore snapshots) =>
             await current.RunAsync(ctx, async actor =>
             {
-                var events = await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
-                    resourceId, groupId, includeSubgroups ?? true, actorProvider), ctx.RequestAborted);
+                var query=new AuditQuery(from,to,actorId,action,targetId,offset??0,resourceId,groupId,includeSubgroups??true,actorProvider);
+                var events=snapshotId is {} token?snapshots.Page(actor,token,query).Events:await reader.ReadAsync(actor,query,ctx.RequestAborted);
                 await audit.RecordAsync(actor, "Audit.Export", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
                 return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(events), "application/json", "valvra-audit.json");
             }));

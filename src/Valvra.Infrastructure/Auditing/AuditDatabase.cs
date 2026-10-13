@@ -160,12 +160,15 @@ public sealed record AuditEventView(AuditEvent Event, string PayloadHash, string
 
 public interface IAuditReader
 {
+    Task<IReadOnlyList<AuditEventView>> ReadSnapshotAsync(Actor actor,AuditQuery query,CancellationToken ct);
     Task<IReadOnlyList<AuditEventView>> ReadAsync(Actor actor, AuditQuery query, CancellationToken ct);
     Task<AuditTargetOptions> ReadTargetsAsync(Actor actor, CancellationToken ct);
 }
 
 public sealed class AuditReader(AuditDatabaseOptions options, IAuditSigner signer) : IAuditReader
 {
+    public Task<IReadOnlyList<AuditEventView>> ReadSnapshotAsync(Actor actor,AuditQuery query,CancellationToken ct)=>
+        WindowsCredentialRunner.RunAsync(options.ReaderWindowsCredentials,async()=>SelectSnapshot(await ReadAllAsync(actor,ct),query));
     public Task<IReadOnlyList<AuditEventView>> ReadAsync(Actor actor, AuditQuery query, CancellationToken ct) =>
         WindowsCredentialRunner.RunAsync(options.ReaderWindowsCredentials, () => ReadCoreAsync(actor, query, ct));
 
@@ -222,10 +225,11 @@ public sealed class AuditReader(AuditDatabaseOptions options, IAuditSigner signe
         return SelectPage(await ReadAllAsync(actor, ct), query);
     }
 
-    internal static IReadOnlyList<AuditEventView> SelectPage(IEnumerable<AuditEventView> events, AuditQuery query) =>
+    internal static IReadOnlyList<AuditEventView> SelectSnapshot(IEnumerable<AuditEventView> events,AuditQuery query)=>
         events.Where(x => !x.SignatureValid || Matches(x.Event, query))
-            .OrderByDescending(x => x.Event.Timestamp).ThenByDescending(x => x.Event.Id)
-            .Skip(query.Offset).Take(200).ToArray();
+            .OrderByDescending(x => x.Event.Timestamp).ThenByDescending(x => x.Event.Id).ToArray();
+    internal static IReadOnlyList<AuditEventView> SelectPage(IEnumerable<AuditEventView> events, AuditQuery query) =>
+        SelectSnapshot(events,query).Skip(query.Offset).Take(200).ToArray();
 
     private static bool Matches(AuditEvent value, AuditQuery query) =>
         (query.From is null || value.Timestamp >= query.From) && (query.To is null || value.Timestamp < query.To)

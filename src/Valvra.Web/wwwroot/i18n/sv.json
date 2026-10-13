@@ -730,5 +730,11 @@
   "Återta platser": "Återta platser",
   "Licensöversikten kunde inte läsas färdigt.": "Licensöversikten kunde inte läsas färdigt.",
   "Ofullständig översikt: sammanfattningar, sökning och sortering gäller bara inlästa licenser.": "Ofullständig översikt: sammanfattningar, sökning och sortering gäller bara inlästa licenser.",
-  "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon.": "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon."
+  "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon.": "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon.",
+  "Auditvyn är för stor. Begränsa datumintervallet eller filtren.": "Auditvyn är för stor. Begränsa datumintervallet eller filtren.",
+  "Auditvyn har löpt ut. Läs aktuella händelser innan du fortsätter.": "Auditvyn har löpt ut. Läs aktuella händelser innan du fortsätter.",
+  "Filtren stämmer inte med auditvyn. Läs aktuella händelser.": "Filtren stämmer inte med auditvyn. Läs aktuella händelser.",
+  "Uppdatera auditvyn": "Uppdatera auditvyn",
+  "Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.": "Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.",
+  "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.": "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export."
 }

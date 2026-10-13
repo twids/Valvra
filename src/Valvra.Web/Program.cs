@@ -74,6 +74,7 @@ try
         options.Cookie.SameSite = SameSiteMode.Strict;
     });
     builder.Services.AddScoped<CurrentActor>();
+    builder.Services.AddSingleton<AuditSnapshotStore>();
     builder.Services.AddRateLimiter(options =>
     {
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

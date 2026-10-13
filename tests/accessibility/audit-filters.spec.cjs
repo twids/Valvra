@@ -85,3 +85,21 @@ test('filter target failure leaves the audit list accessible', async ({page}) =>
     await expect(page.getByLabel('Resurs', {exact: true})).toBeDisabled();
     await expect(page.getByText('Filterval kunde inte läsas. Auditlistan kan fortfarande visas.', {exact: true})).toBeVisible();
 });
+
+test('export keeps displayed events after new events arrive and refresh explicitly captures a new view',async({page})=>{
+ const initial=page.waitForResponse(r=>r.url().includes('/api/audit?'));await page.goto('/audit');const before=await(await initial).json();await expect(page.getByRole('table')).toBeVisible();
+ // The independently audited export adds a new matching event to the source.
+ expect((await page.request.get('/api/audit/export')).ok()).toBe(true);
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'Exportera denna sida',exact:true}).click();const exported=JSON.parse(await fs.readFile(await(await download).path(),'utf8'));
+ expect(exported.map(x=>x.Event.Id)).toEqual(before.map(x=>x.event.id));
+ const refreshed=page.waitForResponse(r=>r.url().includes('/api/audit?'));await page.getByRole('button',{name:'Uppdatera auditvyn',exact:true}).click();
+ expect((await(await refreshed).json()).map(x=>x.event.id)).not.toEqual(before.map(x=>x.event.id));
+});
+
+test('expired audit snapshot offers an explicit refresh instead of retrying the expired token',async({page})=>{
+ let expired=false;await page.route('**/api/audit?*',route=>expired?route.fulfill({status:409,json:{error:'Expired synthetic view'}}):route.continue());
+ await page.goto('/audit');await expect(page.getByRole('table')).toBeVisible();expired=true;
+ await page.getByRole('button',{name:'Uppdatera auditvyn',exact:true}).click();await expect(page.getByText('Expired synthetic view',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Exportera denna sida',exact:true})).toBeDisabled();
+ expired=false;await page.getByRole('button',{name:'Uppdatera auditvyn',exact:true}).last().click();await expect(page.getByText('Expired synthetic view',{exact:true})).toHaveCount(0);await expect(page.getByRole('table')).toBeVisible();
+});

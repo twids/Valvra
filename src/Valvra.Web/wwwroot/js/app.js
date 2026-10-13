@@ -96,7 +96,10 @@
         if (body !== undefined) { options.method = "POST"; options.headers["Content-Type"] = "application/json"; options.headers["X-CSRF-TOKEN"] = state.session.csrfToken; options.body = JSON.stringify(body); }
         const response = await fetch("/api" + path, options);
         if (!response.ok) { const error = await response.json().catch(() => ({})); const failure = new Error(error.error || (response.status === 401 ? t("Windows-inloggningen kunde inte verifieras.") : t("Operationen kunde inte slutföras."))); failure.status = response.status; failure.retryAfter = Math.min(120, Math.max(1, Number(response.headers.get("Retry-After")) || 60)); throw failure; }
-        return response.status === 204 ? null : response.json();
+        if(response.status===204)return null;
+        const value=await response.json();
+        if(path.startsWith("/audit?")&&Array.isArray(value)){value.snapshotId=response.headers?.get?.("X-Valvra-Audit-Snapshot");value.capturedAt=response.headers?.get?.("X-Valvra-Audit-Captured");value.expiresAt=response.headers?.get?.("X-Valvra-Audit-Expires");}
+        return value;
     }
     function clearSecrets() {
         clearTimeout(secretTimer);
@@ -861,7 +864,7 @@
         descendants.checked = saved.descendants !== false;
         let actorProvider=saved.actorProvider||"";
         const read=()=>({from:from.value,to:to.value,actor:actor.value,actorProvider,action:action.value,resource:resource.value,group:group.value,descendants:descendants.checked});
-        let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0;
+        let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0,snapshotExpired=false;
         const selectedActor=actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider);
         actorChoice.value=selectedActor<0?"":String(selectedActor+1);operationChoice.value=action.value;
         const panelNode = panel($("content"), t("Händelser")); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
@@ -873,27 +876,29 @@
         operationChoice.addEventListener("change",()=>{action.value=operationChoice.value;remember();});
         [from,to,resource,group,descendants].forEach(input=>{input.addEventListener("input",remember);input.addEventListener("change",remember);});
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); panelNode.append(count);
-        function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
-        const availability=busy=>{previous.disabled=busy||!hasResults||applied.offset===0;next.disabled=busy||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||!hasResults;apply.disabled=busy;};
+        const snapshotInfo=node("p",undefined,"hint");panelNode.append(snapshotInfo);
+        function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.snapshotId)params.set("snapshotId",value.snapshotId);if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
+        const availability=busy=>{previous.disabled=busy||snapshotExpired||!hasResults||applied.offset===0;next.disabled=busy||snapshotExpired||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||snapshotExpired||!hasResults||!applied.snapshotId;apply.disabled=refreshAudit.disabled=busy;};
         const paint = async requested => {
             const requestEpoch = ++paintEpoch;availability(true);failure.replaceChildren();results.setAttribute("aria-busy","true");count.textContent=t("Läser in…");
             try {
             const events = await api("/audit?" + query(requested)); if (epoch !== renderEpoch || requestEpoch !== paintEpoch) return;
-            applied={...requested};hasResults=true;rowCount=events.length;remember();results.replaceChildren();
+            applied={...requested,snapshotId:events.snapshotId||requested.snapshotId};snapshotExpired=false;hasResults=true;rowCount=events.length;remember();results.replaceChildren();
+            snapshotInfo.textContent=events.capturedAt?t("Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.",{captured:date(events.capturedAt),expires:date(events.expiresAt)}):t("Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.");
             count.textContent = events.length + t(" händelser visas på sida ") + (applied.offset / 200 + 1) + ".";
             if (!events.length) { empty(results, t("Inga händelser"), t("Ändra filtret eller gå till föregående sida.")); return; }
             table(results, [t("Tid"), t("Aktör"), t("Operation"), t("Resurs / resursgrupp"), t("Resultat"), t("Verifiering")], events.map(x => [date(x.event.timestamp), node("span", x.event.actorId, "audit-id"),
                 auditActionLabel(x.event.action), auditScopeLabel(x),
                 x.event.outcome, node("span", x.signatureValid ? t("Giltig signatur") : t("Ogiltig signatur"), "badge" + (x.signatureValid ? "" : " error"))]));
-            }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t("Försök igen"),()=>paint(requested)));}
+            }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;if(error.status===409)snapshotExpired=true;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t(error.status===409?"Uppdatera auditvyn":"Försök igen"),()=>paint(error.status===409?{...requested,snapshotId:undefined,offset:0}:requested)));}
             finally{if(epoch===renderEpoch&&requestEpoch===paintEpoch){results.removeAttribute("aria-busy");availability(false);}}
         };
         const filterActions = node("div", undefined, "actions filter-actions"); toolbar.append(filterActions);
         const apply=button(t("Filtrera"),()=>{if(from.value&&to.value&&new Date(from.value)>=new Date(to.value))throw new Error(t("Sluttiden måste vara efter starttiden."));return paint({...read(),offset:0});});
         const exportPage=button(t("Exportera denna sida"), async () => {
-            const response = await fetch("/api/audit/export?" + query(applied), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok) throw new Error(t("Auditexporten misslyckades."));
+            const response = await fetch("/api/audit/export?" + query(applied), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok){if(response.status===409){snapshotExpired=true;availability(false);}throw new Error(t(response.status===409?"Auditvyn har löpt ut. Läs aktuella händelser innan du fortsätter.":"Auditexporten misslyckades."));}
             const url = URL.createObjectURL(await response.blob()); const link = node("a"); link.href = url; link.download = "valvra-audit.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-        });filterActions.append(apply,exportPage);
+        });const refreshAudit=button(t("Uppdatera auditvyn"),()=>paint({...applied,snapshotId:undefined,offset:0}));filterActions.append(apply,exportPage,refreshAudit);
         const previous=button(t("← Föregående"),()=>paint({...applied,offset:Math.max(0,applied.offset-200)})),next=button(t("Nästa →"),()=>paint({...applied,offset:applied.offset+200}));
         const paging = node("div", undefined, "actions");paging.append(previous,next);$("content").append(paging);await paint(applied);
     }

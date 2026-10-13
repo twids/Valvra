@@ -346,6 +346,10 @@ internal sealed class TestAuthentication(IOptionsMonitor<AuthenticationSchemeOpt
 
 internal sealed class TestAuditReader(RecordingTransport transport) : IAuditReader
 {
+    public Task<IReadOnlyList<AuditEventView>> ReadSnapshotAsync(Actor actor,AuditQuery query,CancellationToken ct){
+        if(!actor.IsEnabled||!actor.IsAuditor)throw new AccessDeniedException();
+        return Task.FromResult(AuditReader.SelectSnapshot(transport.Events.Select(x=>new AuditEventView(x,AuditSignature.Hash(x),"test-key",true)),query));
+    }
     public Task<AuditTargetOptions> ReadTargetsAsync(Actor actor, CancellationToken ct)
     {
         if (!actor.IsEnabled || !actor.IsAuditor) throw new AccessDeniedException();

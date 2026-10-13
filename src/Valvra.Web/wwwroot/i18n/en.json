@@ -730,5 +730,11 @@
   "Återta platser": "Reclaim seats",
   "Licensöversikten kunde inte läsas färdigt.": "The license overview could not finish loading.",
   "Ofullständig översikt: sammanfattningar, sökning och sortering gäller bara inlästa licenser.": "Partial overview: summaries, search and sorting cover only loaded licenses.",
-  "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon.": "Dates use your local time zone. An unchanged date keeps the exact expiry instant; a new date expires at the end of that day in your time zone."
+  "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon.": "Dates use your local time zone. An unchanged date keeps the exact expiry instant; a new date expires at the end of that day in your time zone.",
+  "Auditvyn är för stor. Begränsa datumintervallet eller filtren.": "The audit view is too large. Narrow the date range or filters.",
+  "Auditvyn har löpt ut. Läs aktuella händelser innan du fortsätter.": "The audit view expired. Read current events before continuing.",
+  "Filtren stämmer inte med auditvyn. Läs aktuella händelser.": "The filters do not match this audit view. Read current events.",
+  "Uppdatera auditvyn": "Refresh audit view",
+  "Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.": "Audit view captured {captured}, valid until {expires}. Signatures were verified when captured. Refresh the audit view for new events.",
+  "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.": "The audit view has no stable snapshot. Refresh before exporting."
 }
