@@ -12,4 +12,12 @@ Scope: seven findings from the independent Astra review of merged commit `49659e
 | License expiry date shifts during edit/save | Implemented | Local calendar date display; unchanged date preserves exact stored instant; changed dates use local end-of-day. 46 Node tests include four time zones and a DST boundary. |
 | Audit export/paging move when new events arrive | Implemented | Immutable, actor/filter-bound server snapshots; bounded payload cache and five-minute expiry; exact snapshot paging/export with fresh auditor authorization and required export audit acknowledgement. 28 backend, 46 Node, 23 browser checks and seven audit workflows including new arrivals/expiry passed. |
 
+## Combined verification
+
+The combined implementation passed 272 backend tests (two external-database tests skipped locally), 46 Node checks, all 97 accessibility/browser workflows and all six import workflows. SQL Server/PostgreSQL checks passed in CI on implementation commit `4fb7c77`.
+
+One of the two CI browser runs caught a race in the existing success-notice expiry test: it advanced the clock before awaiting the asynchronous acknowledgement, and did not remove the pointer from the message's intentional hover pause. Commit `fd43c68` corrects those test preconditions without changing application behavior; all 15 checks across five repetitions passed, with independent review. Required CI is rerunning on that correction.
+
+This closes the seven-defect implementation checklist, not application-wide UX acceptance. The [journey review](UX-JOURNEY-REVIEW.md) identifies seven broader improvements across administrator and ordinary-user tasks, with explicit evidence limits and an implementation order. Its first slice clarifies administration/global-role scope, resource paths, capability wording and permission-aware empty states without adding permissions or endpoints.
+
 Limits: synthetic tests do not establish production IIS/AD/SSO, real directory display/account names, the installation's original import failure, certificate rotation/restoration, or manual screen-reader behavior. Keep secret clearing and server authorization as invariants throughout the next journey review.
