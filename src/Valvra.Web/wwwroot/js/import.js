@@ -112,57 +112,73 @@
         return {groups: plannedGroups, resources: plannedResources, entries};
     }
     async function execute(preview, api, cancelled, progress) {
-        const ids = new Map(), report = {created: 0, skipped: 0, groups: 0, resources: 0, stopped: false, uncertainRow: null};
+        const ids = new Map(), report = {created: 0, skipped: 0, groups: 0, resources: 0, stopped: false, uncertainRow: null, errorCode: null, failedRow: null};
         const resolve = id => ids.get(id) || id;
         const stop = () => { if (cancelled()) { report.stopped = true; return true; } return false; };
         try {
-            // Read duplicate metadata before any write. No old secret values are requested.
-            const titles = new Map();
-            for (const id of new Set(preview.entries.map(x => x.resourceId))) {
+            const operations = [
+                ...preview.groups.map(x => ({key:x.id, kind:"group", target:x.parentId, name:x.name})),
+                ...preview.resources.map(x => ({key:x.id, kind:"resource", target:x.groupId, name:x.name})),
+                ...preview.entries.map(x => ({key:"row:" + x.row, kind:"secret", target:x.resourceId, name:x.title, payload:x.payload, row:x.row}))
+            ];
+            for (let offset = 0; offset < operations.length;) {
                 if (stop()) return report;
-                const current = id.startsWith("resource:") ? [] : await api(`/resources/${id}/secrets`);
-                titles.set(id, new Set(current.map(x => key(x.title))));
+                const batch = operations.slice(offset, offset + 12).map(x => ({...x, target:resolve(x.target)}));
+                while (batch.length > 1 && new TextEncoder().encode(JSON.stringify({operations:batch})).length > 1536 * 1024) batch.pop();
+                let response;
+                while (!response) {
+                    try { response = await api("/imports/batch", {operations:batch}); }
+                    catch (error) {
+                        // 429 is rejected before processing. Never retry an uncertain write or other failure.
+                        if (error.status !== 429) throw error;
+                        const until = Date.now() + (error.retryAfter || 60) * 1000;
+                        progress({...report, waiting:true});
+                        while (Date.now() < until) { if (stop()) return report; await new Promise(resolve => setTimeout(resolve, 250)); }
+                        if (stop()) return report;
+                    }
+                }
+                for (const result of response.results) {
+                    const operation = batch.find(x => x.key === result.key);
+                    if (!operation) throw new Error("Invalid import response");
+                    ids.set(result.key, result.id);
+                    if (operation.kind === "secret") {
+                        if (result.created) report.created++; else report.skipped++;
+                        operation.payload.password = operation.payload.notes = operation.payload.username = "";
+                    } else if (result.created) report[operation.kind === "group" ? "groups" : "resources"]++;
+                }
+                progress({...report});
+                if (response.errorCode) {
+                    report.stopped = true; report.errorCode = response.errorCode;
+                    report.failedRow = batch.find(x => x.key === response.failedKey)?.row || null;
+                    report.uncertainRow = response.uncertainRow; return report;
+                }
+                offset += batch.length;
             }
-            for (const group of preview.groups) {
-                if (stop()) return report;
-                ids.set(group.id, (await api("/groups", {name: group.name, parentId: resolve(group.parentId)})).id); report.groups++;
-            }
-            for (const resource of preview.resources) {
-                if (stop()) return report;
-                ids.set(resource.id, (await api("/resources", {name: resource.name, groupId: resolve(resource.groupId)})).id); report.resources++;
-            }
-            for (const entry of preview.entries) {
-                if (stop()) return report;
-                const known = titles.get(entry.resourceId), title = key(entry.title);
-                if (known.has(title)) { report.skipped++; progress({...report}); continue; }
-                report.uncertainRow = entry.row;
-                await api(`/resources/${resolve(entry.resourceId)}/secrets`, {title: entry.title, payload: entry.payload, ldapProfileId: null});
-                report.uncertainRow = null; known.add(title); report.created++; progress({...report});
-                entry.payload.password = entry.payload.notes = entry.payload.username = "";
-            }
-        } catch { report.stopped = true; }
+        } catch { report.stopped = true; report.errorCode = "Transport"; report.uncertainRow = -1; }
         return report;
     }
-    let clearActive = () => {}, transitioning = false;
-    function clear() { if (!transitioning) clearActive(); }
+    let clearActive = () => {}, transitioning = false, activeSession = 0;
+    function clear(reason = "close") { if (!transitioning) { clearActive(); if (reason !== "blur") { clearActive = () => {}; activeSession++; } } }
     function open(ctx) {
         const {state, api, node, button, field, select, hint, table, dialog, notice, load, t} = ctx;
+        if (!state.session.isAccessAdministrator) { notice(t("Import kräver behörighetsadministration."), true); return; }
+        const session = ++activeSession;
         let csv, rows = [], preview, stopped = false, busy = false, step = 0;
         const wipe = () => {
             stopped = true;
             csv?.rows.forEach(row => row.fill("")); csv = null;
             rows.forEach(row => { row.payload.username = row.payload.password = row.payload.notes = ""; }); rows = [];
             preview?.entries.forEach(row => { row.payload.username = row.payload.password = row.payload.notes = ""; });
-            if (document.getElementById("dialog").open && step && !busy) {
+            if (session === activeSession && document.getElementById("dialog").open && step) {
                 document.getElementById("dialog-content").dataset.importCleared = "true";
-                document.getElementById("dialog-error").textContent = t("Importdata har tömts. Välj filen igen.");
+                document.getElementById("dialog-error").textContent = t(busy ? "Importdata har tömts. Pågående batch kan slutföras. Kontrollera destinationen före ett nytt försök." : "Importdata har tömts. Välj filen igen.");
                 document.querySelectorAll("#dialog-actions button[type=submit]").forEach(x => x.disabled = true);
             }
         };
         function show(title, label, submit) {
             transitioning = true;
-            try { return dialog(t(title), label ? t(label) : null, submit); }
-            finally { transitioning = false; clearActive = wipe; }
+            try { const body = dialog(t(title), label ? t(label) : null, submit); hint(body, t("Steg {step} av 4", {step:title === "Import · Resultat" ? 4 : step + 1})); return body; }
+            finally { transitioning = false; if (session === activeSession) clearActive = wipe; }
         }
         const translateError = error => new Error(String(t(error.message)));
         const groupLabel = group => {
@@ -180,12 +196,12 @@
                     rows = mapRows(csv, selected, mode.value === "resource" ? "Import" : fallback.value);
                     // Refresh destinations before planning; never trust the file for permissions.
                     [state.groups, state.resources] = await Promise.all([api("/groups"), api("/resources")]);
-                    if (stopped) return false;
+                    if (stopped || session !== activeSession) return false;
                     preview = plan(rows, state.groups, state.resources, base.value, mode.value === "resource" ? target.value : null, overrides);
                     const knownTitles = new Map();
                     for (const id of new Set(preview.entries.map(x => x.resourceId))) {
                         const current = id.startsWith("resource:") ? [] : await api(`/resources/${id}/secrets`);
-                        if (stopped) return false;
+                        if (stopped || session !== activeSession) return false;
                         knownTitles.set(id, new Set(current.map(x => key(x.title))));
                     }
                     for (const entry of preview.entries) {
@@ -231,19 +247,25 @@
                 if (stopped) throw new Error(String(t("Importdata har tömts. Välj filen igen.")));
                 busy = true;
                 const status = node("p", t("Import pågår…")); status.setAttribute("role", "status"); body.append(status);
-                const report = await execute(preview, api, () => stopped, current => { status.textContent = t("Sparade: {created}. Överhoppade: {skipped}.", current); });
-                busy = false; wipe(); clearActive = () => {};
+                body.append(button(t("Avbryt import"), () => { stopped = true; }));
+                const report = await execute(preview, api, () => stopped || session !== activeSession, current => { if (session === activeSession) status.textContent = current.waiting ? t("Importen väntar på tjänstens anropsgräns. Avbryt stoppar nästa batch.") : t("Sparade: {created}. Överhoppade: {skipped}.", current); });
+                busy = false; wipe(); if (session !== activeSession) return false; clearActive = () => {};
                 const message = t("Sparade: {created}. Överhoppade: {skipped}. Nya grupper: {groups}. Nya resurser: {resources}.", report);
+                const reasons = {Denied:"Importen nekades. Kontrollera administratörsrollen och destinationens rättigheter.", Invalid:"Importen stoppades av en ogiltig post eller tvetydig destination.", Conflict:"Destinationen har ändrats. Kontrollera den innan du försöker igen.", Unavailable:"Valvet eller auditanslutningen är inte tillgänglig. Kontrollera destinationen före ett nytt försök.", Transport:"Svaret uteblev. Den senaste batchen kan ha sparats. Kontrollera destinationen före ett nytt försök."};
+                const reason = report.errorCode ? t(reasons[report.errorCode] || reasons.Transport) : "";
                 if (report.stopped) {
-                    notice(String(message) + " " + t("Importen stoppades. Redan sparade objekt finns kvar. Kontrollera destinationen före ett nytt försök."), true);
-                    if (report.uncertainRow) notice(String(message) + " " + t("Rad {row} kan ha sparats trots att svaret uteblev. Kontrollera destinationen före ett nytt försök.", {row: report.uncertainRow}), true);
+                    notice(String(message) + " " + (reason || t("Importen stoppades. Redan sparade objekt finns kvar. Kontrollera destinationen före ett nytt försök.")), true);
+                    if (report.uncertainRow > 0) notice(String(message) + " " + reason + " " + t("Rad {row} kan ha sparats trots att svaret uteblev. Kontrollera destinationen före ett nytt försök.", {row: report.uncertainRow}), true);
                 } else notice(message);
                 // Preserve the report while refreshing the ordinary resource list.
                 await load();
+                if (session !== activeSession) return false;
                 if (document.getElementById("dialog").open && document.getElementById("dialog-title").textContent === String(t("Import · Förhandsgranskning"))) {
                     const result = show("Import · Resultat"); hint(result, message);
+                    if (reason) hint(result, reason);
+                    if (report.failedRow) hint(result, t("Kontrollera rad {row} i källfilen.", {row:report.failedRow}));
                     if (report.stopped) hint(result, t("Importen stoppades. Redan sparade objekt finns kvar. Kontrollera destinationen före ett nytt försök."));
-                    if (report.uncertainRow) hint(result, t("Rad {row} kan ha sparats trots att svaret uteblev. Kontrollera destinationen före ett nytt försök.", {row: report.uncertainRow}));
+                    if (report.uncertainRow > 0) hint(result, t("Rad {row} kan ha sparats trots att svaret uteblev. Kontrollera destinationen före ett nytt försök.", {row: report.uncertainRow}));
                 }
                 return false;
             });
@@ -266,7 +288,7 @@
             stopped = false; const epoch = ++readEpoch;
             try {
                 const text = new TextDecoder("utf-8", {fatal: true}).decode(await selected.arrayBuffer());
-                if (stopped || epoch !== readEpoch || !document.getElementById("dialog").open) return false;
+                if (stopped || session !== activeSession || epoch !== readEpoch || !document.getElementById("dialog").open) return false;
                 csv = parseCsv(text, separator.value); file.value = ""; mappingStep();
             } catch (error) { throw translateError(error instanceof TypeError ? new Error("Filen måste vara UTF-8-kodad.") : error); }
             return false;
@@ -275,6 +297,7 @@
         const file = field(body, t("CSV-fil"), "file", "", true); file.accept = ".csv,.tsv,text/csv,text/tab-separated-values";
         const separator = select(body, t("Avgränsare"), [["auto", t("Identifiera automatiskt")], [",", t("Komma")], [";", t("Semikolon")], ["\t", t("Tabb")]]);
         hint(body, t("UTF-8, högst 2 MiB och 1000 poster. CSV kan innehålla lösenord i klartext; hantera källfilen säkert."));
+        hint(body, t("Obligatoriska kolumner: title och password. Valfria: username, notes, url, group, subgroup, resource. Kolumnerna kan mappas i nästa steg."));
     }
     const exports = {parseCsv, suggest, mapRows, plan, execute, open, clear};
     if (typeof module !== "undefined") module.exports = exports;

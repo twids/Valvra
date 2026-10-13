@@ -22,6 +22,7 @@ public static class VaultApi
 {
     public static void MapVaultApi(this WebApplication app)
     {
+        app.MapImportApi();
         var api = app.MapGroup("/api").RequireAuthorization();
         api.MapPost("/targets/{kind}/{id:guid}/delete", async (TargetKind kind, Guid id, DeleteRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => { await vault.DeleteEmptyTargetAsync(actor, kind, id, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));

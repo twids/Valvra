@@ -85,7 +85,7 @@
         const options = { credentials: "same-origin", cache: "no-store", headers: { "Accept": "application/json", "X-Valvra-Language": i18n.language } };
         if (body !== undefined) { options.method = "POST"; options.headers["Content-Type"] = "application/json"; options.headers["X-CSRF-TOKEN"] = state.session.csrfToken; options.body = JSON.stringify(body); }
         const response = await fetch("/api" + path, options);
-        if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || (response.status === 401 ? t("Windows-inloggningen kunde inte verifieras.") : t("Operationen kunde inte slutföras."))); }
+        if (!response.ok) { const error = await response.json().catch(() => ({})); const failure = new Error(error.error || (response.status === 401 ? t("Windows-inloggningen kunde inte verifieras.") : t("Operationen kunde inte slutföras."))); failure.status = response.status; failure.retryAfter = Math.min(120, Math.max(1, Number(response.headers.get("Retry-After")) || 60)); throw failure; }
         return response.status === 204 ? null : response.json();
     }
     function clearSecrets() {
@@ -99,7 +99,7 @@
         $("dialog-actions").querySelectorAll("button").forEach(x => { if (x.type === "submit") x.disabled = missing; });
     }
     function protectFocusLoss() {
-        window.ValvraImport?.clear();
+        window.ValvraImport?.clear("blur");
         dialogEpoch++; const cleared = clearSecrets();
         if (revealedDialog) { closeDialog(); return; }
         if ($("dialog").open) {
@@ -122,7 +122,7 @@
         const content = $("dialog-content");
         content.className = "";
         delete content.dataset.importCleared;
-        const actions = $("dialog-actions"); actions.append(button(t(options.back ? "← Tillbaka" : submit ? "Avbryt" : "Stäng dialog"), dismissDialog));
+        const actions = $("dialog-actions"); actions.append(button(t(options.back ? "← Tillbaka" : submit ? "Avbryt" : "Stäng"), dismissDialog));
         if (submit) { const save = node("button", submitLabel, "button primary"); save.type = "submit"; actions.append(save); }
         $("dialog-form").onsubmit = async event => {
             event.preventDefault(); if (!submit || !$("dialog").open || document.hidden || !document.hasFocus()) return;
@@ -189,6 +189,7 @@
         else await auditPage();
     }
     function appendImportAction() {
+        if (!state.session.isAccessAdministrator) return;
         if (state.resources.some(x => (x.permissions & 5) === 5) || state.groups.some(x => x.canManage && (x.permissions & 5) === 5))
             $("page-actions").append(button(t("Importera lösenord"), () => window.ValvraImport.open({state, api, node, button, field, select, hint, table, dialog, notice, load, t})));
     }

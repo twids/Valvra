@@ -17,6 +17,42 @@ async function audit(page) {
     const result=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa']).analyze();
     expect(result.violations.map(x=>({id:x.id,nodes:x.nodes.map(n=>n.target)}))).toEqual([]);
 }
+
+test('initial file-picker blur still allows reading a selected CSV',async({page})=>{
+    await page.goto('/');
+    await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();
+    await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+    await file(page,'title,password\nFile picker test,synthetic');
+    await expect(page.getByRole('heading',{name:'Import · Mappa kolumner',exact:true})).toBeVisible();
+});
+
+test('old import completion cannot replace a new session or disable its secret clearing',async({page})=>{
+    let release, batches=0;
+    const delayed=new Promise(resolve=>{release=resolve;});
+    await page.route('**/api/imports/batch',async route=>{
+        batches++; const operations=route.request().postDataJSON().operations;
+        await delayed;
+        await route.fulfill({json:{results:operations.map(x=>({key:x.key,id:'synthetic',created:true,row:x.row}))}});
+    });
+    await page.goto('/');
+    await page.getByRole('link',{name:'Öppna resurs · Databasplattform',exact:true}).click();
+    await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();
+    await file(page,'title,password\nOld session,synthetic-old');
+    await page.getByRole('button',{name:'Förhandsgranska',exact:true}).click();
+    const request=page.waitForRequest('**/api/imports/batch');
+    await page.getByRole('button',{name:'Starta import',exact:true}).click(); await request;
+    await page.getByRole('button',{name:'Stäng dialog',exact:true}).click();
+    await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();
+    await file(page,'title,password\nNew session,synthetic-new');
+    await page.getByRole('button',{name:'Förhandsgranska',exact:true}).click();
+    const response=page.waitForResponse('**/api/imports/batch'); release(); await response;
+    await expect(page.getByRole('heading',{name:'Import · Förhandsgranskning',exact:true})).toBeVisible();
+    await expect(page.locator('#dialog-content')).toContainText('New session');
+    await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+    await expect(page.locator('#dialog-error')).toHaveText('Importdata har tömts. Välj filen igen.');
+    await expect(page.getByRole('button',{name:'Starta import',exact:true})).toBeDisabled();
+    expect(batches).toBe(1);
+});
 test('real audited hierarchy import creates two levels, reuses groups on retry and never overwrites duplicate titles',async({page})=>{
     await expect.poll(async()=>{
         const response=await page.request.get('/api/resources');
