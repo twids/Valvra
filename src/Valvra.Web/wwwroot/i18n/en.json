@@ -663,5 +663,17 @@
   "Tillkommer": "Added",
   "Försvinner": "Removed",
   "Behålls": "Retained",
-  "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten.": "The preview shows assignments. Group memberships may provide additional access. The server checks current permissions when moving."
+  "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten.": "The preview shows assignments. Group memberships may provide additional access. The server checks current permissions when moving.",
+  "Rensa filter": "Clear filters",
+  "Visning": "View",
+  "Kort": "Cards",
+  "Kompakt lista": "Compact list",
+  "Sortering": "Sort",
+  "Namn A–Ö": "Name A–Z",
+  "Namn Ö–A": "Name Z–A",
+  "Din åtkomst": "Your access",
+  "Visa alla undergrupper": "Expand all subgroups",
+  "Dölj alla undergrupper": "Collapse all subgroups",
+  "Resursåtgärder": "Resource actions",
+  "Fler åtgärder": "More actions"
 }

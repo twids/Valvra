@@ -1,4 +1,5 @@
 const {test,expect} = require('@playwright/test');
+const {clickAction} = require('./ui.cjs');
 const AxeBuilder = require('@axe-core/playwright').default;
 async function data(page) {
     await expect.poll(async()=> (await (await page.request.get('/api/resources')).json()).length).toBe(3);
@@ -92,7 +93,7 @@ test('history closes and clears sensitive dialogs without replaying reveals or d
     await page.goBack(); await focused(page,'IT och infrastruktur');
     await expect(page.getByRole('dialog')).toBeHidden(); await expect(page.locator('#dialog-content')).toBeEmpty();
     await page.goForward(); await focused(page,'Databasplattform'); expect(reveals).toBe(1);
-    await page.getByRole('button',{name:'Ändra · Exempellicens',exact:true}).click();
+    await clickAction(page,'Ändra · Exempellicens');
     await page.getByLabel('Produkt (obligatoriskt)',{exact:true}).fill('PRIVATE-DRAFT');
     await page.getByLabel('Licensnyckel och hemliga anteckningar',{exact:true}).selectOption('1');
     await page.getByLabel('Ny licensnyckel',{exact:true}).fill('SYNTHETIC-SECRET-DRAFT');

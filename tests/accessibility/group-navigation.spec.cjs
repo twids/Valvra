@@ -1,4 +1,5 @@
 const {test,expect} = require('@playwright/test');
+const {clickAction} = require('./ui.cjs');
 const AxeBuilder = require('@axe-core/playwright').default;
 async function fixture(page,{manage=false}={}) {
     await expect.poll(async () => (await (await page.request.get('/api/resources')).json()).length).toBe(3);
@@ -37,6 +38,18 @@ test('group overview shows a navigable nested list using only available group me
     await expect(page.getByRole('button',{name:'Behörigheter',exact:true})).toHaveCount(0);
     expect(calls.some(x=>x.url.includes('/reveal') || /\/resources\/.+\/(secrets|licenses)/.test(x.url))).toBe(false);
     await audit(page);
+});
+
+test('group branches collapse and expand without fetching additional metadata',async({page})=>{
+    const {calls}=await fixture(page);
+    const before=calls.length;
+    await page.getByRole('button',{name:'Dölj alla undergrupper',exact:true}).click();
+    await expect(page.getByRole('link',{name:'Öppna grupp · Produktion',exact:true})).toBeHidden();
+    await page.getByRole('button',{name:'Visa alla undergrupper',exact:true}).click();
+    await expect(page.getByRole('link',{name:'Öppna grupp · Produktion',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'Undergrupper · IT och infrastruktur',exact:true}).click();
+    await expect(page.getByRole('link',{name:'Öppna grupp · Servrar',exact:true})).toBeHidden();
+    expect(calls.length).toBe(before);
 });
 
 test('group resources include grandchildren, direct-only selection and search remain scoped',async({page})=>{
@@ -122,7 +135,7 @@ test('group action menu does not resize rows and supports keyboard and outside d
     await expect(page.getByRole('menuitem',{name:'Byt namn · IT och infrastruktur',exact:true})).toBeFocused();
     await page.keyboard.press('Escape'); await expect(trigger).toBeFocused();
     await trigger.click(); await expect(page.getByRole('menuitem',{name:'Behörigheter · IT och infrastruktur',exact:true})).toBeVisible();
-    await page.keyboard.press('Tab'); await expect(page.getByRole('link',{name:'Öppna grupp · Servrar',exact:true})).toBeFocused();
+    await page.keyboard.press('Tab'); await expect(page.getByRole('button',{name:'Undergrupper · Servrar',exact:true})).toBeFocused();
     await trigger.click(); await page.keyboard.press('Shift+Tab'); await expect(page.getByRole('link',{name:'Öppna grupp · IT och infrastruktur',exact:true})).toBeFocused();
     await page.getByRole('button',{name:'Hantera grupp · Servrar',exact:true}).click();
     await trigger.click(); await expect(page.getByRole('menuitem',{name:'Behörigheter · IT och infrastruktur',exact:true})).toBeFocused();
@@ -143,7 +156,7 @@ test('move previews show full destinations and added removed retained access bef
     await page.route('**/api/move/1/*',route=>{moves++;return route.fulfill({status:204});});
     await page.reload();
     await page.getByRole('link',{name:'Öppna resurs · Databasplattform',exact:true}).click();
-    await page.getByRole('button',{name:'Flytta till annan grupp…',exact:true}).click();
+    await clickAction(page,'Flytta till annan grupp…');
     const picker=page.getByLabel('Ny resursgrupp',{exact:true});
     await expect(picker).toHaveValue(''); await expect(picker).toContainText('Move destination · '+destination.id);
     await picker.selectOption(destination.id);

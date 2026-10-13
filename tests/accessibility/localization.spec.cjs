@@ -1,4 +1,5 @@
 const {test, expect} = require('@playwright/test');
+const {clickAction} = require('./ui.cjs');
 const AxeBuilder = require('@axe-core/playwright').default;
 test.use({locale: 'en-GB'});
 
@@ -91,7 +92,7 @@ test('user-supplied text matching a translation key is displayed verbatim',async
 
 test('English license forms expose localized validation and retain existing focus-loss protection',async({page})=>{
     await openResource(page);
-    await page.getByRole('row').filter({hasText:'Exempellicens'}).getByRole('button',{name:/^Modify/}).click();
+    await clickAction(page.getByRole('row').filter({hasText:'Exempellicens'}),/^Modify/);
     await expect(page.getByRole('dialog',{name:'Edit license',exact:true})).toBeVisible();
     const product=page.getByLabel('Product (required)',{exact:true});
     await product.fill(''); await page.getByRole('button',{name:'Save',exact:true}).click();

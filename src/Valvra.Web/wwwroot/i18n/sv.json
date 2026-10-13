@@ -663,5 +663,17 @@
   "Tillkommer": "Tillkommer",
   "Försvinner": "Försvinner",
   "Behålls": "Behålls",
-  "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten.": "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten."
+  "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten.": "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten.",
+  "Rensa filter": "Rensa filter",
+  "Visning": "Visning",
+  "Kort": "Kort",
+  "Kompakt lista": "Kompakt lista",
+  "Sortering": "Sortering",
+  "Namn A–Ö": "Namn A–Ö",
+  "Namn Ö–A": "Namn Ö–A",
+  "Din åtkomst": "Din åtkomst",
+  "Visa alla undergrupper": "Visa alla undergrupper",
+  "Dölj alla undergrupper": "Dölj alla undergrupper",
+  "Resursåtgärder": "Resursåtgärder",
+  "Fler åtgärder": "Fler åtgärder"
 }

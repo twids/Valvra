@@ -5,7 +5,7 @@
     const navigation = window.ValvraNavigation;
     const t = (key, values) => i18n.message(key, values);
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
-        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, auditFilters: {} };
+        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), auditFilters: {} };
     let renderEpoch = 0;
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
@@ -37,7 +37,7 @@
     function rememberView() {
         if (!historyKey) return;
         viewSnapshots.set(historyKey, { resourceSearch: state.resourceSearch, resourceGroup: state.resourceGroup,
-            resourceIncludeSubgroups: state.resourceIncludeSubgroups, groupSearch: state.groupSearch,
+            resourceIncludeSubgroups: state.resourceIncludeSubgroups, resourceLayout:state.resourceLayout, resourceSort:state.resourceSort, groupSearch: state.groupSearch,
             groupIncludeSubgroups: state.groupIncludeSubgroups, auditFilters: { ...state.auditFilters } });
     }
     function resolveRoute(route) {
@@ -163,10 +163,10 @@
         wrap.tabIndex = 0; wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", title + t(" – tabell, kan rullas i sidled"));
         grid.append(node("caption", title, "visually-hidden"));
         headers.forEach(x => { const th = node("th", x || t("Åtgärder")); th.scope = "col"; tr.append(th); }); head.append(tr); grid.append(head); const body = node("tbody");
-        rows.forEach(row => { const r = node("tr"); row.forEach(value => { const cell = node("td"); cell.append(value instanceof Node ? value : document.createTextNode(value ?? "")); r.append(cell); }); body.append(r); });
+        rows.forEach(row => { const r = node("tr"); row.forEach((value,index) => { const cell = node("td"); cell.dataset.label=String(headers[index] || t("Åtgärder")); cell.append(value instanceof Node ? value : document.createTextNode(value ?? "")); r.append(cell); }); body.append(r); });
         body.querySelectorAll("tr").forEach(row => {
             const context = row.children[0].querySelector("strong")?.textContent || row.children[0].textContent;
-            row.querySelectorAll("button").forEach(action => action.setAttribute("aria-label", action.textContent + " · " + context));
+            row.querySelectorAll("button").forEach(action => { if(!action.hasAttribute("aria-label"))action.setAttribute("aria-label", action.textContent + " · " + context); });
         });
         grid.append(body); wrap.append(grid); parent.append(wrap); return grid;
     }
@@ -209,17 +209,37 @@
         const toolbar = node("div", undefined, "toolbar"); const search = node("input"); search.placeholder = t("Sök bland dina resurser…"); search.setAttribute("aria-label", t("Sök resurser")); search.value = state.resourceSearch; toolbar.append(search);
         const filter = select(toolbar, t("Resursgrupp"), [["", t("Alla grupper")], ...sortedGroups(state.groups).map(x => [x.id, groupPath(x.id).map(g => g.name).join(" / ")])], state.resourceGroup);
         const tree = node("div", undefined, "check-row"); const descendants = field(tree, t("Inkludera undergrupper"), "checkbox"); descendants.checked = state.resourceIncludeSubgroups; descendants.disabled = !filter.value; toolbar.append(tree); content.append(toolbar);
-        const count = node("p", undefined, "visually-hidden"); count.setAttribute("role", "status"); content.append(count);
+        const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); content.append(count);
         const cards = node("div", undefined, "cards"); content.append(cards);
         const paint = () => {
             cards.replaceChildren();
             const resources = scopedResources(filter.value, descendants.checked, search.value);
             count.textContent = resources.length + t(" resurser visas.");
-            resourceCards(cards, resources);
+            resourceCollection(cards, resources);
             if (!resources.length) empty(cards, t("Inga träffar"), t("Prova ett annat sökord eller en annan grupp."));
         }; search.addEventListener("input", () => { state.resourceSearch = search.value; paint(); });
         filter.addEventListener("change", () => { state.resourceGroup = filter.value; descendants.disabled = !filter.value; paint(); });
-        descendants.addEventListener("change", () => { state.resourceIncludeSubgroups = descendants.checked; paint(); }); paint();
+        descendants.addEventListener("change", () => { state.resourceIncludeSubgroups = descendants.checked; paint(); });
+        browseControls(toolbar,paint);
+        toolbar.append(button(t("Rensa filter"),()=>{search.value="";filter.value="";descendants.checked=true;descendants.disabled=true;state.resourceSearch="";state.resourceGroup="";state.resourceIncludeSubgroups=true;paint();search.focus();})); paint();
+    }
+    function browseControls(toolbar, paint) {
+        const layout=select(toolbar,t("Visning"),[["cards",t("Kort")],["list",t("Kompakt lista")]],state.resourceLayout);
+        const sort=select(toolbar,t("Sortering"),[["name",t("Namn A–Ö")],["reverse",t("Namn Ö–A")],["group",t("Resursgrupp")]],state.resourceSort);
+        layout.addEventListener("change",()=>{state.resourceLayout=layout.value;paint();});sort.addEventListener("change",()=>{state.resourceSort=sort.value;paint();});
+    }
+    function resourceCollection(parent, resources, level="h2") {
+        const path=id=>groupPath(id).map(x=>x.name).join(" / ");
+        const ordered=[...resources].sort((a,b)=>(state.resourceSort==="group" ? path(a.groupId).localeCompare(path(b.groupId),i18n.locale) : 0)
+            || (state.resourceSort==="reverse" ? -1 : 1)*a.name.localeCompare(b.name,i18n.locale)||a.id.localeCompare(b.id));
+        parent.className=state.resourceLayout==="list" ? "resource-list" : "cards";
+        if(state.resourceLayout!=="list"){resourceCards(parent,ordered,level);return;}
+        if(!ordered.length)return;
+        table(parent,[t("Namn"),t("Resursgrupp"),t("Din åtkomst"),t("Åtgärder")],ordered.map(resource=>{
+            const open=routeLink(t("Öppna resurs →"),state.view==="groups"&&state.group ? {view:"groups",groupId:state.group.id,resourceId:resource.id} : {view:"vault",resourceId:resource.id});
+            open.setAttribute("aria-label",t("Öppna resurs · ")+resource.name);
+            return [node("strong",resource.name),path(resource.groupId),rights(resource.permissions)||t("Behörighetsadministration"),open];
+        })).classList.add("mobile-records");
     }
     function sortedGroups(groups) { return [...groups].sort((a, b) => a.name.localeCompare(b.name, i18n.locale) || a.id.localeCompare(b.id)); }
     function groupPath(id) {
@@ -279,7 +299,7 @@
             const rect=trigger.getBoundingClientRect(), size=menu.getBoundingClientRect();
             menu.style.left=Math.max(8,Math.min(rect.right-size.width,window.innerWidth-size.width-8))+"px";
             menu.style.top=Math.max(8,rect.bottom+size.height+8<=window.innerHeight ? rect.bottom+4 : rect.top-size.height-4)+"px";
-            actions[0]?.focus();
+            actions[0]?.focus({preventScroll:true});
         };
         trigger.addEventListener("click",()=>{if(open)close();else show();});
         trigger.addEventListener("keydown",event=>{if(event.key==="ArrowDown"){event.preventDefault();show();}});
@@ -288,7 +308,7 @@
             const index=actions.indexOf(document.activeElement);
             if (["ArrowDown","ArrowUp","Home","End"].includes(event.key)) { event.preventDefault(); actions[event.key==="Home" ? 0 : event.key==="End" ? actions.length-1 : (index+(event.key==="ArrowDown" ? 1 : -1)+actions.length)%actions.length]?.focus(); }
             else if(event.key==="Escape"){event.preventDefault();close();trigger.focus();}
-            else if(event.key==="Tab")close();
+            else if(event.key==="Tab"){close();trigger.focus({preventScroll:true});}
         });
         wrapper.append(trigger,menu); return wrapper;
     }
@@ -304,7 +324,9 @@
             row.append(text); if (group.canManage) row.append(groupManagement(group)); item.append(row); container.append(item);
             const children = sortedGroups(groups.filter(child => child.parentId === group.id && !visited.has(child.id)));
             if (nested && children.length && depth < 128) {
-                const branch = node("ul", undefined, "group-tree"); branch.setAttribute("role", "list"); item.append(branch);
+                const branch = node("ul", undefined, "group-tree group-tree-branch"); branch.id="branch-"+crypto.randomUUID();branch.dataset.groupId=group.id;branch.hidden=state.collapsedGroups.has(group.id);branch.setAttribute("role", "list"); item.append(branch);
+                const toggle=button(t("Undergrupper")+" · "+group.name,()=>{if(state.collapsedGroups.has(group.id))state.collapsedGroups.delete(group.id);else state.collapsedGroups.add(group.id);branch.hidden=state.collapsedGroups.has(group.id);toggle.setAttribute("aria-expanded",String(!branch.hidden));},"quiet");
+                toggle.setAttribute("aria-controls",branch.id);toggle.setAttribute("aria-expanded",String(!branch.hidden));row.insertBefore(toggle,row.firstChild);
                 children.forEach(child => append(child, branch, depth + 1));
             }
         };
@@ -330,7 +352,9 @@
         heading(t("Resursgrupper"), t("Organisera resurser i ett träd. Tilldelningar ärvs till undergrupper och resurser."), canCreate ? [button(t("+ Ny grupp"), createGroup, "primary")] : []);
         appendImportAction();
         if (!state.groups.length) { empty($("content"), t("Inga synliga grupper"), t("Grupper visas när du har metadataåtkomst eller rätt att administrera dem.")); return; }
-        const p = panel($("content"), t("Gruppstruktur"));
+        const setBranches=collapsed=>{state.groups.forEach(x=>{if(collapsed)state.collapsedGroups.add(x.id);else state.collapsedGroups.delete(x.id);});
+            document.querySelectorAll(".group-tree-branch").forEach(branch=>{branch.hidden=collapsed;document.querySelector(`[aria-controls="${branch.id}"]`)?.setAttribute("aria-expanded",String(!collapsed));});};
+        const p = panel($("content"), t("Gruppstruktur"),[button(t("Visa alla undergrupper"),()=>setBranches(false)),button(t("Dölj alla undergrupper"),()=>setBranches(true))]);
         groupTree(p, state.groups);
     }
     function groupPage() {
@@ -348,19 +372,22 @@
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); const cards = node("div", undefined, "cards"); body.append(count, cards);
         const paint = () => {
             cards.replaceChildren(); const visible = scopedResources(group.id, descendants.checked, search.value);
-            i18n.setText(count, t("Synliga resurser: {count}", {count: visible.length})); resourceCards(cards, visible, "h3");
+            i18n.setText(count, t("Synliga resurser: {count}", {count: visible.length})); resourceCollection(cards, visible, "h3");
             if (!visible.length) empty(cards, t("Inga synliga resurser i gruppen"), t("Kontrollera sökningen och valet av undergrupper. Bara resurser du har åtkomst till visas."));
         };
         search.addEventListener("input", () => { state.groupSearch = search.value; paint(); });
-        descendants.addEventListener("change", () => { state.groupIncludeSubgroups = descendants.checked; paint(); }); paint();
+        descendants.addEventListener("change", () => { state.groupIncludeSubgroups = descendants.checked; paint(); });
+        browseControls(toolbar,paint);toolbar.append(button(t("Rensa filter"),()=>{search.value="";descendants.checked=true;state.groupSearch="";state.groupIncludeSubgroups=true;paint();search.focus();}));paint();
     }
     async function resourcePage() {
         const resource = state.resource;
         const epoch = renderEpoch;
         const actions = [routeLink(state.view === "groups" ? t("← Till resursgruppen") : t("← Alla resurser"), state.view === "groups" && state.group ? {view: "groups", groupId: state.group.id} : {view: "vault"})];
-        if (resource.canManage) actions.push(button(t("Behörigheter"), () => accessDialog(1, resource)), button(t("Byt namn"), () => renameDialog(1, resource)), button(t("Flytta till annan grupp…"), () => moveDialog(1, resource)));
-        if (has(4)) actions.push(button(t("Papperskorg"), recycleBin));
-        if (resource.canManage) actions.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
+        const secondary=[];
+        if (resource.canManage) { actions.push(button(t("Behörigheter"), () => accessDialog(1, resource))); secondary.push(button(t("Byt namn"), () => renameDialog(1, resource)), button(t("Flytta till annan grupp…"), () => moveDialog(1, resource))); }
+        if (has(4)) secondary.push(button(t("Papperskorg"), recycleBin));
+        if (resource.canManage) secondary.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
+        if(secondary.length)actions.push(actionMenu(t("Resursåtgärder"),secondary));
         heading(resource.name, t("Din åtkomst: ") + (rights(resource.permissions) || t("Behörighetsadministration")), actions);
         appendImportAction();
         if (state.view === "groups") groupBreadcrumb(resource.groupId, resource.name);
@@ -372,11 +399,14 @@
         else table(passwords, [t("Konto"), "Version", t("Åtgärder")], secrets.map(secret => {
             const actions = node("div", undefined, "actions");
             if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret)), button(t("Kopiera"), () => copySecret(secret)));
-            if (has(4)) actions.append(button(t("Ändra"), () => secretDialog(secret)), button(t("Ta bort"), () => deleteSecret(secret), "danger"));
-            actions.append(button(t("Historik"), () => historyDialog(secret)));
-            if (has(2) && has(16) && secret.ldapProfileId) actions.append(button("LDAP-test", () => ldapTest(secret)));
+            const secondary=[];
+            if (has(4)) secondary.push(button(t("Ändra"), () => secretDialog(secret)));
+            secondary.push(button(t("Historik"), () => historyDialog(secret)));
+            if (has(2) && has(16) && secret.ldapProfileId) secondary.push(button("LDAP-test", () => ldapTest(secret)));
+            if (has(4)) secondary.push(button(t("Ta bort"), () => deleteSecret(secret), "danger"));
+            actions.append(actionMenu(t("Fler åtgärder"),secondary,secret.title));
             return [secret.title, String(secret.currentVersion), actions];
-        }));
+        })).classList.add("mobile-records");
         const licensePanel = panel($("content"), t("Licenser"), has(4) ? [button(t("+ Lägg till licens"), () => licenseDialog(), "primary")] : []);
         licenseTable(licensePanel, licenses, true);
     }
@@ -609,17 +639,18 @@
         table(parent, [t("Produkt"), t("Platser"), t("Giltig till"), t("Åtgärder")], licenses.map(license => {
             const resource = state.resources.find(x => x.id === license.resourceId); const actions = node("div", undefined, "actions");
             if (resource?.permissions & 2) actions.append(button(t("Visa nyckel"), () => revealLicense(license)));
-            if (resource?.permissions & 4) actions.append(button(t("Ändra"), () => { state.resource = resource; licenseDialog(license); }));
-            if (resource?.permissions & 4) actions.append(button(t("Ta bort"), () => {
+            const secondary=[];
+            if (resource?.permissions & 4) secondary.push(button(t("Ändra"), () => { state.resource = resource; licenseDialog(license); }));
+            secondary.push(button(t("Tilldelningar"), () => assignmentDialog(license, resource)),button(t("Historik"), () => licenseHistory(license, resource)));
+            if (resource?.permissions & 4) secondary.push(button(t("Ta bort"), () => {
                 const body = dialog(t("Ta bort licens · ") + license.product, t("Ta bort"), async () => { await api(`/licenses/${license.id}/deleted`, { deleted: true, revision: license.revision }); await render(); });
                 body.append(node("p", t("Licensen flyttas till resursens papperskorg. Tilldelningar bevaras för återställning.")));
             }, "danger"));
-            actions.append(button(t("Tilldelningar"), () => assignmentDialog(license, resource)));
-            actions.append(button(t("Historik"), () => licenseHistory(license, resource)));
+            actions.append(actionMenu(t("Fler åtgärder"),secondary,scoped ? license.product : license.product+" · "+(resource?.name||"")));
             const product = node("div"); product.append(node("strong", license.product), node("p", scoped ? license.vendor : (resource?.name || "") + " · " + license.vendor, "hint"));
             const expiry = node("span", date(license.expiresAt), license.expiresAt && new Date(license.expiresAt) < new Date(Date.now() + 30 * 86400000) ? "badge warn" : "");
             return [product, `${license.assignedSeats} / ${license.seats}`, expiry, actions];
-        }));
+        })).classList.add("mobile-records");
     }
     async function licenseOverview() {
         const epoch = renderEpoch;
@@ -753,7 +784,17 @@
         const paging = node("div", undefined, "actions"); paging.append(button(t("← Föregående"), async () => { offset = Math.max(0, offset - 200); await paint(); }), button(t("Nästa →"), async () => { offset += 200; await paint(); })); $("content").append(paging); await paint();
     }
     document.querySelectorAll("[data-view],.brand").forEach(bindRouteLink);
-    window.addEventListener("resize",()=>closeActionMenu?.()); window.addEventListener("scroll",event=>{if(!event.target.closest?.(".action-menu-popup"))closeActionMenu?.();},true);
+    window.addEventListener("resize",()=>closeActionMenu?.());
+    // Scrolling a menu trigger into view can dispatch a delayed scroll after it
+    // opens. Re-anchor the popup instead of closing it during that interaction.
+    window.addEventListener("scroll",event=>{
+        if(!actionMenuElement||event.target.closest?.(".action-menu-popup"))return;
+        const trigger=actionMenuElement.querySelector("button"),menu=actionMenuElement.querySelector(".action-menu-popup");
+        const rect=trigger.getBoundingClientRect(),size=menu.getBoundingClientRect();
+        if(rect.bottom<0||rect.top>window.innerHeight){closeActionMenu?.();return;}
+        menu.style.left=Math.max(8,Math.min(rect.right-size.width,window.innerWidth-size.width-8))+"px";
+        menu.style.top=Math.max(8,rect.bottom+size.height+8<=window.innerHeight?rect.bottom+4:rect.top-size.height-4)+"px";
+    },true);
     document.addEventListener("pointerdown",event=>{if(actionMenuElement&&!actionMenuElement.contains(event.target))closeActionMenu?.();});
     window.addEventListener("popstate", () => {
         if (routeReady && window.location.pathname !== activePath) safely(() => navigate(window.location.pathname, { traversal: true }));
