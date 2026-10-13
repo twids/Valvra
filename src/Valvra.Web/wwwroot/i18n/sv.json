@@ -675,5 +675,16 @@
   "Visa alla undergrupper": "Visa alla undergrupper",
   "Dölj alla undergrupper": "Dölj alla undergrupper",
   "Resursåtgärder": "Resursåtgärder",
-  "Fler åtgärder": "Fler åtgärder"
+  "Fler åtgärder": "Fler åtgärder",
+  "Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination.": "Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination.",
+  "Sök licenser": "Sök licenser",
+  "Licensfilter": "Licensfilter",
+  "Med tilldelade platser": "Med tilldelade platser",
+  "Inga lediga platser": "Inga lediga platser",
+  "Sortera": "Sortera",
+  "Lediga platser": "Lediga platser",
+  "{shown} av {total} licenser visas": "{shown} av {total} licenser visas",
+  "Inga matchande licenser": "Inga matchande licenser",
+  "Ändra eller rensa filtren.": "Ändra eller rensa filtren.",
+  "Välj en destinationsresurs": "Välj en destinationsresurs"
 }

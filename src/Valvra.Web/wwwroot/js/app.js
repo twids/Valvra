@@ -5,7 +5,7 @@
     const navigation = window.ValvraNavigation;
     const t = (key, values) => i18n.message(key, values);
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
-        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), auditFilters: {} };
+        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), licenseFilters:{}, auditFilters: {} };
     let renderEpoch = 0;
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
@@ -38,7 +38,7 @@
         if (!historyKey) return;
         viewSnapshots.set(historyKey, { resourceSearch: state.resourceSearch, resourceGroup: state.resourceGroup,
             resourceIncludeSubgroups: state.resourceIncludeSubgroups, resourceLayout:state.resourceLayout, resourceSort:state.resourceSort, groupSearch: state.groupSearch,
-            groupIncludeSubgroups: state.groupIncludeSubgroups, auditFilters: { ...state.auditFilters } });
+            groupIncludeSubgroups: state.groupIncludeSubgroups, licenseFilters:{...state.licenseFilters}, auditFilters: { ...state.auditFilters } });
     }
     function resolveRoute(route) {
         const previousGroup = state.group?.id;
@@ -63,7 +63,7 @@
         if (traversal) {
             historyKey = window.history.state?.valvraEntry;
             const snapshot = viewSnapshots.get(historyKey);
-            if (snapshot) Object.assign(state, snapshot, { auditFilters: { ...snapshot.auditFilters } });
+            if (snapshot) Object.assign(state, snapshot, { licenseFilters:{...snapshot.licenseFilters}, auditFilters: { ...snapshot.auditFilters } });
         } else if (initial || canonical !== activePath) {
             historyKey = crypto.randomUUID();
             window.history[initial ? "replaceState" : "pushState"]({ valvraEntry: historyKey }, "", canonical);
@@ -656,12 +656,34 @@
         const epoch = renderEpoch;
         const writableResources = state.resources.filter(x => (x.permissions & 5) === 5);
         heading(t("Licensöversikt"), t("Tilldelade platser och kommande utgångsdatum för dina synliga resurser."),
-            writableResources.length ? [button(t("+ Lägg till licens"), () => licenseDialog(null, writableResources), "primary")] : []);
+            [button(t("+ Lägg till licens"), () => {
+                if(writableResources.length)licenseDialog(null,writableResources);
+                else hint(dialog(t("Lägg till licens")),t("Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination."));
+            }, "primary")]);
         const licenses = (await Promise.all(state.resources.filter(x => x.permissions & 1).map(x => api(`/resources/${x.id}/licenses`)))).flat();
         if (epoch !== renderEpoch) return;
-        const stats = node("div", undefined, "summary-grid"); const expiring = licenses.filter(x => x.expiresAt && new Date(x.expiresAt) < new Date(Date.now() + 30 * 86400000)).length;
-        [[licenses.length, t("Registrerade licenser")], [licenses.reduce((a, x) => a + x.assignedSeats, 0), t("Tilldelade platser")], [expiring, t("Utgångna eller förfaller inom 30 dagar")]].forEach(([value, label]) => { const stat = node("div", undefined, "summary-card"); stat.append(node("strong", String(value)), node("span", label)); stats.append(stat); }); $("content").append(stats);
-        licenseTable(panel($("content"), t("Programlicenser")), licenses, false);
+        const expiring=x=>x.expiresAt&&new Date(x.expiresAt)<new Date(Date.now()+30*86400000);
+        const stats=node("div",undefined,"summary-grid"),toolbar=node("div",undefined,"toolbar"); $("content").append(stats,toolbar);
+        const search=field(toolbar,t("Sök licenser"),"search",state.licenseFilters.search||"");
+        const filter=select(toolbar,t("Licensfilter"),[["all",t("Alla")],["assigned",t("Med tilldelade platser")],["expiring",t("Utgångna eller förfaller inom 30 dagar")],["full",t("Inga lediga platser")]],state.licenseFilters.filter||"all");
+        const sort=select(toolbar,t("Sortera"),[["product",t("Produkt")],["expiry",t("Giltig till")],["available",t("Lediga platser")],["resource",t("Resurs")]],state.licenseFilters.sort||"product");
+        const section=panel($("content"),t("Programlicenser")),count=node("p",undefined,"hint"),results=node("div");count.setAttribute("role","status");section.append(count,results);
+        const summaries=[];
+        const paint=()=>{
+            state.licenseFilters={search:search.value,filter:filter.value,sort:sort.value};
+            summaries.forEach(([control,value])=>control.setAttribute("aria-pressed",String(filter.value===value)));
+            const resourceName=x=>state.resources.find(r=>r.id===x.resourceId)?.name||"";
+            const visible=licenses.filter(x=>(filter.value!=="assigned"||x.assignedSeats>0)&&(filter.value!=="expiring"||expiring(x))&&(filter.value!=="full"||x.assignedSeats>=x.seats)
+                &&[x.product,x.vendor,x.purchaseReference,resourceName(x)].join(" ").toLocaleLowerCase(i18n.locale).includes(search.value.trim().toLocaleLowerCase(i18n.locale)));
+            visible.sort((a,b)=>(sort.value==="expiry"?(a.expiresAt?Date.parse(a.expiresAt):Infinity)-(b.expiresAt?Date.parse(b.expiresAt):Infinity):sort.value==="available"?(a.seats-a.assignedSeats)-(b.seats-b.assignedSeats):sort.value==="resource"?resourceName(a).localeCompare(resourceName(b),i18n.locale):0)||a.product.localeCompare(b.product,i18n.locale)||a.id.localeCompare(b.id));
+            count.textContent=t("{shown} av {total} licenser visas",{shown:visible.length,total:licenses.length});results.replaceChildren();
+            if(!visible.length&&licenses.length)empty(results,t("Inga matchande licenser"),t("Ändra eller rensa filtren."));else licenseTable(results,visible,false);
+        };
+        for(const [value,number,label] of [["all",licenses.length,t("Registrerade licenser")],["assigned",licenses.reduce((a,x)=>a+x.assignedSeats,0),t("Tilldelade platser")],["expiring",licenses.filter(expiring).length,t("Utgångna eller förfaller inom 30 dagar")]]){
+            const control=button(number+" · "+label,()=>{filter.value=value;paint();},"summary-card");stats.append(control);summaries.push([control,value]);
+        }
+        search.addEventListener("input",paint);filter.addEventListener("change",paint);sort.addEventListener("change",paint);
+        toolbar.append(button(t("Rensa filter"),()=>{search.value="";filter.value="all";paint();}));paint();
     }
     function licenseDialog(license, writableResources) {
             const resourceId = license?.resourceId || state.resource?.id;
@@ -674,7 +696,7 @@
                     seats: Number(seats.value), expiresAt: expiry.value ? new Date(expiry.value + "T23:59:59").toISOString() : null,
                     secretChange: mode, payload: mode === 1 ? { licenseKey: key.value, notes: notes.value } : null, revision: license?.revision || 0 }); await render();
             });
-            if (writableResources) resourcePicker = select(body, t("Resurs"), writableResources.map(x => [x.id, x.name]));
+            if (writableResources) { resourcePicker = select(body, t("Resurs"), [["",t("Välj en destinationsresurs")],...writableResources.map(x => [x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],""); resourcePicker.required=true; }
             product = field(body, t("Produkt"), "text", license?.product || "", true); vendor = field(body, t("Leverantör"), "text", license?.vendor || "");
             reference = field(body, t("Inköpsreferens"), "text", license?.purchaseReference || ""); seats = field(body, t("Antal platser"), "number", String(license?.seats || 1), true); seats.min = "1"; seats.max = "1000000";
             expiry = field(body, t("Giltig till"), "date", license?.expiresAt?.slice(0, 10) || "");

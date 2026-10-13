@@ -11,7 +11,7 @@ Scope: all 22 findings in [UX review](UX-REVIEW.md). Work is based on released 1
 | Administration navigation, version, certificates | UX-10, UX-20, UX-21 | Implemented | Two backend tests; 41 Node tests; 11 browser checks plus seven settings checks rerun after reviewed draft-race fixes. Routed role-aware sections, people first, retained draft, runtime version/footer, authorized certificate metadata and operator runbook. No key-mutating browser endpoint. |
 | Group menus and moves | UX-11, UX-12 | Implemented | Independent review corrected native menu reopening. Nine group/browser checks, 41 Node tests and four backend administration tests passed. Anchored menus preserve layout and keyboard focus; full paths/IDs and added/removed/retained access previews; invalid descendants excluded. |
 | Resource browsing and mobile actions | UX-14, UX-15 | Implemented | Independent review: no blockers. 41 Node tests; 53 broad browser checks passed initially, and all 33 affected checks passed after correcting delayed-scroll menu dismissal and keyboard traversal. Visible counts, clear filters, sortable compact list/cards with history preservation, collapsible hierarchy, primary Show/Copy and secondary menus, stacked mobile records. |
-| License overview | UX-16 | Pending | |
+| License overview | UX-16 | Implemented | Independent review: no blockers; 41 Node tests and 11 browser checks passed. Search, sorting and actionable summaries use metadata only; Add explains missing destination rights; explicit full-path/ID destination selection, with server authorization unchanged. |
 | Audit and asynchronous view states | UX-17, UX-19 | Pending | |
 | Secret/history navigation | UX-22 | Pending | |
 

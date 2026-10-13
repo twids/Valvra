@@ -675,5 +675,16 @@
   "Visa alla undergrupper": "Expand all subgroups",
   "Dölj alla undergrupper": "Collapse all subgroups",
   "Resursåtgärder": "Resource actions",
-  "Fler åtgärder": "More actions"
+  "Fler åtgärder": "More actions",
+  "Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination.": "No visible resource allows you to add licenses. Ask a resource owner for Metadata and Modify on the correct destination.",
+  "Sök licenser": "Search licenses",
+  "Licensfilter": "License filter",
+  "Med tilldelade platser": "With assigned seats",
+  "Inga lediga platser": "No available seats",
+  "Sortera": "Sort by",
+  "Lediga platser": "Available seats",
+  "{shown} av {total} licenser visas": "{shown} of {total} licenses shown",
+  "Inga matchande licenser": "No matching licenses",
+  "Ändra eller rensa filtren.": "Change or clear the filters.",
+  "Välj en destinationsresurs": "Select a destination resource"
 }
