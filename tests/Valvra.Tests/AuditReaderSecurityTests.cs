@@ -32,6 +32,14 @@ public sealed class AuditReaderSecurityTests
     private static AuditReader Reader(TestAuditSigner signer, int maximum = 100000, long bytes = 64 * 1024 * 1024) =>
         new(new() { InstallationId = Installation, MaximumReadEvents = maximum, MaximumReadBytes = bytes }, signer);
 
+    [Fact]
+    public void ActorAndOperationChoicesOnlyUseVerifiedEventsAndFilterUsesProvider()
+    {
+        var valid=Event();var rows=new[]{new AuditEventView(valid,"","",true),new AuditEventView(valid with{ActorProvider="other"},"","",true),new AuditEventView(valid with{ActorId="forged",Action="Forged.Action"},"","",false)};
+        var targets=AuditReader.BuildTargets(rows);Assert.Equal(2,targets.Actors!.Count);Assert.Equal("Secret.Reveal",Assert.Single(targets.Actions!));Assert.DoesNotContain(targets.Actors,x=>x.Id=="forged");
+        var result=AuditReader.SelectPage(rows,new(null,null,"user",null,null,ActorProvider:"ad"));Assert.Equal(2,result.Count);Assert.Single(result,x=>x.SignatureValid);Assert.Contains(result,x=>!x.SignatureValid);
+    }
+
     // DataTableReader.GetChars requires a char[] column even though GetString requires
     // a string column. Adapt only that incompatibility to the providers' text-reader contract.
     private sealed class TextReader(DbDataReader inner) : DbDataReader

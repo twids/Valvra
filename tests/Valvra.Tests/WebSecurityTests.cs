@@ -349,10 +349,7 @@ internal sealed class TestAuditReader(RecordingTransport transport) : IAuditRead
     public Task<AuditTargetOptions> ReadTargetsAsync(Actor actor, CancellationToken ct)
     {
         if (!actor.IsEnabled || !actor.IsAuditor) throw new AccessDeniedException();
-        var scopes = transport.Events.Where(x => x.Scope is not null).Select(x => x.Scope!).ToArray();
-        return Task.FromResult(new AuditTargetOptions(
-            scopes.Where(x => x.ResourceId is not null).GroupBy(x => x.ResourceId!.Value).Select(x => new AuditTargetOption(x.Key, x.Last().ResourceName!)).ToArray(),
-            scopes.SelectMany(x => x.GroupPath).GroupBy(x => x.Id).Select(x => new AuditTargetOption(x.Key, x.Last().Name)).ToArray()));
+        return Task.FromResult(AuditReader.BuildTargets(transport.Events.Select(x=>new AuditEventView(x,AuditSignature.Hash(x),"test-key",true))));
     }
     public Task<IReadOnlyList<AuditEventView>> ReadAsync(Actor actor, AuditQuery query, CancellationToken ct)
     {
@@ -361,6 +358,7 @@ internal sealed class TestAuditReader(RecordingTransport transport) : IAuditRead
         return Task.FromResult<IReadOnlyList<AuditEventView>>(transport.Events.OrderByDescending(x => x.Timestamp)
             .Where(x => (query.From is null || x.Timestamp >= query.From) && (query.To is null || x.Timestamp < query.To)
                 && (query.Action is null || x.Action == query.Action) && (query.ActorId is null || x.ActorId == query.ActorId)
+                && (query.ActorProvider is null || x.ActorProvider == query.ActorProvider)
                 && (query.TargetId is null || x.TargetId == query.TargetId) && query.MatchesScope(x))
             .Skip(query.Offset).Take(200).Select(x => new AuditEventView(x, AuditSignature.Hash(x), "test-key", true)).ToArray());
     }

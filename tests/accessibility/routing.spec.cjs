@@ -70,6 +70,7 @@ test('resource and group filters are restored from memory during history travers
     expect(page.url()).not.toContain('Windows');
 });
 test('audit filters and paging return with the audit history entry',async({page})=>{
+    await page.route('**/api/audit?*',route=>route.fulfill({json:Array.from({length:200},()=>({event:{timestamp:'2026-10-05T10:00:00Z',actorId:'synthetic-actor',action:'Secret.Read',outcome:'Success'},signatureValid:true}))}));
     await data(page); await page.goto('/audit');
     await page.getByLabel('Aktörens ID',{exact:true}).fill('synthetic-actor');
     await page.getByLabel('Operation',{exact:true}).fill('Secret.Read');

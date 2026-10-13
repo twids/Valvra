@@ -184,17 +184,27 @@
     async function render() {
         closeActionMenu?.();
         const settingsEpoch = ++renderEpoch;
+        $("content").removeAttribute("aria-busy");
         $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Inställningar") }[state.view]);
         document.querySelectorAll("[data-view]").forEach(x => { const current = x.dataset.view === state.view; x.classList.toggle("active", current); if (current) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
         if (routeUnavailable) {
             heading(t("Vyn är inte tillgänglig"), t("Länken är ogiltig, innehållet är borttaget eller du saknar behörighet."), [routeLink(t("← Alla resurser"), {view: "vault"})]); return;
         }
+        const progress=node("p",t("Läser in…"),"hint");progress.setAttribute("role","status");$("content").append(progress);$("content").setAttribute("aria-busy","true");
+        try {
         if (state.view === "vault") { if (state.resource) await resourcePage(); else resourcesPage(); }
         else if (state.view === "groups") { if (state.resource) await resourcePage(); else if (state.group) groupPage(); else groupsPage(); }
         else if (state.view === "licenses") await licenseOverview();
         else if (state.view === "settings") await window.ValvraSettings.render({state, api, node, button, field, panel, table, hint, heading, dialog, notice, t, render, refreshSession, routeLink,
             openImport:() => window.ValvraImport.open({state, api, node, button, field, select, hint, table, dialog, notice, load, t}), isCurrent: () => settingsEpoch === renderEpoch});
         else await auditPage();
+        } catch(error) {
+            if(settingsEpoch!==renderEpoch)return;
+            const failure=node("section",undefined,"panel");failure.append(node("h2",t("Vyn kunde inte läsas")),node("p",error.message));
+            failure.append(button(t("Försök igen"),()=>render(),"primary"));$("content").append(failure);
+        } finally {
+            progress.remove();if(settingsEpoch===renderEpoch)$("content").removeAttribute("aria-busy");
+        }
     }
     function appendImportAction() {
         if (!state.session.isAccessAdministrator) return;
@@ -769,6 +779,11 @@
         const filter = (label, type) => { const group = node("div"); toolbar.append(group); return field(group, label, type); };
         const from = filter(t("Från"), "datetime-local"), to = filter(t("Till (exklusive)"), "datetime-local");
         const actor = filter(t("Aktörens ID"), "text"), action = filter(t("Operation"), "text"); $("content").append(toolbar);
+        const actorChoices=targets.actors||[],actionChoices=targets.actions||[];
+        const actorChoice=select(toolbar,t("Registrerade aktörer"),[["",t("Välj eller ange ID nedan")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
+        const operationChoice=select(toolbar,t("Registrerade operationer"),[["",t("Välj eller ange kod nedan")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
+        actorChoice.disabled=operationChoice.disabled=targetsUnavailable;
+        hint(toolbar,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
         const targetFilter = (label, options) => {
             const names = new Map(); options.forEach(x => names.set(x.name, (names.get(x.name) || 0) + 1));
             const group = node("div"); toolbar.append(group);
@@ -784,27 +799,44 @@
         const saved = state.auditFilters;
         for (const [name, input] of Object.entries({from, to, actor, action, resource, group})) input.value = saved[name] || "";
         descendants.checked = saved.descendants !== false;
-        const panelNode = panel($("content"), t("Händelser")); const results = node("div"); panelNode.append(results); let offset = saved.offset || 0, paintEpoch = 0;
-        const remember = () => { state.auditFilters = {from:from.value, to:to.value, actor:actor.value, action:action.value, resource:resource.value, group:group.value, descendants:descendants.checked, offset}; };
-        [from,to,actor,action,resource,group,descendants].forEach(input => { input.addEventListener("input", remember); input.addEventListener("change", remember); });
+        let actorProvider=saved.actorProvider||"";
+        const read=()=>({from:from.value,to:to.value,actor:actor.value,actorProvider,action:action.value,resource:resource.value,group:group.value,descendants:descendants.checked});
+        let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0;
+        actorChoice.value=String(actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider)+1);operationChoice.value=action.value;
+        const panelNode = panel($("content"), t("Händelser")); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
+        const remember=()=>{state.auditFilters={...read(),offset:applied.offset,applied:{...applied}};dirty.textContent=t("Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.");
+            dirty.hidden=Object.entries(read()).every(([key,value])=>applied[key]===value);};
+        actor.addEventListener("input",()=>{actorProvider="";actorChoice.value="";remember();});
+        action.addEventListener("input",()=>{operationChoice.value=action.value;remember();});
+        actorChoice.addEventListener("change",()=>{const selected=actorChoices[Number(actorChoice.value)-1];actor.value=selected?.id||"";actorProvider=selected?.provider||"";remember();});
+        operationChoice.addEventListener("change",()=>{action.value=operationChoice.value;remember();});
+        [from,to,resource,group,descendants].forEach(input=>{input.addEventListener("input",remember);input.addEventListener("change",remember);});
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); panelNode.append(count);
-        function query() { const params = new URLSearchParams({ offset }); if (from.value) params.set("from", new Date(from.value).toISOString()); if (to.value) params.set("to", new Date(to.value).toISOString()); if (actor.value) params.set("actorId", actor.value); if (action.value) params.set("action", action.value); if (resource.value) params.set("resourceId", resource.value); if (group.value) { params.set("groupId", group.value); params.set("includeSubgroups", String(descendants.checked)); } return params.toString(); }
-        const paint = async () => {
-            remember(); const requestEpoch = ++paintEpoch;
-            const events = await api("/audit?" + query()); if (epoch !== renderEpoch || requestEpoch !== paintEpoch) return; results.replaceChildren();
-            count.textContent = events.length + t(" händelser visas på sida ") + (offset / 200 + 1) + ".";
+        function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
+        const availability=busy=>{previous.disabled=busy||!hasResults||applied.offset===0;next.disabled=busy||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||!hasResults;apply.disabled=busy;};
+        const paint = async requested => {
+            const requestEpoch = ++paintEpoch;availability(true);failure.replaceChildren();results.setAttribute("aria-busy","true");count.textContent=t("Läser in…");
+            try {
+            const events = await api("/audit?" + query(requested)); if (epoch !== renderEpoch || requestEpoch !== paintEpoch) return;
+            applied={...requested};hasResults=true;rowCount=events.length;remember();results.replaceChildren();
+            count.textContent = events.length + t(" händelser visas på sida ") + (applied.offset / 200 + 1) + ".";
             if (!events.length) { empty(results, t("Inga händelser"), t("Ändra filtret eller gå till föregående sida.")); return; }
             table(results, [t("Tid"), t("Aktör"), t("Operation"), t("Resurs / resursgrupp"), t("Resultat"), t("Verifiering")], events.map(x => [date(x.event.timestamp), node("span", x.event.actorId, "audit-id"),
-                x.event.action, auditScopeLabel(x),
+                auditActionLabel(x.event.action), auditScopeLabel(x),
                 x.event.outcome, node("span", x.signatureValid ? t("Giltig signatur") : t("Ogiltig signatur"), "badge" + (x.signatureValid ? "" : " error"))]));
+            }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t("Försök igen"),()=>paint(requested)));}
+            finally{if(epoch===renderEpoch&&requestEpoch===paintEpoch){results.removeAttribute("aria-busy");availability(false);}}
         };
         const filterActions = node("div", undefined, "actions filter-actions"); toolbar.append(filterActions);
-        filterActions.append(button(t("Filtrera"), async () => { offset = 0; await paint(); }), button(t("Exportera denna sida"), async () => {
-            const response = await fetch("/api/audit/export?" + query(), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok) throw new Error(t("Auditexporten misslyckades."));
+        const apply=button(t("Filtrera"),()=>{if(from.value&&to.value&&new Date(from.value)>=new Date(to.value))throw new Error(t("Sluttiden måste vara efter starttiden."));return paint({...read(),offset:0});});
+        const exportPage=button(t("Exportera denna sida"), async () => {
+            const response = await fetch("/api/audit/export?" + query(applied), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok) throw new Error(t("Auditexporten misslyckades."));
             const url = URL.createObjectURL(await response.blob()); const link = node("a"); link.href = url; link.download = "valvra-audit.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }));
-        const paging = node("div", undefined, "actions"); paging.append(button(t("← Föregående"), async () => { offset = Math.max(0, offset - 200); await paint(); }), button(t("Nästa →"), async () => { offset += 200; await paint(); })); $("content").append(paging); await paint();
+        });filterActions.append(apply,exportPage);
+        const previous=button(t("← Föregående"),()=>paint({...applied,offset:Math.max(0,applied.offset-200)})),next=button(t("Nästa →"),()=>paint({...applied,offset:applied.offset+200}));
+        const paging = node("div", undefined, "actions");paging.append(previous,next);$("content").append(paging);await paint(applied);
     }
+    function auditActionLabel(code){const labels={"Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code])+" · "+code:code;}
     document.querySelectorAll("[data-view],.brand").forEach(bindRouteLink);
     window.addEventListener("resize",()=>closeActionMenu?.());
     // Scrolling a menu trigger into view can dispatch a delayed scroll after it
@@ -846,5 +878,11 @@
         if ($("settings-nav")) $("settings-nav").hidden = !state.session.isAccessAdministrator && !state.session.isSystemAdministrator;
         if (routeReady) resolveRoute(navigation.parse(window.location.pathname));
     }
-    safely(async () => { await i18n.ready; await refreshSession(); await load(); });
+    async function start(){
+        await i18n.ready;const progress=node("p",t("Läser in…"));progress.setAttribute("role","status");$("content").replaceChildren(progress);$("content").setAttribute("aria-busy","true");
+        try{await refreshSession();await load();}
+        catch(error){heading(t("Vyn kunde inte läsas"),t("Försök igen för att kontrollera din session och läsa aktuell metadata."));$("content").replaceChildren(node("p",error.message),button(t("Försök igen"),start,"primary"));}
+        finally{$("content").removeAttribute("aria-busy");}
+    }
+    safely(async () => { await i18n.ready; await start(); });
 })();

@@ -7,6 +7,7 @@ class Element {
     constructor(tag='div') { this.tag=tag; this.children=[]; this.dataset={}; this.style={}; this.value=''; this.type=''; this.open=false; this.events={}; this.attributes={}; this.classList={add(){},toggle(){}}; }
     append(...nodes) { this.children.push(...nodes); nodes.forEach(x=>{if(x instanceof Element)x.parentElement=this;}); if(this.tag==='select' && !this.value) this.value=this.children[0]?.value || ''; }
     replaceChildren(...nodes) { this.children.forEach(x=>{if(x instanceof Element)x.parentElement=null;}); this.children=[]; this.append(...nodes); }
+    remove(){if(this.parentElement)this.parentElement.children=this.parentElement.children.filter(x=>x!==this);this.parentElement=null;}
     closest(selector) { for(let node=this;node;node=node.parentElement)if(selector.split(',').includes(node.tag))return node; return null; }
     addEventListener(name, action) { this.events[name]=action; }
     setAttribute(name,value) {this.attributes[name]=value;}

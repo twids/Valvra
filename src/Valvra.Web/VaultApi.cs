@@ -126,17 +126,17 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => { await vault.UnassignLicenseAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
 
         api.MapGet("/audit", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, HttpContext ctx, CurrentActor current, IAuditReader reader) =>
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider, HttpContext ctx, CurrentActor current, IAuditReader reader) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
-                resourceId, groupId, includeSubgroups ?? true), ctx.RequestAborted))));
-        api.MapGet("/audit/targets", async (HttpContext ctx, CurrentActor current, IAuditReader reader) =>
-            await current.RunAsync(ctx, async actor => Results.Ok(await reader.ReadTargetsAsync(actor, ctx.RequestAborted))));
+                resourceId, groupId, includeSubgroups ?? true, actorProvider), ctx.RequestAborted))));
+        api.MapGet("/audit/targets", async (HttpContext ctx, CurrentActor current, IAuditReader reader, IDirectoryProvider directory) =>
+            await current.RunAsync(ctx, async actor => Results.Ok(await AuditPresentation.NamesAsync(actor,await reader.ReadTargetsAsync(actor, ctx.RequestAborted),directory,ctx.RequestAborted))));
         api.MapGet("/audit/export", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit) =>
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit) =>
             await current.RunAsync(ctx, async actor =>
             {
                 var events = await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
-                    resourceId, groupId, includeSubgroups ?? true), ctx.RequestAborted);
+                    resourceId, groupId, includeSubgroups ?? true, actorProvider), ctx.RequestAborted);
                 await audit.RecordAsync(actor, "Audit.Export", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
                 return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(events), "application/json", "valvra-audit.json");
             }));
