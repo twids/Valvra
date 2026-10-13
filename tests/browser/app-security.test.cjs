@@ -23,7 +23,7 @@ function harness(audit = null) {
     const elements=new Map(), handlers=new Map(), writes=[];
     let complete, now=Date.now();
     const pending=new Promise(resolve=>complete=resolve);
-    const context={Node:Element,crypto:webcrypto,URLSearchParams,console,Date:class extends Date{static now(){return now;}},clearTimeout(){},setTimeout(){return 1;},setInterval(fn){handlers.set('inactivity',fn);},
+    const context={Node:Element,crypto:webcrypto,URLSearchParams,console,Date:class extends Date{static now(){return now;}},clearTimeout(){},clearInterval(){},setTimeout(){return 1;},setInterval(fn,delay){handlers.set(delay===10000?'inactivity':'countdown',fn);},
         document:{hidden:false,hasFocus:()=>true,getElementById:id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);},createElement:tag=>new Element(tag),createTextNode:x=>x,querySelectorAll:()=>[],addEventListener:(name,fn)=>handlers.set(name,fn)},
         window:{ValvraNavigation:require('../../src/Valvra.Web/wwwroot/js/navigation.js'),ValvraI18n:{message:key=>key,locale:'sv-SE',ready:Promise.resolve(),setText:(element,text)=>element.textContent=text},addEventListener:(name,fn)=>handlers.set(name,fn)},
         navigator:{clipboard:{writeText:async value=>writes.push({clipboard:value})}},

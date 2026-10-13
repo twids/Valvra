@@ -707,5 +707,7 @@
   "Tilldela behörighet": "Tilldela behörighet",
   "Återkalla behörighet": "Återkalla behörighet",
   "Åtkomst nekad": "Åtkomst nekad",
-  "Exportera auditlogg": "Exportera auditlogg"
+  "Exportera auditlogg": "Exportera auditlogg",
+  "Fälten töms om {seconds} sekunder.": "Fälten töms om {seconds} sekunder.",
+  "Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata.": "Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata."
 }

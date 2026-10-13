@@ -10,6 +10,8 @@
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
     let secretTimer;
+    let countdownTimer;
+    let pendingMetadataRead;
     let dialogEpoch = 0;
     let revealedDialog = false;
     let dialogOpener;
@@ -96,6 +98,7 @@
     }
     function clearSecrets() {
         clearTimeout(secretTimer);
+        clearInterval(countdownTimer);
         let cleared = false;
         $("dialog-content").querySelectorAll("input,textarea").forEach(field => { if (field.type === "password" || field.dataset.sensitive) { cleared ||= !!field.value; field.value = ""; } });
         return cleared;
@@ -106,6 +109,7 @@
     }
     function protectFocusLoss() {
         window.ValvraImport?.clear("blur");
+        pendingMetadataRead?.();pendingMetadataRead=null;
         dialogEpoch++; const cleared = clearSecrets();
         if (revealedDialog) { closeDialog(); return; }
         if ($("dialog").open) {
@@ -115,9 +119,10 @@
     }
     function closeDialog() {
         dialogBack = null;
+        pendingMetadataRead=null;
         window.ValvraImport?.clear();
         const wasOpen = $("dialog").open;
-        dialogEpoch++; revealedDialog = false; clearSecrets(); $("dialog").close(); $("dialog-content").replaceChildren(); $("dialog-actions").replaceChildren();
+        dialogEpoch++; revealedDialog = false; clearSecrets(); $("dialog").close(); $("dialog-content").replaceChildren(); $("dialog-content").removeAttribute("aria-busy"); $("dialog-actions").replaceChildren();
         if (wasOpen && !document.hidden && document.hasFocus()) (dialogOpener?.isConnected ? dialogOpener : $("page-title")).focus();
     }
     function dismissDialog() { const back = dialogBack; closeDialog(); if (back && !document.hidden && document.hasFocus()) safely(back); }
@@ -139,6 +144,21 @@
             finally { controls.forEach(x => x.disabled = false); updateSecretSubmitState(); }
         };
         $("dialog").showModal(); $("dialog-title").focus(); return content;
+    }
+    async function metadataDialog(title,read,retry){
+        const body=dialog(title),progress=node("p",t("Läser in…"));progress.setAttribute("role","status");body.append(progress);body.setAttribute("aria-busy","true");
+        const epoch=dialogEpoch;
+        const failed=message=>{progress.remove();body.removeAttribute("aria-busy");body.append(node("p",message),button(t("Försök igen"),retry));};
+        const interrupted=()=>failed(t("Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata."));pendingMetadataRead=interrupted;
+        try{const value=await read();if(!canDisplay(epoch))return null;progress.remove();body.removeAttribute("aria-busy");return{body,value};}
+        catch(error){if(canDisplay(epoch))failed(error.message);return null;}
+        finally{if(pendingMetadataRead===interrupted)pendingMetadataRead=null;}
+    }
+    function revealCountdown(body){
+        const remaining=node("p",undefined,"hint");remaining.setAttribute("role","timer");remaining.setAttribute("aria-live","off");body.append(remaining);
+        const started=Date.now();
+        const update=()=>{const seconds=Math.max(0,Math.min(30,Math.ceil((30000-(Date.now()-started))/1000)));remaining.textContent=t("Fälten töms om {seconds} sekunder.",{seconds});if(seconds===0)closeDialog();};
+        update();countdownTimer=setInterval(update,1000);secretTimer=setTimeout(closeDialog,30000);
     }
     function field(parent, label, type = "text", value = "", required = false) {
         const id = "field-" + crypto.randomUUID(); const l = node("label"); l.append(node("span", label)); if (required) l.append(node("span", t(" (obligatoriskt)"))); l.htmlFor = id;
@@ -473,11 +493,11 @@
         const epoch = ++dialogEpoch;
         const payload = await api(`/secrets/${secret.id}/reveal`, { version: version ?? null });
         if (!canDisplay(epoch)) return;
-        const body = dialog(secret.title + (version ? ` · version ${version}` : ""));
+        const body = dialog(secret.title + (version ? ` · version ${version}` : ""),undefined,undefined,version?{back:()=>historyDialog(secret)}:{});
         revealedDialog = true;
         [ [t("Användarnamn"), payload.username], [t("Lösenord"), payload.password], [t("Anteckningar"), payload.notes] ].forEach(([label, value]) => { const input = field(body, label, "textarea", value); input.readOnly = true; input.classList.add("secret-value"); });
         hint(body, t("Visningen är auditerad. Fälten töms automatiskt efter 30 sekunder eller när sidan tappar fokus."));
-        secretTimer = setTimeout(closeDialog, 30000);
+        revealCountdown(body);
     }
     async function copySecret(secret) {
         const epoch = ++dialogEpoch;
@@ -490,14 +510,13 @@
         body.append(node("p", t("Ta bort {title}? Historiska versioner bevaras krypterade.", {title: secret.title})));
     }
     async function historyDialog(secret) {
-        const epoch = ++dialogEpoch;
-        const versions = await api(`/secrets/${secret.id}/versions`); if (!canDisplay(epoch)) return;
-        const body = dialog(t("Versionshistorik · ") + secret.title);
+        const loaded=await metadataDialog(t("Versionshistorik · ")+secret.title,()=>api(`/secrets/${secret.id}/versions`),()=>historyDialog(secret));if(!loaded)return;
+        const {body,value:versions}=loaded;
         table(body, ["Version", t("Datum"), t("Ändrad av"), t("Åtgärder")], versions.map(version => {
             const actions = node("div", undefined, "actions");
             if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret, version.version)));
             if (has(2) && has(4) && version.version !== secret.currentVersion) actions.append(button(t("Återställ"), () => {
-                const confirmation = dialog(t("Återställ tidigare version"), t("Återställ"), async () => { await api(`/secrets/${secret.id}/restore`, { version: version.version, revision: secret.revision }); await render(); });
+                const confirmation = dialog(t("Återställ tidigare version"), t("Återställ"), async () => { await api(`/secrets/${secret.id}/restore`, { version: version.version, revision: secret.revision }); await render(); },{back:()=>historyDialog(secret)});
                 confirmation.append(node("p", t("Version {version} blir en ny aktuell version. Återställningen auditeras.", {version: version.version})));
             }));
             return [String(version.version), date(version.createdAt), version.createdBy, actions];
@@ -721,21 +740,20 @@
         const epoch = ++dialogEpoch;
         const payload = await api(`/licenses/${license.id}/reveal`, { version: version ?? null });
         if (!canDisplay(epoch)) return;
-        const body = dialog(t("Licensnyckel · ") + license.product + (version ? ` · version ${version}` : ""));
+        const body = dialog(t("Licensnyckel · ") + license.product + (version ? ` · version ${version}` : ""),undefined,undefined,version?{back:()=>licenseHistory(license,state.resources.find(x=>x.id===license.resourceId))}:{});
         revealedDialog = true;
         const key = field(body, t("Licensnyckel"), "textarea", payload.licenseKey); key.readOnly = true;
         const notes = field(body, t("Anteckningar"), "textarea", payload.notes); notes.readOnly = true;
-        hint(body, t("Visningen är auditerad. Fälten töms efter 30 sekunder eller när sidan tappar fokus.")); secretTimer = setTimeout(closeDialog, 30000);
+        hint(body, t("Visningen är auditerad. Fälten töms efter 30 sekunder eller när sidan tappar fokus."));revealCountdown(body);
     }
     async function licenseHistory(license, resource) {
-        const epoch = ++dialogEpoch;
-        const versions = await api(`/licenses/${license.id}/versions`); if (!canDisplay(epoch)) return;
-        const body = dialog(t("Versionshistorik · ") + license.product);
+        const loaded=await metadataDialog(t("Versionshistorik · ")+license.product,()=>api(`/licenses/${license.id}/versions`),()=>licenseHistory(license,resource));if(!loaded)return;
+        const {body,value:versions}=loaded;
         table(body, ["Version", t("Datum"), t("Ändrad av"), t("Åtgärder")], versions.map(version => {
             const actions = node("div", undefined, "actions");
             if (resource?.permissions & 2) actions.append(button(t("Visa"), () => revealLicense(license, version.version)));
             if ((resource?.permissions & 6) === 6 && version.version !== license.currentVersion) actions.append(button(t("Återställ"), () => {
-                const confirmation = dialog(t("Återställ licensversion"), t("Återställ"), async () => { await api(`/licenses/${license.id}/restore`, { version: version.version, revision: license.revision }); await render(); });
+                const confirmation = dialog(t("Återställ licensversion"), t("Återställ"), async () => { await api(`/licenses/${license.id}/restore`, { version: version.version, revision: license.revision }); await render(); },{back:()=>licenseHistory(license,resource)});
                 hint(confirmation, t("Version {version} sparas som en ny version. Nuvarande metadata behålls.", {version: version.version}));
             }));
             return [String(version.version), date(version.createdAt), version.createdBy, actions];
