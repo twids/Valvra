@@ -211,8 +211,9 @@ internal sealed class SpyCipher : ISecretCipher, IDisposable
 internal sealed class FakeDirectory : IDirectoryProvider
 {
     public bool ReportGlobalRoles { get; set; } = true;
+    public IReadOnlyList<DirectorySubject>? SearchSubjects { get; set; }
     public string ProviderId => "ad";
     public Task<Actor> ResolveAsync(string id, CancellationToken ct) => Task.FromResult(new Actor("ad", id, id, new HashSet<string>(), true, ReportGlobalRoles && id == "user", ReportGlobalRoles && id == "user"));
-    public Task<IReadOnlyList<DirectorySubject>> SearchAsync(string query, SubjectKind kind, CancellationToken ct) => Task.FromResult<IReadOnlyList<DirectorySubject>>([new("ad", query, query, kind)]);
+    public Task<IReadOnlyList<DirectorySubject>> SearchAsync(string query, SubjectKind kind, CancellationToken ct) => Task.FromResult<IReadOnlyList<DirectorySubject>>(SearchSubjects ?? [new("ad", query, query, kind)]);
     public Task<DirectorySubject?> FindAsync(string id, SubjectKind kind, CancellationToken ct) => Task.FromResult<DirectorySubject?>(new("ad", id, id, kind));
 }

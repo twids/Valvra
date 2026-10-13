@@ -77,7 +77,7 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
         var term = Escape(query);
         var entries = SearchAt(connection, SearchBase(kind), $"(&{category}(|(sAMAccountName={term}*)(displayName={term}*)(cn={term}*)))", "objectSid", "displayName", "sAMAccountName", "cn");
         cancellationToken.ThrowIfCancellationRequested();
-        return entries.Take(100).Select(x => new DirectorySubject("ad", Sid(x), Text(x, "displayName", "sAMAccountName", "cn"), kind)).ToArray();
+        return entries.Take(100).Select(x => new DirectorySubject("ad", Sid(x), Text(x, "displayName", "sAMAccountName", "cn"), kind, Text(x, "sAMAccountName"))).ToArray();
     }, cancellationToken);
 
     public Task<DirectorySubject?> FindAsync(string subjectId, SubjectKind kind, CancellationToken cancellationToken) => Task.Run(() =>
@@ -87,7 +87,7 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
         var category = Category(kind);
         var entry = SearchAt(connection, SearchBase(kind), $"(&{category}(objectSid={SidFilter(subjectId)}))", "objectSid", "displayName", "sAMAccountName", "cn").SingleOrDefault();
         cancellationToken.ThrowIfCancellationRequested();
-        return entry is null ? null : new DirectorySubject("ad", Sid(entry), Text(entry, "displayName", "sAMAccountName", "cn"), kind);
+        return entry is null ? null : new DirectorySubject("ad", Sid(entry), Text(entry, "displayName", "sAMAccountName", "cn"), kind, Text(entry, "sAMAccountName"));
     }, cancellationToken);
 
     private LdapConnection Connect()

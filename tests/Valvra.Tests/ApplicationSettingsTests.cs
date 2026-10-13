@@ -35,6 +35,23 @@ internal sealed class FakeDirectoryProbe : IDirectoryConfigurationProbe
 public sealed class ApplicationSettingsTests
 {
     [Fact]
+    public async Task PeopleSearchReturnsAccountNamesWithoutReplacingStableIdentityOrAuthorization()
+    {
+        await using var host = new TestWebHost(); using var admin = host.Client("user");
+        ((FakeDirectory)host.Services.GetRequiredService<IDirectoryProvider>()).SearchSubjects = [
+            new("ad", "person-one", "Alex Example", SubjectKind.User, "alex.one"),
+            new("ad", "person-two", "Alex Example", SubjectKind.User, "alex.two")];
+        var people = await admin.GetFromJsonAsync<JsonElement[]>("/api/settings/people?query=Alex");
+        Assert.Equal(2, people!.Length);
+        Assert.Equal("Alex Example", people[0].GetProperty("name").GetString());
+        Assert.Equal("alex.one", people[0].GetProperty("samAccountName").GetString());
+        Assert.Equal("alex.two", people[1].GetProperty("samAccountName").GetString());
+        Assert.Equal("person-two", people[1].GetProperty("id").GetString());
+        Assert.Equal("ad", people[1].GetProperty("provider").GetString());
+        using var ordinary = host.Client("outsider");
+        Assert.Equal(HttpStatusCode.Forbidden,(await ordinary.GetAsync("/api/settings/people?query=Alex")).StatusCode);
+    }
+    [Fact]
     public async Task SettingsAndRoleApisDenyOrdinaryUsersIncludingFakeDirectoryAdminClaims()
     {
         await using var host = new TestWebHost(); using var user = host.Client("outsider"); await host.AddCsrfAsync(user);

@@ -134,6 +134,7 @@
                 const search = field(body, t("Sök personkonto"), "text"); search.minLength = 2; search.maxLength = 128;
                 const results = node("div"), status = node("p"); status.setAttribute("role", "status");
                 let searchEpoch = 0;
+                const personChoiceLabel = person => person.name + (person.samAccountName ? " · " + person.samAccountName : person.name !== person.id ? " · " + person.id : "");
                 const runSearch = async () => {
                     const epoch = ++searchEpoch;
                     subject = null; results.replaceChildren(); status.textContent = "";
@@ -141,8 +142,8 @@
                     const people = await api("/settings/people?query=" + encodeURIComponent(search.value.trim()));
                     if (epoch !== searchEpoch || !results.isConnected) return;
                     results.replaceChildren();
-                    people.forEach(person => results.append(button(person.name, () => {
-                        subject = person; status.textContent = person.name + " · " + person.id;
+                    people.forEach(person => results.append(button(personChoiceLabel(person), () => {
+                        subject = person; status.textContent = personChoiceLabel(person) + " · " + person.provider + " · " + person.id;
                         results.replaceChildren();
                         checks[0][1].focus();
                     })));

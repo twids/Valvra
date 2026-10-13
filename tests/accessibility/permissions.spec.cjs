@@ -76,6 +76,29 @@ test('global role search Enter searches and changing text clears the chosen pers
     await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Select'); expect(writes).toBe(0);
 });
 
+test('global role search distinguishes duplicate display names by account name and submits stable identity',async({page})=>{
+    const display='Alex <img src=x onerror=alert(1)> Example';
+    await page.route('**/api/settings/people?*',route=>route.fulfill({json:[
+        {provider:'ad',id:'person-one',name:display,kind:0,samAccountName:'alex.one'},
+        {provider:'ad',id:'person-two',name:display,kind:0,samAccountName:'alex.two'},
+        {provider:'ad',id:'person-legacy',name:'Legacy Person',kind:0}
+    ]}));
+    let posted;
+    await page.route('**/api/settings/roles',route=>route.request().method()==='POST'
+        ?(posted=route.request().postDataJSON(),route.fulfill({json:{id:'synthetic'}})):route.continue());
+    await page.goto('/settings');await page.getByRole('button',{name:'+ Assign user account',exact:true}).click();
+    await page.getByLabel('Search for user account',{exact:true}).fill('Alex');await page.getByRole('button',{name:'Search',exact:true}).click();
+    await expect(page.getByRole('button',{name:display+' · alex.one',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Legacy Person · person-legacy',exact:true})).toBeVisible();
+    await expect(page.getByRole('dialog').locator('img')).toHaveCount(0);
+    await page.getByRole('button',{name:display+' · alex.two',exact:true}).click();
+    await expect(page.getByRole('dialog').getByRole('status')).toHaveText(display+' · alex.two · ad · person-two');
+    await page.getByRole('checkbox').last().check();
+    await page.getByRole('button',{name:'Save',exact:true}).click();
+    await expect.poll(()=>posted).toMatchObject({provider:'ad',subjectId:'person-two',kind:0,roles:128});
+    expect(posted).not.toHaveProperty('samAccountName');expect(posted).not.toHaveProperty('name');
+});
+
 test('cancel and save return to permissions, revoke requires confirmation, names render as text', async ({page}) => {
     let revokes = 0;
     await page.route('**/api/access/1/*', async route => {
