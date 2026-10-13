@@ -25,6 +25,9 @@ test('audit resource/group filters and export share criteria and preserve access
     const ax = await new AxeBuilder({page}).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
     expect(ax.violations.map(x => x.id)).toEqual([]);
     const download = page.waitForEvent('download');
+    // Unapplied edits must never silently change the export query.
+    await page.getByLabel('Operation',{exact:true}).fill('License.Reveal');
+    await expect(page.getByText('Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.',{exact:true})).toBeVisible();
     await page.getByRole('button', {name: 'Exportera denna sida', exact: true}).click();
     const exported = JSON.parse(await fs.readFile(await (await download).path(), 'utf8'));
     expect(exported.map(x => x.Event.Id)).toEqual(filtered.map(x => x.event.id));
@@ -34,6 +37,10 @@ test('audit resource/group filters and export share criteria and preserve access
 });
 
 test('group-only filtering works with subgroup checkbox and pagination', async ({page}) => {
+    await page.route('**/api/audit?*',async route=>{
+        const response=await route.fetch(),rows=await response.json();
+        await route.fulfill({response,json:new URL(route.request().url()).searchParams.get('offset')==='200'?[]:Array.from({length:200},(_,i)=>rows[i%rows.length])});
+    });
     await page.goto('/'); await page.getByRole('link', {name: 'Auditlogg', exact: true}).click();
     await page.getByLabel('Resursgrupp', {exact: true}).selectOption({label: 'IT och infrastruktur'});
     await page.getByRole('button', {name: 'Filtrera', exact: true}).click();
@@ -43,8 +50,20 @@ test('group-only filtering works with subgroup checkbox and pagination', async (
     const parameters = new URL((await request).url()).searchParams;
     expect(parameters.get('groupId')).toBeTruthy(); expect(parameters.get('includeSubgroups')).toBe('true');
     await expect(page.getByRole('heading', {name: 'Inga händelser', exact: true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Nästa →',exact:true})).toBeDisabled();
     await page.getByRole('button', {name: '← Föregående', exact: true}).click();
     await expect(page.getByRole('table')).toBeVisible();
+});
+
+test('recorded actors resolve names and apply exact provider and operation while boundaries disable paging',async({page})=>{
+    await page.goto('/audit');
+    const choice=page.getByLabel('Registrerade aktörer',{exact:true});await expect(choice.locator('option')).toHaveCount(2);await expect(choice).toHaveValue('');
+    await choice.selectOption('1');await page.getByLabel('Registrerade operationer',{exact:true}).selectOption('Secret.Create');
+    const response=page.waitForResponse(r=>r.url().includes('/api/audit?'));
+    await page.getByRole('button',{name:'Filtrera',exact:true}).click();const received=await response;
+    expect(new URL(received.url()).searchParams.get('actorProvider')).toBe('ad');
+    expect((await received.json()).every(x=>x.event.actorId==='user'&&x.event.action==='Secret.Create')).toBe(true);
+    await expect(page.getByRole('button',{name:'← Föregående',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Nästa →',exact:true})).toBeDisabled();
 });
 
 test('corrupt scope is marked without hiding the audit table', async ({page}) => {

@@ -1,4 +1,5 @@
 const {test, expect} = require('@playwright/test');
+const {clickAction} = require('./ui.cjs');
 test.use({locale:'en-GB'});
 
 test('success is dismissible, expires, and does not survive navigation', async ({page}) => {
@@ -32,7 +33,7 @@ test('errors persist until dismissed and render hostile text as text', async ({p
 test('audit table is named for Events after a dialog has closed', async ({page}) => {
     await page.goto('/');
     await page.getByRole('link',{name:'Open resource · Databasplattform',exact:true}).click();
-    await page.getByRole('button',{name:'Rename',exact:true}).click();
+    await clickAction(page,'Rename');
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
     await page.getByRole('link',{name:'Audit log',exact:true}).click();
     await expect(page.getByRole('table',{name:'Events',exact:true})).toBeVisible();

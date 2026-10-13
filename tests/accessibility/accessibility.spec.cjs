@@ -1,4 +1,5 @@
 const {test, expect} = require('@playwright/test');
+const {clickAction} = require('./ui.cjs');
 const AxeBuilder = require('@axe-core/playwright').default;
 
 // The web server is an isolated, loopback-only .NET host with synthetic data.
@@ -16,7 +17,7 @@ async function openResource(page) {
 }
 async function openLicenseEditor(page) {
     await openResource(page);
-    await page.getByRole('row').filter({hasText: 'Exempellicens'}).getByRole('button', {name: /^Ändra/}).click();
+    await clickAction(page.getByRole('row').filter({hasText: 'Exempellicens'}), /^Ändra/);
     await expect(page.getByRole('dialog', {name: 'Ändra licens', exact: true})).toBeVisible();
 }
 async function noPageOverflow(page) {
@@ -112,7 +113,7 @@ test('resource tables and password/license dialogs satisfy automated WCAG rules'
         'Tilldelningar · Exempellicens', 'Papperskorg', 'Behörigheter'
     ];
     for (const name of actions) {
-        await page.getByRole('button', {name, exact: true}).click();
+        await clickAction(page,name);
         await expect(page.getByRole('dialog')).toBeVisible();
         await expect(page.locator('#dialog-title')).toBeFocused();
         await audit(page);
@@ -135,7 +136,7 @@ test('license editor: keyboard containment, Escape and focus return', async ({pa
         expect(await page.evaluate(() => document.querySelector('#dialog').contains(document.activeElement))).toBe(true);
     }
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('row').filter({hasText: 'Exempellicens'}).getByRole('button', {name: /^Ändra/})).toBeFocused();
+    await expect(page.getByRole('row').filter({hasText: 'Exempellicens'}).getByRole('button', {name: /^Fler åtgärder/})).toBeFocused();
 });
 
 test('required fields and server errors have visible and accessible feedback', async ({page}) => {

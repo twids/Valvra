@@ -1,4 +1,5 @@
 const {test, expect} = require('@playwright/test');
+const {clickAction} = require('./ui.cjs');
 const AxeBuilder = require('@axe-core/playwright').default;
 test.use({locale: 'en-GB'});
 
@@ -22,9 +23,10 @@ test('license overview creates a license in the selected writable resource',asyn
     await page.getByRole('navigation').getByRole('link',{name:'License overview',exact:true}).click();
     await page.getByRole('button',{name:'+ Add license',exact:true}).click();
     const picker=page.getByLabel('Resource',{exact:true});
-    await expect(picker.locator('option')).toHaveCount(2);
+    await expect(picker.locator('option')).toHaveCount(3);
+    await expect(picker).toHaveValue('');
     await expect(picker).not.toContainText('Databasplattform');
-    await picker.selectOption({label:'Windows-servrar'});
+    await picker.selectOption(await picker.locator('option').filter({hasText:'Windows-servrar'}).getAttribute('value'));
     const target=await picker.inputValue();
     await page.getByLabel('Product (required)',{exact:true}).fill('Overview license');
     await page.getByLabel('New license key',{exact:true}).fill('SYNTHETIC-OVERVIEW-LICENSE');
@@ -37,7 +39,7 @@ test('license overview creates a license in the selected writable resource',asyn
     await expect(page.getByRole('row').filter({hasText:'Overview license'})).toContainText('Windows-servrar');
 });
 
-test('license overview hides creation when no resource is writable',async({page})=>{
+test('license overview explains creation when no resource is writable',async({page})=>{
     await page.route('**/api/resources',async route=>{
         const response=await route.fetch(); const resources=await response.json();
         resources.forEach(x=>x.permissions=3);
@@ -46,7 +48,27 @@ test('license overview hides creation when no resource is writable',async({page}
     await page.goto('/');
     await page.getByRole('navigation').getByRole('link',{name:'License overview',exact:true}).click();
     await expect(page.getByRole('heading',{name:'License overview',level:1})).toBeVisible();
-    await expect(page.getByRole('button',{name:'+ Add license',exact:true})).toHaveCount(0);
+    await page.getByRole('button',{name:'+ Add license',exact:true}).click();
+    await expect(page.getByRole('dialog')).toContainText('No visible resource allows you to add licenses.');
+    await expect(page.getByRole('dialog').getByRole('button',{name:'Save',exact:true})).toHaveCount(0);
+});
+
+test('license summaries filter metadata and search sorting clear and back preserve context',async({page})=>{
+    let reveals=0;page.on('request',r=>{if(r.url().includes('/reveal'))reveals++;});
+    await page.route('**/api/resources/*/licenses',route=>route.fulfill({json:[
+        {id:'late',resourceId:'resource-1',product:'Zeta',vendor:'Vendor',assignedSeats:1,seats:5,expiresAt:'2099-01-01T00:00:00Z'},
+        {id:'soon',resourceId:'resource-1',product:'Alpha',vendor:'Vendor',assignedSeats:2,seats:2,expiresAt:'2020-01-01T00:00:00Z'}]}));
+    await page.goto('/licenses');
+    await page.getByRole('button',{name:/ · Expired or expiring within 30 days$/}).click();
+    await expect(page.getByRole('row').filter({hasText:'Zeta'})).toHaveCount(0);
+    await expect(page.getByRole('row').filter({hasText:'Alpha'})).toHaveCount(3);
+    await page.getByRole('button',{name:'Clear filters',exact:true}).click();
+    await page.getByLabel('Sort by',{exact:true}).selectOption('expiry');
+    await expect(page.getByRole('row').nth(1)).toContainText('Alpha');
+    await page.getByLabel('Search licenses',{exact:true}).fill('Zeta');
+    await page.getByRole('navigation',{name:'Main navigation'}).getByRole('link',{name:'Resources',exact:true}).click();await page.goBack();
+    await expect(page.getByLabel('Search licenses',{exact:true})).toHaveValue('Zeta');
+    await expect(page.getByLabel('Sort by',{exact:true})).toHaveValue('expiry');expect(reveals).toBe(0);
 });
 
 test('English navigation, document language, headings and accessibility across all views',async({page})=>{
@@ -91,7 +113,7 @@ test('user-supplied text matching a translation key is displayed verbatim',async
 
 test('English license forms expose localized validation and retain existing focus-loss protection',async({page})=>{
     await openResource(page);
-    await page.getByRole('row').filter({hasText:'Exempellicens'}).getByRole('button',{name:/^Modify/}).click();
+    await clickAction(page.getByRole('row').filter({hasText:'Exempellicens'}),/^Modify/);
     await expect(page.getByRole('dialog',{name:'Edit license',exact:true})).toBeVisible();
     const product=page.getByLabel('Product (required)',{exact:true});
     await product.fill(''); await page.getByRole('button',{name:'Save',exact:true}).click();

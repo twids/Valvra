@@ -5,16 +5,20 @@
     const navigation = window.ValvraNavigation;
     const t = (key, values) => i18n.message(key, values);
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
-        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, auditFilters: {} };
+        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), licenseFilters:{}, auditFilters: {} };
     let renderEpoch = 0;
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
     let secretTimer;
+    let countdownTimer;
+    let pendingMetadataRead;
     let dialogEpoch = 0;
     let revealedDialog = false;
     let dialogOpener;
     let dialogBack;
     let noticeTimer;
+    let closeActionMenu;
+    let actionMenuElement;
     const focusHeading = () => $("page-title").focus();
     const canDisplay = epoch => epoch === dialogEpoch && !document.hidden && document.hasFocus();
     let lastActivity = Date.now();
@@ -35,8 +39,8 @@
     function rememberView() {
         if (!historyKey) return;
         viewSnapshots.set(historyKey, { resourceSearch: state.resourceSearch, resourceGroup: state.resourceGroup,
-            resourceIncludeSubgroups: state.resourceIncludeSubgroups, groupSearch: state.groupSearch,
-            groupIncludeSubgroups: state.groupIncludeSubgroups, auditFilters: { ...state.auditFilters } });
+            resourceIncludeSubgroups: state.resourceIncludeSubgroups, resourceLayout:state.resourceLayout, resourceSort:state.resourceSort, groupSearch: state.groupSearch,
+            groupIncludeSubgroups: state.groupIncludeSubgroups, licenseFilters:{...state.licenseFilters}, auditFilters: { ...state.auditFilters } });
     }
     function resolveRoute(route) {
         const previousGroup = state.group?.id;
@@ -53,6 +57,7 @@
         if (previousGroup !== state.group?.id) { state.groupSearch = ""; state.groupIncludeSubgroups = true; }
     }
     async function navigate(path, { traversal = false, initial = false } = {}) {
+        closeActionMenu?.();
         clearNotice();
         const route = navigation.parse(path);
         rememberView(); closeDialog(); resolveRoute(route);
@@ -60,7 +65,7 @@
         if (traversal) {
             historyKey = window.history.state?.valvraEntry;
             const snapshot = viewSnapshots.get(historyKey);
-            if (snapshot) Object.assign(state, snapshot, { auditFilters: { ...snapshot.auditFilters } });
+            if (snapshot) Object.assign(state, snapshot, { licenseFilters:{...snapshot.licenseFilters}, auditFilters: { ...snapshot.auditFilters } });
         } else if (initial || canonical !== activePath) {
             historyKey = crypto.randomUUID();
             window.history[initial ? "replaceState" : "pushState"]({ valvraEntry: historyKey }, "", canonical);
@@ -93,6 +98,7 @@
     }
     function clearSecrets() {
         clearTimeout(secretTimer);
+        clearInterval(countdownTimer);
         let cleared = false;
         $("dialog-content").querySelectorAll("input,textarea").forEach(field => { if (field.type === "password" || field.dataset.sensitive) { cleared ||= !!field.value; field.value = ""; } });
         return cleared;
@@ -103,6 +109,7 @@
     }
     function protectFocusLoss() {
         window.ValvraImport?.clear("blur");
+        pendingMetadataRead?.();pendingMetadataRead=null;
         dialogEpoch++; const cleared = clearSecrets();
         if (revealedDialog) { closeDialog(); return; }
         if ($("dialog").open) {
@@ -112,9 +119,10 @@
     }
     function closeDialog() {
         dialogBack = null;
+        pendingMetadataRead=null;
         window.ValvraImport?.clear();
         const wasOpen = $("dialog").open;
-        dialogEpoch++; revealedDialog = false; clearSecrets(); $("dialog").close(); $("dialog-content").replaceChildren(); $("dialog-actions").replaceChildren();
+        dialogEpoch++; revealedDialog = false; clearSecrets(); $("dialog").close(); $("dialog-content").replaceChildren(); $("dialog-content").removeAttribute("aria-busy"); $("dialog-actions").replaceChildren();
         if (wasOpen && !document.hidden && document.hasFocus()) (dialogOpener?.isConnected ? dialogOpener : $("page-title")).focus();
     }
     function dismissDialog() { const back = dialogBack; closeDialog(); if (back && !document.hidden && document.hasFocus()) safely(back); }
@@ -137,6 +145,21 @@
         };
         $("dialog").showModal(); $("dialog-title").focus(); return content;
     }
+    async function metadataDialog(title,read,retry){
+        const body=dialog(title),progress=node("p",t("Läser in…"));progress.setAttribute("role","status");body.append(progress);body.setAttribute("aria-busy","true");
+        const epoch=dialogEpoch;
+        const failed=message=>{progress.remove();body.removeAttribute("aria-busy");body.append(node("p",message),button(t("Försök igen"),retry));};
+        const interrupted=()=>failed(t("Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata."));pendingMetadataRead=interrupted;
+        try{const value=await read();if(!canDisplay(epoch))return null;progress.remove();body.removeAttribute("aria-busy");return{body,value};}
+        catch(error){if(canDisplay(epoch))failed(error.message);return null;}
+        finally{if(pendingMetadataRead===interrupted)pendingMetadataRead=null;}
+    }
+    function revealCountdown(body){
+        const remaining=node("p",undefined,"hint");remaining.setAttribute("role","timer");remaining.setAttribute("aria-live","off");body.append(remaining);
+        const started=Date.now();
+        const update=()=>{const seconds=Math.max(0,Math.min(30,Math.ceil((30000-(Date.now()-started))/1000)));remaining.textContent=t("Fälten töms om {seconds} sekunder.",{seconds});if(seconds===0)closeDialog();};
+        update();countdownTimer=setInterval(update,1000);secretTimer=setTimeout(closeDialog,30000);
+    }
     function field(parent, label, type = "text", value = "", required = false) {
         const id = "field-" + crypto.randomUUID(); const l = node("label"); l.append(node("span", label)); if (required) l.append(node("span", t(" (obligatoriskt)"))); l.htmlFor = id;
         const input = type === "textarea" ? node("textarea") : node("input"); input.id = id;
@@ -151,6 +174,7 @@
         if (selected !== undefined && selected !== null) s.value = selected; parent.append(l, s); return s;
     }
     function hint(parent, text) { parent.append(node("p", text, "hint")); }
+    function controlGroup(parent){const group=node("div",undefined,"filter-control");parent.append(group);return group;}
     function empty(parent, title, text) { const box = node("div", undefined, "empty"); box.append(node("h2", title), node("p", text)); parent.append(box); }
     function heading(title, description, actions = []) { i18n.setText($("page-title"), title); document.title = title + " · Valvra"; i18n.setText($("page-description"), description); $("page-actions").replaceChildren(...actions); }
     function table(parent, headers, rows) {
@@ -160,10 +184,10 @@
         wrap.tabIndex = 0; wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", title + t(" – tabell, kan rullas i sidled"));
         grid.append(node("caption", title, "visually-hidden"));
         headers.forEach(x => { const th = node("th", x || t("Åtgärder")); th.scope = "col"; tr.append(th); }); head.append(tr); grid.append(head); const body = node("tbody");
-        rows.forEach(row => { const r = node("tr"); row.forEach(value => { const cell = node("td"); cell.append(value instanceof Node ? value : document.createTextNode(value ?? "")); r.append(cell); }); body.append(r); });
+        rows.forEach(row => { const r = node("tr"); row.forEach((value,index) => { const cell = node("td"); cell.dataset.label=String(headers[index] || t("Åtgärder")); cell.append(value instanceof Node ? value : document.createTextNode(value ?? "")); r.append(cell); }); body.append(r); });
         body.querySelectorAll("tr").forEach(row => {
             const context = row.children[0].querySelector("strong")?.textContent || row.children[0].textContent;
-            row.querySelectorAll("button").forEach(action => action.setAttribute("aria-label", action.textContent + " · " + context));
+            row.querySelectorAll("button").forEach(action => { if(!action.hasAttribute("aria-label"))action.setAttribute("aria-label", action.textContent + " · " + context); });
         });
         grid.append(body); wrap.append(grid); parent.append(wrap); return grid;
     }
@@ -179,18 +203,29 @@
         else { resolveRoute(navigation.parse(window.location.pathname)); await render(); }
     }
     async function render() {
+        closeActionMenu?.();
         const settingsEpoch = ++renderEpoch;
+        $("content").removeAttribute("aria-busy");
         $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Inställningar") }[state.view]);
         document.querySelectorAll("[data-view]").forEach(x => { const current = x.dataset.view === state.view; x.classList.toggle("active", current); if (current) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
         if (routeUnavailable) {
             heading(t("Vyn är inte tillgänglig"), t("Länken är ogiltig, innehållet är borttaget eller du saknar behörighet."), [routeLink(t("← Alla resurser"), {view: "vault"})]); return;
         }
+        const progress=node("p",t("Läser in…"),"hint");progress.setAttribute("role","status");$("content").append(progress);$("content").setAttribute("aria-busy","true");
+        try {
         if (state.view === "vault") { if (state.resource) await resourcePage(); else resourcesPage(); }
         else if (state.view === "groups") { if (state.resource) await resourcePage(); else if (state.group) groupPage(); else groupsPage(); }
         else if (state.view === "licenses") await licenseOverview();
         else if (state.view === "settings") await window.ValvraSettings.render({state, api, node, button, field, panel, table, hint, heading, dialog, notice, t, render, refreshSession, routeLink,
             openImport:() => window.ValvraImport.open({state, api, node, button, field, select, hint, table, dialog, notice, load, t}), isCurrent: () => settingsEpoch === renderEpoch});
         else await auditPage();
+        } catch(error) {
+            if(settingsEpoch!==renderEpoch)return;
+            const failure=node("section",undefined,"panel");failure.append(node("h2",t("Vyn kunde inte läsas")),node("p",error.message));
+            failure.append(button(t("Försök igen"),()=>render(),"primary"));$("content").append(failure);
+        } finally {
+            progress.remove();if(settingsEpoch===renderEpoch)$("content").removeAttribute("aria-busy");
+        }
     }
     function appendImportAction() {
         if (!state.session.isAccessAdministrator) return;
@@ -203,19 +238,39 @@
         const content = $("content");
         if (!state.resources.length) { empty(content, t("Inga resurser ännu"), state.session.isAccessAdministrator ? t("Skapa en resursgrupp, lägg till resurser och tilldela åtkomst för att öppna valvet.") : t("Be en resursägare eller behörighetsadministratör tilldela dig åtkomst.")); return; }
         const toolbar = node("div", undefined, "toolbar"); const search = node("input"); search.placeholder = t("Sök bland dina resurser…"); search.setAttribute("aria-label", t("Sök resurser")); search.value = state.resourceSearch; toolbar.append(search);
-        const filter = select(toolbar, t("Resursgrupp"), [["", t("Alla grupper")], ...sortedGroups(state.groups).map(x => [x.id, groupPath(x.id).map(g => g.name).join(" / ")])], state.resourceGroup);
+        const filter = select(controlGroup(toolbar), t("Resursgrupp"), [["", t("Alla grupper")], ...sortedGroups(state.groups).map(x => [x.id, groupPath(x.id).map(g => g.name).join(" / ")])], state.resourceGroup);
         const tree = node("div", undefined, "check-row"); const descendants = field(tree, t("Inkludera undergrupper"), "checkbox"); descendants.checked = state.resourceIncludeSubgroups; descendants.disabled = !filter.value; toolbar.append(tree); content.append(toolbar);
-        const count = node("p", undefined, "visually-hidden"); count.setAttribute("role", "status"); content.append(count);
+        const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); content.append(count);
         const cards = node("div", undefined, "cards"); content.append(cards);
         const paint = () => {
             cards.replaceChildren();
             const resources = scopedResources(filter.value, descendants.checked, search.value);
             count.textContent = resources.length + t(" resurser visas.");
-            resourceCards(cards, resources);
+            resourceCollection(cards, resources);
             if (!resources.length) empty(cards, t("Inga träffar"), t("Prova ett annat sökord eller en annan grupp."));
         }; search.addEventListener("input", () => { state.resourceSearch = search.value; paint(); });
         filter.addEventListener("change", () => { state.resourceGroup = filter.value; descendants.disabled = !filter.value; paint(); });
-        descendants.addEventListener("change", () => { state.resourceIncludeSubgroups = descendants.checked; paint(); }); paint();
+        descendants.addEventListener("change", () => { state.resourceIncludeSubgroups = descendants.checked; paint(); });
+        browseControls(toolbar,paint);
+        toolbar.append(button(t("Rensa filter"),()=>{search.value="";filter.value="";descendants.checked=true;descendants.disabled=true;state.resourceSearch="";state.resourceGroup="";state.resourceIncludeSubgroups=true;paint();search.focus();})); paint();
+    }
+    function browseControls(toolbar, paint) {
+        const layout=select(controlGroup(toolbar),t("Visning"),[["cards",t("Kort")],["list",t("Kompakt lista")]],state.resourceLayout);
+        const sort=select(controlGroup(toolbar),t("Sortering"),[["name",t("Namn A–Ö")],["reverse",t("Namn Ö–A")],["group",t("Resursgrupp")]],state.resourceSort);
+        layout.addEventListener("change",()=>{state.resourceLayout=layout.value;paint();});sort.addEventListener("change",()=>{state.resourceSort=sort.value;paint();});
+    }
+    function resourceCollection(parent, resources, level="h2") {
+        const path=id=>groupPath(id).map(x=>x.name).join(" / ");
+        const ordered=[...resources].sort((a,b)=>(state.resourceSort==="group" ? path(a.groupId).localeCompare(path(b.groupId),i18n.locale) : 0)
+            || (state.resourceSort==="reverse" ? -1 : 1)*a.name.localeCompare(b.name,i18n.locale)||a.id.localeCompare(b.id));
+        parent.className=state.resourceLayout==="list" ? "resource-list" : "cards";
+        if(state.resourceLayout!=="list"){resourceCards(parent,ordered,level);return;}
+        if(!ordered.length)return;
+        table(parent,[t("Namn"),t("Resursgrupp"),t("Din åtkomst"),t("Åtgärder")],ordered.map(resource=>{
+            const open=routeLink(t("Öppna resurs →"),state.view==="groups"&&state.group ? {view:"groups",groupId:state.group.id,resourceId:resource.id} : {view:"vault",resourceId:resource.id});
+            open.setAttribute("aria-label",t("Öppna resurs · ")+resource.name);
+            return [node("strong",resource.name),path(resource.groupId),rights(resource.permissions)||t("Behörighetsadministration"),open];
+        })).classList.add("mobile-records");
     }
     function sortedGroups(groups) { return [...groups].sort((a, b) => a.name.localeCompare(b.name, i18n.locale) || a.id.localeCompare(b.id)); }
     function groupPath(id) {
@@ -251,15 +306,44 @@
     }
     function groupActions(group) {
         if (!group.canManage) return [];
-        return [button(t("Behörigheter"), () => accessDialog(0, group)), button(t("Byt namn"), () => renameDialog(0, group)), button(t("Flytta"), () => moveDialog(0, group)), button(t("Ta bort"), () => deleteTarget(0, group), "danger")];
+        return [button(t("Behörigheter"), () => accessDialog(0, group)), button(t("Byt namn"), () => renameDialog(0, group)), button(t("Flytta till annan grupp…"), () => moveDialog(0, group)), button(t("Ta bort"), () => deleteTarget(0, group), "danger")];
     }
-    function groupManagement(group) {
-        const details = node("details", undefined, "group-management"), summary = node("summary", t("Hantera grupp"));
-        summary.setAttribute("aria-label", t("Hantera grupp · ") + group.name);
-        const actions = node("div", undefined, "actions"); actions.append(...groupActions(group));
-        actions.querySelectorAll("button").forEach(action => action.setAttribute("aria-label", action.textContent + " · " + group.name));
-        details.append(summary, actions); return details;
+    function actionMenu(label, actions, context) {
+        const wrapper = node("div",undefined,"action-menu"), trigger = node("button",label,"button"); trigger.type = "button";
+        if (context) trigger.setAttribute("aria-label", label + " · " + context);
+        const menu = node("div",undefined,"action-menu-popup"); menu.id = "menu-" + crypto.randomUUID();
+        menu.setAttribute("popover","auto"); menu.setAttribute("role","menu"); menu.setAttribute("aria-label",label + (context ? " · " + context : ""));
+        trigger.setAttribute("aria-haspopup","menu"); trigger.setAttribute("aria-controls",menu.id); trigger.setAttribute("aria-expanded","false");
+        let open = false;
+        const close = () => { if (menu.hidePopover) { if(open)menu.hidePopover(); } else menu.hidden=true; open=false; trigger.setAttribute("aria-expanded","false"); if(actionMenuElement===wrapper)actionMenuElement=null; };
+        if (!menu.showPopover) menu.hidden=true;
+        actions.forEach(action => {
+            action.setAttribute("role","menuitem"); action.tabIndex=-1;
+            if (context) action.setAttribute("aria-label",action.textContent + " · " + context);
+            action.addEventListener("click",() => { close(); trigger.focus(); },true); menu.append(action);
+        });
+        const show = () => {
+            closeActionMenu?.(); closeActionMenu=close; actionMenuElement=wrapper;
+            menu.hidden=false;
+            if (menu.showPopover) menu.showPopover(); else menu.hidden=false;
+            open=true; trigger.setAttribute("aria-expanded","true");
+            const rect=trigger.getBoundingClientRect(), size=menu.getBoundingClientRect();
+            menu.style.left=Math.max(8,Math.min(rect.right-size.width,window.innerWidth-size.width-8))+"px";
+            menu.style.top=Math.max(8,rect.bottom+size.height+8<=window.innerHeight ? rect.bottom+4 : rect.top-size.height-4)+"px";
+            actions[0]?.focus({preventScroll:true});
+        };
+        trigger.addEventListener("click",()=>{if(open)close();else show();});
+        trigger.addEventListener("keydown",event=>{if(event.key==="ArrowDown"){event.preventDefault();show();}});
+        menu.addEventListener("toggle",event=>{if(event.newState==="closed"){open=false;trigger.setAttribute("aria-expanded","false");}});
+        menu.addEventListener("keydown",event=>{
+            const index=actions.indexOf(document.activeElement);
+            if (["ArrowDown","ArrowUp","Home","End"].includes(event.key)) { event.preventDefault(); actions[event.key==="Home" ? 0 : event.key==="End" ? actions.length-1 : (index+(event.key==="ArrowDown" ? 1 : -1)+actions.length)%actions.length]?.focus(); }
+            else if(event.key==="Escape"){event.preventDefault();close();trigger.focus();}
+            else if(event.key==="Tab"){close();trigger.focus({preventScroll:true});}
+        });
+        wrapper.append(trigger,menu); return wrapper;
     }
+    function groupManagement(group) { const menu=actionMenu(t("Hantera grupp"),groupActions(group),group.name);menu.classList.add("group-management");return menu; }
     function groupTree(parent, groups, nested = true) {
         const list = node("ul", undefined, "group-tree"); list.setAttribute("role", "list"); parent.append(list);
         const available = new Set(groups.map(group => group.id)), visited = new Set();
@@ -271,7 +355,9 @@
             row.append(text); if (group.canManage) row.append(groupManagement(group)); item.append(row); container.append(item);
             const children = sortedGroups(groups.filter(child => child.parentId === group.id && !visited.has(child.id)));
             if (nested && children.length && depth < 128) {
-                const branch = node("ul", undefined, "group-tree"); branch.setAttribute("role", "list"); item.append(branch);
+                const branch = node("ul", undefined, "group-tree group-tree-branch"); branch.id="branch-"+crypto.randomUUID();branch.dataset.groupId=group.id;branch.hidden=state.collapsedGroups.has(group.id);branch.setAttribute("role", "list"); item.append(branch);
+                const toggle=button(t("Undergrupper")+" · "+group.name,()=>{if(state.collapsedGroups.has(group.id))state.collapsedGroups.delete(group.id);else state.collapsedGroups.add(group.id);branch.hidden=state.collapsedGroups.has(group.id);toggle.setAttribute("aria-expanded",String(!branch.hidden));},"quiet");
+                toggle.setAttribute("aria-controls",branch.id);toggle.setAttribute("aria-expanded",String(!branch.hidden));row.insertBefore(toggle,row.firstChild);
                 children.forEach(child => append(child, branch, depth + 1));
             }
         };
@@ -297,7 +383,9 @@
         heading(t("Resursgrupper"), t("Organisera resurser i ett träd. Tilldelningar ärvs till undergrupper och resurser."), canCreate ? [button(t("+ Ny grupp"), createGroup, "primary")] : []);
         appendImportAction();
         if (!state.groups.length) { empty($("content"), t("Inga synliga grupper"), t("Grupper visas när du har metadataåtkomst eller rätt att administrera dem.")); return; }
-        const p = panel($("content"), t("Gruppstruktur"));
+        const setBranches=collapsed=>{state.groups.forEach(x=>{if(collapsed)state.collapsedGroups.add(x.id);else state.collapsedGroups.delete(x.id);});
+            document.querySelectorAll(".group-tree-branch").forEach(branch=>{branch.hidden=collapsed;document.querySelector(`[aria-controls="${branch.id}"]`)?.setAttribute("aria-expanded",String(!collapsed));});};
+        const p = panel($("content"), t("Gruppstruktur"),[button(t("Visa alla undergrupper"),()=>setBranches(false)),button(t("Dölj alla undergrupper"),()=>setBranches(true))]);
         groupTree(p, state.groups);
     }
     function groupPage() {
@@ -315,19 +403,22 @@
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); const cards = node("div", undefined, "cards"); body.append(count, cards);
         const paint = () => {
             cards.replaceChildren(); const visible = scopedResources(group.id, descendants.checked, search.value);
-            i18n.setText(count, t("Synliga resurser: {count}", {count: visible.length})); resourceCards(cards, visible, "h3");
+            i18n.setText(count, t("Synliga resurser: {count}", {count: visible.length})); resourceCollection(cards, visible, "h3");
             if (!visible.length) empty(cards, t("Inga synliga resurser i gruppen"), t("Kontrollera sökningen och valet av undergrupper. Bara resurser du har åtkomst till visas."));
         };
         search.addEventListener("input", () => { state.groupSearch = search.value; paint(); });
-        descendants.addEventListener("change", () => { state.groupIncludeSubgroups = descendants.checked; paint(); }); paint();
+        descendants.addEventListener("change", () => { state.groupIncludeSubgroups = descendants.checked; paint(); });
+        browseControls(toolbar,paint);toolbar.append(button(t("Rensa filter"),()=>{search.value="";descendants.checked=true;state.groupSearch="";state.groupIncludeSubgroups=true;paint();search.focus();}));paint();
     }
     async function resourcePage() {
         const resource = state.resource;
         const epoch = renderEpoch;
         const actions = [routeLink(state.view === "groups" ? t("← Till resursgruppen") : t("← Alla resurser"), state.view === "groups" && state.group ? {view: "groups", groupId: state.group.id} : {view: "vault"})];
-        if (resource.canManage) actions.push(button(t("Behörigheter"), () => accessDialog(1, resource)), button(t("Byt namn"), () => renameDialog(1, resource)), button(t("Flytta"), () => moveDialog(1, resource)));
-        if (has(4)) actions.push(button(t("Papperskorg"), recycleBin));
-        if (resource.canManage) actions.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
+        const secondary=[];
+        if (resource.canManage) { actions.push(button(t("Behörigheter"), () => accessDialog(1, resource))); secondary.push(button(t("Byt namn"), () => renameDialog(1, resource)), button(t("Flytta till annan grupp…"), () => moveDialog(1, resource))); }
+        if (has(4)) secondary.push(button(t("Papperskorg"), recycleBin));
+        if (resource.canManage) secondary.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
+        if(secondary.length)actions.push(actionMenu(t("Resursåtgärder"),secondary));
         heading(resource.name, t("Din åtkomst: ") + (rights(resource.permissions) || t("Behörighetsadministration")), actions);
         appendImportAction();
         if (state.view === "groups") groupBreadcrumb(resource.groupId, resource.name);
@@ -339,11 +430,14 @@
         else table(passwords, [t("Konto"), "Version", t("Åtgärder")], secrets.map(secret => {
             const actions = node("div", undefined, "actions");
             if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret)), button(t("Kopiera"), () => copySecret(secret)));
-            if (has(4)) actions.append(button(t("Ändra"), () => secretDialog(secret)), button(t("Ta bort"), () => deleteSecret(secret), "danger"));
-            actions.append(button(t("Historik"), () => historyDialog(secret)));
-            if (has(2) && has(16) && secret.ldapProfileId) actions.append(button("LDAP-test", () => ldapTest(secret)));
+            const secondary=[];
+            if (has(4)) secondary.push(button(t("Ändra"), () => secretDialog(secret)));
+            secondary.push(button(t("Historik"), () => historyDialog(secret)));
+            if (has(2) && has(16) && secret.ldapProfileId) secondary.push(button("LDAP-test", () => ldapTest(secret)));
+            if (has(4)) secondary.push(button(t("Ta bort"), () => deleteSecret(secret), "danger"));
+            actions.append(actionMenu(t("Fler åtgärder"),secondary,secret.title));
             return [secret.title, String(secret.currentVersion), actions];
-        }));
+        })).classList.add("mobile-records");
         const licensePanel = panel($("content"), t("Licenser"), has(4) ? [button(t("+ Lägg till licens"), () => licenseDialog(), "primary")] : []);
         licenseTable(licensePanel, licenses, true);
     }
@@ -351,14 +445,14 @@
         let name, parent;
         const body = dialog(t("Ny resursgrupp"), t("Skapa grupp"), async () => { await api("/groups", { name: name.value, parentId: parent.value || null }); await load(); });
         name = field(body, t("Namn"), "text", "", true); name.maxLength = 200;
-        parent = select(body, t("Överordnad grupp"), [...(state.session.isAccessAdministrator ? [["", t("Ingen – skapa rotgrupp")]] : []), ...state.groups.filter(x => x.canManage).map(x => [x.id, x.name])], state.group?.id);
+        parent = select(body, t("Överordnad grupp"), [...(state.session.isAccessAdministrator ? [["", t("Ingen – skapa rotgrupp")]] : []), ...sortedGroups(state.groups.filter(x => x.canManage)).map(x => [x.id, groupPath(x.id).map(g=>g.name).join(" / ") + " · " + x.id])], state.group?.id);
         hint(body, t("Behörigheter och ägare från den överordnade gruppen ärvs."));
     }
     function createResource() {
         let name, group;
         const body = dialog(t("Ny resurs"), t("Skapa resurs"), async () => { const result = await api("/resources", { name: name.value, groupId: group.value }); await load(); await navigate(navigation.url({view: "vault", resourceId: result.id})); });
         name = field(body, t("Resursnamn"), "text", "", true); name.maxLength = 200;
-        group = select(body, t("Resursgrupp"), state.groups.filter(x => x.canManage).map(x => [x.id, x.name]), state.group?.id);
+        group = select(body, t("Resursgrupp"), sortedGroups(state.groups.filter(x => x.canManage)).map(x => [x.id, groupPath(x.id).map(g=>g.name).join(" / ") + " · " + x.id]), state.group?.id);
     }
     function renameDialog(kind, target) {
         let name; const body = dialog(t("Byt namn"), t("Spara"), async () => { await api(`/${kind === 0 ? "groups" : "resources"}/${target.id}/rename`, { name: name.value, revision: target.revision }); await load(); });
@@ -400,11 +494,11 @@
         const epoch = ++dialogEpoch;
         const payload = await api(`/secrets/${secret.id}/reveal`, { version: version ?? null });
         if (!canDisplay(epoch)) return;
-        const body = dialog(secret.title + (version ? ` · version ${version}` : ""));
+        const body = dialog(secret.title + (version ? ` · version ${version}` : ""),undefined,undefined,version?{back:()=>historyDialog(secret)}:{});
         revealedDialog = true;
         [ [t("Användarnamn"), payload.username], [t("Lösenord"), payload.password], [t("Anteckningar"), payload.notes] ].forEach(([label, value]) => { const input = field(body, label, "textarea", value); input.readOnly = true; input.classList.add("secret-value"); });
         hint(body, t("Visningen är auditerad. Fälten töms automatiskt efter 30 sekunder eller när sidan tappar fokus."));
-        secretTimer = setTimeout(closeDialog, 30000);
+        revealCountdown(body);
     }
     async function copySecret(secret) {
         const epoch = ++dialogEpoch;
@@ -417,14 +511,13 @@
         body.append(node("p", t("Ta bort {title}? Historiska versioner bevaras krypterade.", {title: secret.title})));
     }
     async function historyDialog(secret) {
-        const epoch = ++dialogEpoch;
-        const versions = await api(`/secrets/${secret.id}/versions`); if (!canDisplay(epoch)) return;
-        const body = dialog(t("Versionshistorik · ") + secret.title);
+        const loaded=await metadataDialog(t("Versionshistorik · ")+secret.title,()=>api(`/secrets/${secret.id}/versions`),()=>historyDialog(secret));if(!loaded)return;
+        const {body,value:versions}=loaded;
         table(body, ["Version", t("Datum"), t("Ändrad av"), t("Åtgärder")], versions.map(version => {
             const actions = node("div", undefined, "actions");
             if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret, version.version)));
             if (has(2) && has(4) && version.version !== secret.currentVersion) actions.append(button(t("Återställ"), () => {
-                const confirmation = dialog(t("Återställ tidigare version"), t("Återställ"), async () => { await api(`/secrets/${secret.id}/restore`, { version: version.version, revision: secret.revision }); await render(); });
+                const confirmation = dialog(t("Återställ tidigare version"), t("Återställ"), async () => { await api(`/secrets/${secret.id}/restore`, { version: version.version, revision: secret.revision }); await render(); },{back:()=>historyDialog(secret)});
                 confirmation.append(node("p", t("Version {version} blir en ny aktuell version. Återställningen auditeras.", {version: version.version})));
             }));
             return [String(version.version), date(version.createdAt), version.createdBy, actions];
@@ -538,17 +631,37 @@
         let pick; const body = dialog(t("Lägg till ägare · ") + target.name, t("Lägg till ägare"), async () => { const subject = pick(); await api("/owners", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id }); await load(); }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
         pick = directoryPicker(body); hint(body, t("Ägaren får hantera åtkomst inom resursen eller gruppens underträd."));
     }
-    function moveDialog(kind, target) {
+    function moveDialog(kind, target, selectedDestination) {
         let destination; const body = dialog(t("Flytta · ") + target.name);
-        destination = select(body, t("Ny resursgrupp"), state.groups.filter(x => x.canManage && x.id !== target.id).map(x => [x.id, x.name]));
+        const excluded=kind===0 ? groupIds(target.id,true) : new Set();
+        const destinations=sortedGroups(state.groups.filter(x=>x.canManage&&!excluded.has(x.id)&&x.id!==(kind===0 ? target.parentId : target.groupId)));
+        destination = select(body, t("Ny resursgrupp"), [["",t("Välj grupp")],...destinations.map(x=>[x.id,groupPath(x.id).map(g=>g.name).join(" / ")+" · "+x.id])],selectedDestination || ""); destination.required=true;
+        const source=kind===0 ? groupPath(target.id).map(x=>x.name).join(" / ") : groupPath(target.groupId).map(x=>x.name).join(" / ")+" / "+target.name;
+        hint(body,t("Från: {path}",{path:source}));
+        hint(body,t("Flytten ändrar vilka grupptilldelningar som ärvs. Förhandsgranska skillnaden innan du bekräftar."));
+        if(!destinations.length){hint(body,t("Ingen annan tillåten destinationsgrupp finns."));return;}
         body.append(button(t("Förhandsgranska åtkomst"), async () => {
+            if(!destination.reportValidity())return;
             const epoch = ++dialogEpoch;
-            const selected = destination.value; const preview = await api(`/move/${kind}/${target.id}/preview`, { destinationGroupId: selected, revision: target.revision });
+            const selected = destination.value; const [before,preview] = await Promise.all([api(`/access/${kind}/${target.id}`),api(`/move/${kind}/${target.id}/preview`, { destinationGroupId: selected, revision: target.revision })]);
             if (!canDisplay(epoch)) return;
-            const summary = dialog(t("Bekräfta flytt · ") + target.name, t("Flytta"), async () => { await api(`/move/${kind}/${target.id}`, { destinationGroupId: selected, revision: target.revision }); await load(); });
+            const summary = dialog(t("Bekräfta flytt · ") + target.name, t("Flytta"), async () => { await api(`/move/${kind}/${target.id}`, { destinationGroupId: selected, revision: target.revision }); await load(); },{
+                back:()=>moveDialog(kind,target,selected),
+                afterSave:async message=>{if(kind===1&&state.view==="groups")await navigate(navigation.url({view:"groups",groupId:selected,resourceId:target.id}));notice(message);}
+            });
+            hint(summary,t("Från: {path}",{path:source})); hint(summary,t("Till: {path}",{path:groupPath(selected).map(x=>x.name).join(" / ")}));
             hint(summary, t("Följande tilldelningar blir tillämpliga efter flytten. För en grupp påverkas även dess underträd; direkta tilldelningar längre ned bevaras."));
-            table(summary, [t("Identitet"), t("Rättigheter"), t("Gäller till")], preview.grants.map(x => [x.subjectId, rights(x.permissions), date(x.expiresAt)]));
-            table(summary, [t("Ägare")], preview.owners.map(x => [x.subjectId]));
+            const subjects={subjects:[...(before.subjects||[]),...(preview.subjects||[])]};
+            for(const [label,grants,owners] of [
+                ["Tillkommer",preview.grants.filter(x=>!before.grants.some(y=>y.id===x.id)),preview.owners.filter(x=>!before.owners.some(y=>y.id===x.id))],
+                ["Försvinner",before.grants.filter(x=>!preview.grants.some(y=>y.id===x.id)),before.owners.filter(x=>!preview.owners.some(y=>y.id===x.id))],
+                ["Behålls",preview.grants.filter(x=>before.grants.some(y=>y.id===x.id)),preview.owners.filter(x=>before.owners.some(y=>y.id===x.id))]
+            ]) {
+                const section=node("section"); section.append(node("h3",t(label)));summary.append(section);
+                if(!grants.length&&!owners.length)hint(section,t("Ingen"));
+                else table(section,[t("Identitet"),t("Rättigheter"),t("Gäller till")],[...grants.map(x=>[identityLabel(subjects,x),rights(x.permissions),date(x.expiresAt)]),...owners.map(x=>[identityLabel(subjects,x),t("Ägare"),"—"])]);
+            }
+            hint(summary,t("Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten."));
         }, "primary"));
     }
     function licenseTable(parent, licenses, scoped) {
@@ -556,28 +669,51 @@
         table(parent, [t("Produkt"), t("Platser"), t("Giltig till"), t("Åtgärder")], licenses.map(license => {
             const resource = state.resources.find(x => x.id === license.resourceId); const actions = node("div", undefined, "actions");
             if (resource?.permissions & 2) actions.append(button(t("Visa nyckel"), () => revealLicense(license)));
-            if (resource?.permissions & 4) actions.append(button(t("Ändra"), () => { state.resource = resource; licenseDialog(license); }));
-            if (resource?.permissions & 4) actions.append(button(t("Ta bort"), () => {
+            const secondary=[];
+            if (resource?.permissions & 4) secondary.push(button(t("Ändra"), () => { state.resource = resource; licenseDialog(license); }));
+            secondary.push(button(t("Tilldelningar"), () => assignmentDialog(license, resource)),button(t("Historik"), () => licenseHistory(license, resource)));
+            if (resource?.permissions & 4) secondary.push(button(t("Ta bort"), () => {
                 const body = dialog(t("Ta bort licens · ") + license.product, t("Ta bort"), async () => { await api(`/licenses/${license.id}/deleted`, { deleted: true, revision: license.revision }); await render(); });
                 body.append(node("p", t("Licensen flyttas till resursens papperskorg. Tilldelningar bevaras för återställning.")));
             }, "danger"));
-            actions.append(button(t("Tilldelningar"), () => assignmentDialog(license, resource)));
-            actions.append(button(t("Historik"), () => licenseHistory(license, resource)));
+            actions.append(actionMenu(t("Fler åtgärder"),secondary,scoped ? license.product : license.product+" · "+(resource?.name||"")));
             const product = node("div"); product.append(node("strong", license.product), node("p", scoped ? license.vendor : (resource?.name || "") + " · " + license.vendor, "hint"));
             const expiry = node("span", date(license.expiresAt), license.expiresAt && new Date(license.expiresAt) < new Date(Date.now() + 30 * 86400000) ? "badge warn" : "");
             return [product, `${license.assignedSeats} / ${license.seats}`, expiry, actions];
-        }));
+        })).classList.add("mobile-records");
     }
     async function licenseOverview() {
         const epoch = renderEpoch;
         const writableResources = state.resources.filter(x => (x.permissions & 5) === 5);
         heading(t("Licensöversikt"), t("Tilldelade platser och kommande utgångsdatum för dina synliga resurser."),
-            writableResources.length ? [button(t("+ Lägg till licens"), () => licenseDialog(null, writableResources), "primary")] : []);
+            [button(t("+ Lägg till licens"), () => {
+                if(writableResources.length)licenseDialog(null,writableResources);
+                else hint(dialog(t("Lägg till licens")),t("Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination."));
+            }, "primary")]);
         const licenses = (await Promise.all(state.resources.filter(x => x.permissions & 1).map(x => api(`/resources/${x.id}/licenses`)))).flat();
         if (epoch !== renderEpoch) return;
-        const stats = node("div", undefined, "summary-grid"); const expiring = licenses.filter(x => x.expiresAt && new Date(x.expiresAt) < new Date(Date.now() + 30 * 86400000)).length;
-        [[licenses.length, t("Registrerade licenser")], [licenses.reduce((a, x) => a + x.assignedSeats, 0), t("Tilldelade platser")], [expiring, t("Utgångna eller förfaller inom 30 dagar")]].forEach(([value, label]) => { const stat = node("div", undefined, "summary-card"); stat.append(node("strong", String(value)), node("span", label)); stats.append(stat); }); $("content").append(stats);
-        licenseTable(panel($("content"), t("Programlicenser")), licenses, false);
+        const expiring=x=>x.expiresAt&&new Date(x.expiresAt)<new Date(Date.now()+30*86400000);
+        const stats=node("div",undefined,"summary-grid"),toolbar=node("div",undefined,"toolbar"); $("content").append(stats,toolbar);
+        const search=field(controlGroup(toolbar),t("Sök licenser"),"search",state.licenseFilters.search||"");
+        const filter=select(controlGroup(toolbar),t("Licensfilter"),[["all",t("Alla")],["assigned",t("Med tilldelade platser")],["expiring",t("Utgångna eller förfaller inom 30 dagar")],["full",t("Inga lediga platser")]],state.licenseFilters.filter||"all");
+        const sort=select(controlGroup(toolbar),t("Sortera"),[["product",t("Produkt")],["expiry",t("Giltig till")],["available",t("Lediga platser")],["resource",t("Resurs")]],state.licenseFilters.sort||"product");
+        const section=panel($("content"),t("Programlicenser")),count=node("p",undefined,"hint"),results=node("div");count.setAttribute("role","status");section.append(count,results);
+        const summaries=[];
+        const paint=()=>{
+            state.licenseFilters={search:search.value,filter:filter.value,sort:sort.value};
+            summaries.forEach(([control,value])=>control.setAttribute("aria-pressed",String(filter.value===value)));
+            const resourceName=x=>state.resources.find(r=>r.id===x.resourceId)?.name||"";
+            const visible=licenses.filter(x=>(filter.value!=="assigned"||x.assignedSeats>0)&&(filter.value!=="expiring"||expiring(x))&&(filter.value!=="full"||x.assignedSeats>=x.seats)
+                &&[x.product,x.vendor,x.purchaseReference,resourceName(x)].join(" ").toLocaleLowerCase(i18n.locale).includes(search.value.trim().toLocaleLowerCase(i18n.locale)));
+            visible.sort((a,b)=>(sort.value==="expiry"?(a.expiresAt?Date.parse(a.expiresAt):Infinity)-(b.expiresAt?Date.parse(b.expiresAt):Infinity):sort.value==="available"?(a.seats-a.assignedSeats)-(b.seats-b.assignedSeats):sort.value==="resource"?resourceName(a).localeCompare(resourceName(b),i18n.locale):0)||a.product.localeCompare(b.product,i18n.locale)||a.id.localeCompare(b.id));
+            count.textContent=t("{shown} av {total} licenser visas",{shown:visible.length,total:licenses.length});results.replaceChildren();
+            if(!visible.length&&licenses.length)empty(results,t("Inga matchande licenser"),t("Ändra eller rensa filtren."));else licenseTable(results,visible,false);
+        };
+        for(const [value,number,label] of [["all",licenses.length,t("Registrerade licenser")],["assigned",licenses.reduce((a,x)=>a+x.assignedSeats,0),t("Tilldelade platser")],["expiring",licenses.filter(expiring).length,t("Utgångna eller förfaller inom 30 dagar")]]){
+            const control=button(number+" · "+label,()=>{filter.value=value;paint();},"summary-card");stats.append(control);summaries.push([control,value]);
+        }
+        search.addEventListener("input",paint);filter.addEventListener("change",paint);sort.addEventListener("change",paint);
+        toolbar.append(button(t("Rensa filter"),()=>{search.value="";filter.value="all";paint();}));paint();
     }
     function licenseDialog(license, writableResources) {
             const resourceId = license?.resourceId || state.resource?.id;
@@ -590,7 +726,7 @@
                     seats: Number(seats.value), expiresAt: expiry.value ? new Date(expiry.value + "T23:59:59").toISOString() : null,
                     secretChange: mode, payload: mode === 1 ? { licenseKey: key.value, notes: notes.value } : null, revision: license?.revision || 0 }); await render();
             });
-            if (writableResources) resourcePicker = select(body, t("Resurs"), writableResources.map(x => [x.id, x.name]));
+            if (writableResources) { resourcePicker = select(body, t("Resurs"), [["",t("Välj en destinationsresurs")],...writableResources.map(x => [x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],""); resourcePicker.required=true; }
             product = field(body, t("Produkt"), "text", license?.product || "", true); vendor = field(body, t("Leverantör"), "text", license?.vendor || "");
             reference = field(body, t("Inköpsreferens"), "text", license?.purchaseReference || ""); seats = field(body, t("Antal platser"), "number", String(license?.seats || 1), true); seats.min = "1"; seats.max = "1000000";
             expiry = field(body, t("Giltig till"), "date", license?.expiresAt?.slice(0, 10) || "");
@@ -605,21 +741,20 @@
         const epoch = ++dialogEpoch;
         const payload = await api(`/licenses/${license.id}/reveal`, { version: version ?? null });
         if (!canDisplay(epoch)) return;
-        const body = dialog(t("Licensnyckel · ") + license.product + (version ? ` · version ${version}` : ""));
+        const body = dialog(t("Licensnyckel · ") + license.product + (version ? ` · version ${version}` : ""),undefined,undefined,version?{back:()=>licenseHistory(license,state.resources.find(x=>x.id===license.resourceId))}:{});
         revealedDialog = true;
         const key = field(body, t("Licensnyckel"), "textarea", payload.licenseKey); key.readOnly = true;
         const notes = field(body, t("Anteckningar"), "textarea", payload.notes); notes.readOnly = true;
-        hint(body, t("Visningen är auditerad. Fälten töms efter 30 sekunder eller när sidan tappar fokus.")); secretTimer = setTimeout(closeDialog, 30000);
+        hint(body, t("Visningen är auditerad. Fälten töms efter 30 sekunder eller när sidan tappar fokus."));revealCountdown(body);
     }
     async function licenseHistory(license, resource) {
-        const epoch = ++dialogEpoch;
-        const versions = await api(`/licenses/${license.id}/versions`); if (!canDisplay(epoch)) return;
-        const body = dialog(t("Versionshistorik · ") + license.product);
+        const loaded=await metadataDialog(t("Versionshistorik · ")+license.product,()=>api(`/licenses/${license.id}/versions`),()=>licenseHistory(license,resource));if(!loaded)return;
+        const {body,value:versions}=loaded;
         table(body, ["Version", t("Datum"), t("Ändrad av"), t("Åtgärder")], versions.map(version => {
             const actions = node("div", undefined, "actions");
             if (resource?.permissions & 2) actions.append(button(t("Visa"), () => revealLicense(license, version.version)));
             if ((resource?.permissions & 6) === 6 && version.version !== license.currentVersion) actions.append(button(t("Återställ"), () => {
-                const confirmation = dialog(t("Återställ licensversion"), t("Återställ"), async () => { await api(`/licenses/${license.id}/restore`, { version: version.version, revision: license.revision }); await render(); });
+                const confirmation = dialog(t("Återställ licensversion"), t("Återställ"), async () => { await api(`/licenses/${license.id}/restore`, { version: version.version, revision: license.revision }); await render(); },{back:()=>licenseHistory(license,resource)});
                 hint(confirmation, t("Version {version} sparas som en ny version. Nuvarande metadata behålls.", {version: version.version}));
             }));
             return [String(version.version), date(version.createdAt), version.createdBy, actions];
@@ -663,6 +798,11 @@
         const filter = (label, type) => { const group = node("div"); toolbar.append(group); return field(group, label, type); };
         const from = filter(t("Från"), "datetime-local"), to = filter(t("Till (exklusive)"), "datetime-local");
         const actor = filter(t("Aktörens ID"), "text"), action = filter(t("Operation"), "text"); $("content").append(toolbar);
+        const actorChoices=targets.actors||[],actionChoices=targets.actions||[];
+        const actorChoice=select(controlGroup(toolbar),t("Registrerade aktörer"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
+        const operationChoice=select(controlGroup(toolbar),t("Registrerade operationer"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
+        actorChoice.disabled=operationChoice.disabled=targetsUnavailable;
+        hint(toolbar,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
         const targetFilter = (label, options) => {
             const names = new Map(); options.forEach(x => names.set(x.name, (names.get(x.name) || 0) + 1));
             const group = node("div"); toolbar.append(group);
@@ -678,28 +818,58 @@
         const saved = state.auditFilters;
         for (const [name, input] of Object.entries({from, to, actor, action, resource, group})) input.value = saved[name] || "";
         descendants.checked = saved.descendants !== false;
-        const panelNode = panel($("content"), t("Händelser")); const results = node("div"); panelNode.append(results); let offset = saved.offset || 0, paintEpoch = 0;
-        const remember = () => { state.auditFilters = {from:from.value, to:to.value, actor:actor.value, action:action.value, resource:resource.value, group:group.value, descendants:descendants.checked, offset}; };
-        [from,to,actor,action,resource,group,descendants].forEach(input => { input.addEventListener("input", remember); input.addEventListener("change", remember); });
+        let actorProvider=saved.actorProvider||"";
+        const read=()=>({from:from.value,to:to.value,actor:actor.value,actorProvider,action:action.value,resource:resource.value,group:group.value,descendants:descendants.checked});
+        let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0;
+        const selectedActor=actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider);
+        actorChoice.value=selectedActor<0?"":String(selectedActor+1);operationChoice.value=action.value;
+        const panelNode = panel($("content"), t("Händelser")); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
+        const remember=()=>{state.auditFilters={...read(),offset:applied.offset,applied:{...applied}};dirty.textContent=t("Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.");
+            dirty.hidden=Object.entries(read()).every(([key,value])=>applied[key]===value);};
+        actor.addEventListener("input",()=>{actorProvider="";actorChoice.value="";remember();});
+        action.addEventListener("input",()=>{operationChoice.value=action.value;remember();});
+        actorChoice.addEventListener("change",()=>{const selected=actorChoices[Number(actorChoice.value)-1];actor.value=selected?.id||"";actorProvider=selected?.provider||"";remember();});
+        operationChoice.addEventListener("change",()=>{action.value=operationChoice.value;remember();});
+        [from,to,resource,group,descendants].forEach(input=>{input.addEventListener("input",remember);input.addEventListener("change",remember);});
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); panelNode.append(count);
-        function query() { const params = new URLSearchParams({ offset }); if (from.value) params.set("from", new Date(from.value).toISOString()); if (to.value) params.set("to", new Date(to.value).toISOString()); if (actor.value) params.set("actorId", actor.value); if (action.value) params.set("action", action.value); if (resource.value) params.set("resourceId", resource.value); if (group.value) { params.set("groupId", group.value); params.set("includeSubgroups", String(descendants.checked)); } return params.toString(); }
-        const paint = async () => {
-            remember(); const requestEpoch = ++paintEpoch;
-            const events = await api("/audit?" + query()); if (epoch !== renderEpoch || requestEpoch !== paintEpoch) return; results.replaceChildren();
-            count.textContent = events.length + t(" händelser visas på sida ") + (offset / 200 + 1) + ".";
+        function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
+        const availability=busy=>{previous.disabled=busy||!hasResults||applied.offset===0;next.disabled=busy||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||!hasResults;apply.disabled=busy;};
+        const paint = async requested => {
+            const requestEpoch = ++paintEpoch;availability(true);failure.replaceChildren();results.setAttribute("aria-busy","true");count.textContent=t("Läser in…");
+            try {
+            const events = await api("/audit?" + query(requested)); if (epoch !== renderEpoch || requestEpoch !== paintEpoch) return;
+            applied={...requested};hasResults=true;rowCount=events.length;remember();results.replaceChildren();
+            count.textContent = events.length + t(" händelser visas på sida ") + (applied.offset / 200 + 1) + ".";
             if (!events.length) { empty(results, t("Inga händelser"), t("Ändra filtret eller gå till föregående sida.")); return; }
             table(results, [t("Tid"), t("Aktör"), t("Operation"), t("Resurs / resursgrupp"), t("Resultat"), t("Verifiering")], events.map(x => [date(x.event.timestamp), node("span", x.event.actorId, "audit-id"),
-                x.event.action, auditScopeLabel(x),
+                auditActionLabel(x.event.action), auditScopeLabel(x),
                 x.event.outcome, node("span", x.signatureValid ? t("Giltig signatur") : t("Ogiltig signatur"), "badge" + (x.signatureValid ? "" : " error"))]));
+            }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t("Försök igen"),()=>paint(requested)));}
+            finally{if(epoch===renderEpoch&&requestEpoch===paintEpoch){results.removeAttribute("aria-busy");availability(false);}}
         };
         const filterActions = node("div", undefined, "actions filter-actions"); toolbar.append(filterActions);
-        filterActions.append(button(t("Filtrera"), async () => { offset = 0; await paint(); }), button(t("Exportera denna sida"), async () => {
-            const response = await fetch("/api/audit/export?" + query(), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok) throw new Error(t("Auditexporten misslyckades."));
+        const apply=button(t("Filtrera"),()=>{if(from.value&&to.value&&new Date(from.value)>=new Date(to.value))throw new Error(t("Sluttiden måste vara efter starttiden."));return paint({...read(),offset:0});});
+        const exportPage=button(t("Exportera denna sida"), async () => {
+            const response = await fetch("/api/audit/export?" + query(applied), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok) throw new Error(t("Auditexporten misslyckades."));
             const url = URL.createObjectURL(await response.blob()); const link = node("a"); link.href = url; link.download = "valvra-audit.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }));
-        const paging = node("div", undefined, "actions"); paging.append(button(t("← Föregående"), async () => { offset = Math.max(0, offset - 200); await paint(); }), button(t("Nästa →"), async () => { offset += 200; await paint(); })); $("content").append(paging); await paint();
+        });filterActions.append(apply,exportPage);
+        const previous=button(t("← Föregående"),()=>paint({...applied,offset:Math.max(0,applied.offset-200)})),next=button(t("Nästa →"),()=>paint({...applied,offset:applied.offset+200}));
+        const paging = node("div", undefined, "actions");paging.append(previous,next);$("content").append(paging);await paint(applied);
     }
+    function auditActionLabel(code){const labels={"Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code])+" · "+code:code;}
     document.querySelectorAll("[data-view],.brand").forEach(bindRouteLink);
+    window.addEventListener("resize",()=>closeActionMenu?.());
+    // Scrolling a menu trigger into view can dispatch a delayed scroll after it
+    // opens. Re-anchor the popup instead of closing it during that interaction.
+    window.addEventListener("scroll",event=>{
+        if(!actionMenuElement||event.target.closest?.(".action-menu-popup"))return;
+        const trigger=actionMenuElement.querySelector("button"),menu=actionMenuElement.querySelector(".action-menu-popup");
+        const rect=trigger.getBoundingClientRect(),size=menu.getBoundingClientRect();
+        if(rect.bottom<0||rect.top>window.innerHeight){closeActionMenu?.();return;}
+        menu.style.left=Math.max(8,Math.min(rect.right-size.width,window.innerWidth-size.width-8))+"px";
+        menu.style.top=Math.max(8,rect.bottom+size.height+8<=window.innerHeight?rect.bottom+4:rect.top-size.height-4)+"px";
+    },true);
+    document.addEventListener("pointerdown",event=>{if(actionMenuElement&&!actionMenuElement.contains(event.target))closeActionMenu?.();});
     window.addEventListener("popstate", () => {
         if (routeReady && window.location.pathname !== activePath) safely(() => navigate(window.location.pathname, { traversal: true }));
     });
@@ -728,5 +898,11 @@
         if ($("settings-nav")) $("settings-nav").hidden = !state.session.isAccessAdministrator && !state.session.isSystemAdministrator;
         if (routeReady) resolveRoute(navigation.parse(window.location.pathname));
     }
-    safely(async () => { await i18n.ready; await refreshSession(); await load(); });
+    async function start(){
+        await i18n.ready;const progress=node("p",t("Läser in…"));progress.setAttribute("role","status");$("content").replaceChildren(progress);$("content").setAttribute("aria-busy","true");
+        try{await refreshSession();await load();}
+        catch(error){heading(t("Vyn kunde inte läsas"),t("Försök igen för att kontrollera din session och läsa aktuell metadata."));$("content").replaceChildren(node("p",error.message),button(t("Försök igen"),start,"primary"));}
+        finally{$("content").removeAttribute("aria-busy");}
+    }
+    safely(async () => { await i18n.ready; await start(); });
 })();

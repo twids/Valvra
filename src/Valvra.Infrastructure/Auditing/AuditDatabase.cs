@@ -146,14 +146,16 @@ public sealed class DatabaseAuditTransport(AuditDatabaseOptions options, IAuditS
 }
 
 public sealed record AuditQuery(DateTimeOffset? From, DateTimeOffset? To, string? ActorId, string? Action, Guid? TargetId, int Offset = 0,
-    Guid? ResourceId = null, Guid? GroupId = null, bool IncludeSubgroups = true)
+    Guid? ResourceId = null, Guid? GroupId = null, bool IncludeSubgroups = true, string? ActorProvider = null)
 {
     public bool MatchesScope(AuditEvent value) =>
         (ResourceId is null || value.Scope?.ResourceId == ResourceId)
         && (GroupId is null || (IncludeSubgroups ? value.Scope?.GroupPath?.Any(x => x is not null && x.Id == GroupId) == true : value.Scope?.GroupId == GroupId));
 }
 public sealed record AuditTargetOption(Guid Id, string Name);
-public sealed record AuditTargetOptions(IReadOnlyList<AuditTargetOption> Resources, IReadOnlyList<AuditTargetOption> Groups, int InvalidEventCount = 0);
+public sealed record AuditActorOption(string Provider, string Id, string? Name = null);
+public sealed record AuditTargetOptions(IReadOnlyList<AuditTargetOption> Resources, IReadOnlyList<AuditTargetOption> Groups, int InvalidEventCount = 0,
+    IReadOnlyList<AuditActorOption>? Actors = null, IReadOnlyList<string>? Actions = null);
 public sealed record AuditEventView(AuditEvent Event, string PayloadHash, string SigningKeyId, bool SignatureValid);
 
 public interface IAuditReader
@@ -176,17 +178,19 @@ public sealed class AuditReader(AuditDatabaseOptions options, IAuditSigner signe
     internal static AuditTargetOptions BuildTargets(IEnumerable<AuditEventView> events)
     {
         var resources = new Dictionary<Guid, string>(); var groups = new Dictionary<Guid, string>();
-        var invalid = 0;
+        var invalid = 0; var actors=new HashSet<(string Provider,string Id)>();var actions=new HashSet<string>();
         // Verify before deduplicating. Only signed timestamps/IDs decide the latest name.
         foreach (var view in events.OrderByDescending(x => x.Event.Timestamp).ThenByDescending(x => x.Event.Id))
         {
             if (!view.SignatureValid) { invalid++; continue; }
+            actors.Add((view.Event.ActorProvider,view.Event.ActorId));actions.Add(view.Event.Action);
             if (view.Event.Scope is not { } scope) continue;
             if (scope.ResourceId is { } id) resources.TryAdd(id, scope.ResourceName ?? id.ToString());
             foreach (var group in scope.GroupPath) groups.TryAdd(group.Id, group.Name);
         }
         return new(resources.Select(x => new AuditTargetOption(x.Key, x.Value)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToArray(),
-            groups.Select(x => new AuditTargetOption(x.Key, x.Value)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToArray(), invalid);
+              groups.Select(x => new AuditTargetOption(x.Key, x.Value)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToArray(), invalid,
+              actors.OrderBy(x=>x.Provider).ThenBy(x=>x.Id).Take(100).Select(x=>new AuditActorOption(x.Provider,x.Id)).ToArray(),actions.Order().Take(200).ToArray());
     }
 
     internal AuditEventView ReadVerified(DbDataReader reader)
@@ -226,6 +230,7 @@ public sealed class AuditReader(AuditDatabaseOptions options, IAuditSigner signe
     private static bool Matches(AuditEvent value, AuditQuery query) =>
         (query.From is null || value.Timestamp >= query.From) && (query.To is null || value.Timestamp < query.To)
         && (string.IsNullOrWhiteSpace(query.ActorId) || value.ActorId == query.ActorId)
+          && (string.IsNullOrWhiteSpace(query.ActorProvider) || value.ActorProvider == query.ActorProvider)
         && (string.IsNullOrWhiteSpace(query.Action) || value.Action == query.Action)
         && (query.TargetId is null || value.TargetId == query.TargetId) && query.MatchesScope(value);
 

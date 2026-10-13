@@ -277,7 +277,8 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         if (kind == TargetKind.Group && (await access.GroupPathAsync(destination, ct)).Contains(id))
             throw new VaultValidationException("En grupp kan inte flyttas till sitt eget underträd.");
         if (kind == TargetKind.Group) await ValidateGroupPlacementAsync(destination, id, ct);
-        return new(targetAccess.Grants.Concat(directGrants).ToArray(), targetAccess.Owners.Concat(directOwners).ToArray());
+        return new(targetAccess.Grants.Concat(directGrants).ToArray(), targetAccess.Owners.Concat(directOwners).ToArray(),
+            (targetAccess.Subjects ?? []).Concat(currentAccess.Subjects ?? []).DistinctBy(x=>(x.Provider,x.Id,x.Kind)).ToArray());
     }
 
     public async Task MoveAsync(Actor actor, TargetKind kind, Guid id, Guid destination, long revision, string correlation, CancellationToken ct)

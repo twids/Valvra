@@ -4,13 +4,15 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const {webcrypto} = require('node:crypto');
 class Element {
-    constructor(tag='div') { this.tag=tag; this.children=[]; this.dataset={}; this.style={}; this.value=''; this.type=''; this.open=false; this.events={}; this.classList={add(){},toggle(){}}; }
+    constructor(tag='div') { this.tag=tag; this.children=[]; this.dataset={}; this.style={}; this.value=''; this.type=''; this.open=false; this.events={}; this.attributes={}; this.classList={add(){},toggle(){}}; }
     append(...nodes) { this.children.push(...nodes); nodes.forEach(x=>{if(x instanceof Element)x.parentElement=this;}); if(this.tag==='select' && !this.value) this.value=this.children[0]?.value || ''; }
     replaceChildren(...nodes) { this.children.forEach(x=>{if(x instanceof Element)x.parentElement=null;}); this.children=[]; this.append(...nodes); }
+    remove(){if(this.parentElement)this.parentElement.children=this.parentElement.children.filter(x=>x!==this);this.parentElement=null;}
     closest(selector) { for(let node=this;node;node=node.parentElement)if(selector.split(',').includes(node.tag))return node; return null; }
     addEventListener(name, action) { this.events[name]=action; }
-    setAttribute() {}
-    removeAttribute() {}
+    setAttribute(name,value) {this.attributes[name]=value;}
+    removeAttribute(name) {delete this.attributes[name];}
+    hasAttribute(name) {return Object.hasOwn(this.attributes,name);}
     focus() {}
     querySelector(selector) { return this.querySelectorAll(selector)[0]; }
     close() { this.open=false; }
@@ -21,7 +23,7 @@ function harness(audit = null) {
     const elements=new Map(), handlers=new Map(), writes=[];
     let complete, now=Date.now();
     const pending=new Promise(resolve=>complete=resolve);
-    const context={Node:Element,crypto:webcrypto,URLSearchParams,console,Date:class extends Date{static now(){return now;}},clearTimeout(){},setTimeout(){return 1;},setInterval(fn){handlers.set('inactivity',fn);},
+    const context={Node:Element,crypto:webcrypto,URLSearchParams,console,Date:class extends Date{static now(){return now;}},clearTimeout(){},clearInterval(){},setTimeout(){return 1;},setInterval(fn,delay){handlers.set(delay===10000?'inactivity':'countdown',fn);},
         document:{hidden:false,hasFocus:()=>true,getElementById:id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);},createElement:tag=>new Element(tag),createTextNode:x=>x,querySelectorAll:()=>[],addEventListener:(name,fn)=>handlers.set(name,fn)},
         window:{ValvraNavigation:require('../../src/Valvra.Web/wwwroot/js/navigation.js'),ValvraI18n:{message:key=>key,locale:'sv-SE',ready:Promise.resolve(),setText:(element,text)=>element.textContent=text},addEventListener:(name,fn)=>handlers.set(name,fn)},
         navigator:{clipboard:{writeText:async value=>writes.push({clipboard:value})}},
