@@ -15,6 +15,8 @@
     let dialogOpener;
     let dialogBack;
     let noticeTimer;
+    let closeActionMenu;
+    let actionMenuElement;
     const focusHeading = () => $("page-title").focus();
     const canDisplay = epoch => epoch === dialogEpoch && !document.hidden && document.hasFocus();
     let lastActivity = Date.now();
@@ -53,6 +55,7 @@
         if (previousGroup !== state.group?.id) { state.groupSearch = ""; state.groupIncludeSubgroups = true; }
     }
     async function navigate(path, { traversal = false, initial = false } = {}) {
+        closeActionMenu?.();
         clearNotice();
         const route = navigation.parse(path);
         rememberView(); closeDialog(); resolveRoute(route);
@@ -179,6 +182,7 @@
         else { resolveRoute(navigation.parse(window.location.pathname)); await render(); }
     }
     async function render() {
+        closeActionMenu?.();
         const settingsEpoch = ++renderEpoch;
         $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Inställningar") }[state.view]);
         document.querySelectorAll("[data-view]").forEach(x => { const current = x.dataset.view === state.view; x.classList.toggle("active", current); if (current) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
@@ -251,15 +255,44 @@
     }
     function groupActions(group) {
         if (!group.canManage) return [];
-        return [button(t("Behörigheter"), () => accessDialog(0, group)), button(t("Byt namn"), () => renameDialog(0, group)), button(t("Flytta"), () => moveDialog(0, group)), button(t("Ta bort"), () => deleteTarget(0, group), "danger")];
+        return [button(t("Behörigheter"), () => accessDialog(0, group)), button(t("Byt namn"), () => renameDialog(0, group)), button(t("Flytta till annan grupp…"), () => moveDialog(0, group)), button(t("Ta bort"), () => deleteTarget(0, group), "danger")];
     }
-    function groupManagement(group) {
-        const details = node("details", undefined, "group-management"), summary = node("summary", t("Hantera grupp"));
-        summary.setAttribute("aria-label", t("Hantera grupp · ") + group.name);
-        const actions = node("div", undefined, "actions"); actions.append(...groupActions(group));
-        actions.querySelectorAll("button").forEach(action => action.setAttribute("aria-label", action.textContent + " · " + group.name));
-        details.append(summary, actions); return details;
+    function actionMenu(label, actions, context) {
+        const wrapper = node("div",undefined,"action-menu"), trigger = node("button",label,"button"); trigger.type = "button";
+        if (context) trigger.setAttribute("aria-label", label + " · " + context);
+        const menu = node("div",undefined,"action-menu-popup"); menu.id = "menu-" + crypto.randomUUID();
+        menu.setAttribute("popover","auto"); menu.setAttribute("role","menu"); menu.setAttribute("aria-label",label + (context ? " · " + context : ""));
+        trigger.setAttribute("aria-haspopup","menu"); trigger.setAttribute("aria-controls",menu.id); trigger.setAttribute("aria-expanded","false");
+        let open = false;
+        const close = () => { if (menu.hidePopover) { if(open)menu.hidePopover(); } else menu.hidden=true; open=false; trigger.setAttribute("aria-expanded","false"); if(actionMenuElement===wrapper)actionMenuElement=null; };
+        if (!menu.showPopover) menu.hidden=true;
+        actions.forEach(action => {
+            action.setAttribute("role","menuitem"); action.tabIndex=-1;
+            if (context) action.setAttribute("aria-label",action.textContent + " · " + context);
+            action.addEventListener("click",() => { close(); trigger.focus(); },true); menu.append(action);
+        });
+        const show = () => {
+            closeActionMenu?.(); closeActionMenu=close; actionMenuElement=wrapper;
+            menu.hidden=false;
+            if (menu.showPopover) menu.showPopover(); else menu.hidden=false;
+            open=true; trigger.setAttribute("aria-expanded","true");
+            const rect=trigger.getBoundingClientRect(), size=menu.getBoundingClientRect();
+            menu.style.left=Math.max(8,Math.min(rect.right-size.width,window.innerWidth-size.width-8))+"px";
+            menu.style.top=Math.max(8,rect.bottom+size.height+8<=window.innerHeight ? rect.bottom+4 : rect.top-size.height-4)+"px";
+            actions[0]?.focus();
+        };
+        trigger.addEventListener("click",()=>{if(open)close();else show();});
+        trigger.addEventListener("keydown",event=>{if(event.key==="ArrowDown"){event.preventDefault();show();}});
+        menu.addEventListener("toggle",event=>{if(event.newState==="closed"){open=false;trigger.setAttribute("aria-expanded","false");}});
+        menu.addEventListener("keydown",event=>{
+            const index=actions.indexOf(document.activeElement);
+            if (["ArrowDown","ArrowUp","Home","End"].includes(event.key)) { event.preventDefault(); actions[event.key==="Home" ? 0 : event.key==="End" ? actions.length-1 : (index+(event.key==="ArrowDown" ? 1 : -1)+actions.length)%actions.length]?.focus(); }
+            else if(event.key==="Escape"){event.preventDefault();close();trigger.focus();}
+            else if(event.key==="Tab")close();
+        });
+        wrapper.append(trigger,menu); return wrapper;
     }
+    function groupManagement(group) { const menu=actionMenu(t("Hantera grupp"),groupActions(group),group.name);menu.classList.add("group-management");return menu; }
     function groupTree(parent, groups, nested = true) {
         const list = node("ul", undefined, "group-tree"); list.setAttribute("role", "list"); parent.append(list);
         const available = new Set(groups.map(group => group.id)), visited = new Set();
@@ -325,7 +358,7 @@
         const resource = state.resource;
         const epoch = renderEpoch;
         const actions = [routeLink(state.view === "groups" ? t("← Till resursgruppen") : t("← Alla resurser"), state.view === "groups" && state.group ? {view: "groups", groupId: state.group.id} : {view: "vault"})];
-        if (resource.canManage) actions.push(button(t("Behörigheter"), () => accessDialog(1, resource)), button(t("Byt namn"), () => renameDialog(1, resource)), button(t("Flytta"), () => moveDialog(1, resource)));
+        if (resource.canManage) actions.push(button(t("Behörigheter"), () => accessDialog(1, resource)), button(t("Byt namn"), () => renameDialog(1, resource)), button(t("Flytta till annan grupp…"), () => moveDialog(1, resource)));
         if (has(4)) actions.push(button(t("Papperskorg"), recycleBin));
         if (resource.canManage) actions.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
         heading(resource.name, t("Din åtkomst: ") + (rights(resource.permissions) || t("Behörighetsadministration")), actions);
@@ -351,14 +384,14 @@
         let name, parent;
         const body = dialog(t("Ny resursgrupp"), t("Skapa grupp"), async () => { await api("/groups", { name: name.value, parentId: parent.value || null }); await load(); });
         name = field(body, t("Namn"), "text", "", true); name.maxLength = 200;
-        parent = select(body, t("Överordnad grupp"), [...(state.session.isAccessAdministrator ? [["", t("Ingen – skapa rotgrupp")]] : []), ...state.groups.filter(x => x.canManage).map(x => [x.id, x.name])], state.group?.id);
+        parent = select(body, t("Överordnad grupp"), [...(state.session.isAccessAdministrator ? [["", t("Ingen – skapa rotgrupp")]] : []), ...sortedGroups(state.groups.filter(x => x.canManage)).map(x => [x.id, groupPath(x.id).map(g=>g.name).join(" / ") + " · " + x.id])], state.group?.id);
         hint(body, t("Behörigheter och ägare från den överordnade gruppen ärvs."));
     }
     function createResource() {
         let name, group;
         const body = dialog(t("Ny resurs"), t("Skapa resurs"), async () => { const result = await api("/resources", { name: name.value, groupId: group.value }); await load(); await navigate(navigation.url({view: "vault", resourceId: result.id})); });
         name = field(body, t("Resursnamn"), "text", "", true); name.maxLength = 200;
-        group = select(body, t("Resursgrupp"), state.groups.filter(x => x.canManage).map(x => [x.id, x.name]), state.group?.id);
+        group = select(body, t("Resursgrupp"), sortedGroups(state.groups.filter(x => x.canManage)).map(x => [x.id, groupPath(x.id).map(g=>g.name).join(" / ") + " · " + x.id]), state.group?.id);
     }
     function renameDialog(kind, target) {
         let name; const body = dialog(t("Byt namn"), t("Spara"), async () => { await api(`/${kind === 0 ? "groups" : "resources"}/${target.id}/rename`, { name: name.value, revision: target.revision }); await load(); });
@@ -538,17 +571,37 @@
         let pick; const body = dialog(t("Lägg till ägare · ") + target.name, t("Lägg till ägare"), async () => { const subject = pick(); await api("/owners", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id }); await load(); }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
         pick = directoryPicker(body); hint(body, t("Ägaren får hantera åtkomst inom resursen eller gruppens underträd."));
     }
-    function moveDialog(kind, target) {
+    function moveDialog(kind, target, selectedDestination) {
         let destination; const body = dialog(t("Flytta · ") + target.name);
-        destination = select(body, t("Ny resursgrupp"), state.groups.filter(x => x.canManage && x.id !== target.id).map(x => [x.id, x.name]));
+        const excluded=kind===0 ? groupIds(target.id,true) : new Set();
+        const destinations=sortedGroups(state.groups.filter(x=>x.canManage&&!excluded.has(x.id)&&x.id!==(kind===0 ? target.parentId : target.groupId)));
+        destination = select(body, t("Ny resursgrupp"), [["",t("Välj grupp")],...destinations.map(x=>[x.id,groupPath(x.id).map(g=>g.name).join(" / ")+" · "+x.id])],selectedDestination || ""); destination.required=true;
+        const source=kind===0 ? groupPath(target.id).map(x=>x.name).join(" / ") : groupPath(target.groupId).map(x=>x.name).join(" / ")+" / "+target.name;
+        hint(body,t("Från: {path}",{path:source}));
+        hint(body,t("Flytten ändrar vilka grupptilldelningar som ärvs. Förhandsgranska skillnaden innan du bekräftar."));
+        if(!destinations.length){hint(body,t("Ingen annan tillåten destinationsgrupp finns."));return;}
         body.append(button(t("Förhandsgranska åtkomst"), async () => {
+            if(!destination.reportValidity())return;
             const epoch = ++dialogEpoch;
-            const selected = destination.value; const preview = await api(`/move/${kind}/${target.id}/preview`, { destinationGroupId: selected, revision: target.revision });
+            const selected = destination.value; const [before,preview] = await Promise.all([api(`/access/${kind}/${target.id}`),api(`/move/${kind}/${target.id}/preview`, { destinationGroupId: selected, revision: target.revision })]);
             if (!canDisplay(epoch)) return;
-            const summary = dialog(t("Bekräfta flytt · ") + target.name, t("Flytta"), async () => { await api(`/move/${kind}/${target.id}`, { destinationGroupId: selected, revision: target.revision }); await load(); });
+            const summary = dialog(t("Bekräfta flytt · ") + target.name, t("Flytta"), async () => { await api(`/move/${kind}/${target.id}`, { destinationGroupId: selected, revision: target.revision }); await load(); },{
+                back:()=>moveDialog(kind,target,selected),
+                afterSave:async message=>{if(kind===1&&state.view==="groups")await navigate(navigation.url({view:"groups",groupId:selected,resourceId:target.id}));notice(message);}
+            });
+            hint(summary,t("Från: {path}",{path:source})); hint(summary,t("Till: {path}",{path:groupPath(selected).map(x=>x.name).join(" / ")}));
             hint(summary, t("Följande tilldelningar blir tillämpliga efter flytten. För en grupp påverkas även dess underträd; direkta tilldelningar längre ned bevaras."));
-            table(summary, [t("Identitet"), t("Rättigheter"), t("Gäller till")], preview.grants.map(x => [x.subjectId, rights(x.permissions), date(x.expiresAt)]));
-            table(summary, [t("Ägare")], preview.owners.map(x => [x.subjectId]));
+            const subjects={subjects:[...(before.subjects||[]),...(preview.subjects||[])]};
+            for(const [label,grants,owners] of [
+                ["Tillkommer",preview.grants.filter(x=>!before.grants.some(y=>y.id===x.id)),preview.owners.filter(x=>!before.owners.some(y=>y.id===x.id))],
+                ["Försvinner",before.grants.filter(x=>!preview.grants.some(y=>y.id===x.id)),before.owners.filter(x=>!preview.owners.some(y=>y.id===x.id))],
+                ["Behålls",preview.grants.filter(x=>before.grants.some(y=>y.id===x.id)),preview.owners.filter(x=>before.owners.some(y=>y.id===x.id))]
+            ]) {
+                const section=node("section"); section.append(node("h3",t(label)));summary.append(section);
+                if(!grants.length&&!owners.length)hint(section,t("Ingen"));
+                else table(section,[t("Identitet"),t("Rättigheter"),t("Gäller till")],[...grants.map(x=>[identityLabel(subjects,x),rights(x.permissions),date(x.expiresAt)]),...owners.map(x=>[identityLabel(subjects,x),t("Ägare"),"—"])]);
+            }
+            hint(summary,t("Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten."));
         }, "primary"));
     }
     function licenseTable(parent, licenses, scoped) {
@@ -700,6 +753,8 @@
         const paging = node("div", undefined, "actions"); paging.append(button(t("← Föregående"), async () => { offset = Math.max(0, offset - 200); await paint(); }), button(t("Nästa →"), async () => { offset += 200; await paint(); })); $("content").append(paging); await paint();
     }
     document.querySelectorAll("[data-view],.brand").forEach(bindRouteLink);
+    window.addEventListener("resize",()=>closeActionMenu?.()); window.addEventListener("scroll",event=>{if(!event.target.closest?.(".action-menu-popup"))closeActionMenu?.();},true);
+    document.addEventListener("pointerdown",event=>{if(actionMenuElement&&!actionMenuElement.contains(event.target))closeActionMenu?.();});
     window.addEventListener("popstate", () => {
         if (routeReady && window.location.pathname !== activePath) safely(() => navigate(window.location.pathname, { traversal: true }));
     });

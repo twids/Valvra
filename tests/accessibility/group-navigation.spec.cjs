@@ -99,14 +99,61 @@ test('creation dialogs select the group being viewed without reading saved secre
     await page.keyboard.press('Escape'); await page.getByRole('button',{name:'+ Ny undergrupp',exact:true}).click();
     await expect(page.getByRole('dialog').getByLabel('Överordnad grupp',{exact:true})).toHaveValue(root.id);
     await page.keyboard.press('Escape');
-    const management=page.locator('#page-actions summary');
+    const management=page.locator('#page-actions .group-management>button');
     await management.focus(); await page.keyboard.press('Enter');
-    await expect(page.locator('#page-actions').getByRole('button',{name:'Byt namn · IT och infrastruktur',exact:true})).toBeVisible();
+    await expect(page.locator('#page-actions').getByRole('menuitem',{name:'Byt namn · IT och infrastruktur',exact:true})).toBeVisible();
     await audit(page);
-    await page.keyboard.press('Enter');
-    await expect(page.locator('#page-actions').getByRole('button',{name:'Byt namn · IT och infrastruktur',exact:true})).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(management).toBeFocused();
+    await expect(page.locator('#page-actions').getByRole('menuitem',{name:'Byt namn · IT och infrastruktur',exact:true})).toBeHidden();
     await page.setViewportSize({width:320,height:800});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true); await audit(page);
+});
+
+test('group action menu does not resize rows and supports keyboard and outside dismissal',async({page})=>{
+    await fixture(page,{manage:true});
+    const trigger=page.getByRole('button',{name:'Hantera grupp · IT och infrastruktur',exact:true});
+    const row=trigger.locator('..').locator('..');
+    const before=await row.boundingBox();
+    await trigger.click();
+    const after=await row.boundingBox(); expect(after.height).toBeCloseTo(before.height,0);
+    await expect(page.getByRole('menuitem',{name:'Behörigheter · IT och infrastruktur',exact:true})).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByRole('menuitem',{name:'Byt namn · IT och infrastruktur',exact:true})).toBeFocused();
+    await page.keyboard.press('Escape'); await expect(trigger).toBeFocused();
+    await trigger.click(); await expect(page.getByRole('menuitem',{name:'Behörigheter · IT och infrastruktur',exact:true})).toBeVisible();
+    await page.keyboard.press('Tab'); await expect(page.getByRole('link',{name:'Öppna grupp · Servrar',exact:true})).toBeFocused();
+    await trigger.click(); await page.keyboard.press('Shift+Tab'); await expect(page.getByRole('link',{name:'Öppna grupp · IT och infrastruktur',exact:true})).toBeFocused();
+    await page.getByRole('button',{name:'Hantera grupp · Servrar',exact:true}).click();
+    await trigger.click(); await expect(page.getByRole('menuitem',{name:'Behörigheter · IT och infrastruktur',exact:true})).toBeFocused();
+    await page.getByRole('heading',{name:'Resursgrupper',level:1}).click();
+    await expect(trigger).toHaveAttribute('aria-expanded','false');
+});
+
+test('move previews show full destinations and added removed retained access before any move',async({page})=>{
+    await page.goto('/');
+    const session=await (await page.request.get('/api/session')).json();
+    const headers={'X-CSRF-TOKEN':session.csrfToken};
+    const created=await page.request.post('/api/groups',{headers,data:{name:'Move destination',parentId:null}});
+    expect(created.ok()).toBe(true); const destination=await created.json();
+    const grantSession=await (await page.request.get('/api/session')).json();
+    const granted=await page.request.post('/api/grants',{headers:{'X-CSRF-TOKEN':grantSession.csrfToken},data:{targetKind:0,targetId:destination.id,subjectKind:0,provider:'ad',subjectId:'outsider',permissions:3}});
+    expect(granted.ok(),await granted.text()).toBe(true);
+    let moves=0;
+    await page.route('**/api/move/1/*',route=>{moves++;return route.fulfill({status:204});});
+    await page.reload();
+    await page.getByRole('link',{name:'Öppna resurs · Databasplattform',exact:true}).click();
+    await page.getByRole('button',{name:'Flytta till annan grupp…',exact:true}).click();
+    const picker=page.getByLabel('Ny resursgrupp',{exact:true});
+    await expect(picker).toHaveValue(''); await expect(picker).toContainText('Move destination · '+destination.id);
+    await picker.selectOption(destination.id);
+    await page.getByRole('button',{name:'Förhandsgranska åtkomst',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Tillkommer',exact:true})).toBeVisible();
+    await expect(page.getByRole('heading',{name:'Försvinner',exact:true})).toBeVisible();
+    await expect(page.getByRole('heading',{name:'Behålls',exact:true})).toBeVisible(); expect(moves).toBe(0);
+    await page.getByRole('button',{name:'← Tillbaka',exact:true}).click();
+    await expect(picker).toHaveValue(destination.id); expect(moves).toBe(0);
+    await page.keyboard.press('Escape');
 });
 
 test('late resource metadata cannot replace the group view after navigating back',async({page})=>{

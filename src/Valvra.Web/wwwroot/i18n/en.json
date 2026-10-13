@@ -654,5 +654,14 @@
   "Planera ett underhållsfönster. Stoppa och verifiera webbplatsens applikationspool. Konfigurera nya aktiva tumavtryck och behåll äldre tillåtna/verifierande tumavtryck.": "Schedule maintenance. Stop and verify the website application pool. Configure new active thumbprints while retaining older allowed/verification thumbprints.",
   "Kör Valvra.Web.exe --rewrap-keys från publiceringskatalogen som ett aktivt AD-personkonto med behörighetsadministration och nödvändig databas- och certifikatåtkomst. Avbruten ompackning kan köras igen.": "Run Valvra.Web.exe --rewrap-keys from the publish directory as an enabled AD person account with Access Administrator and required database/certificate access. Interrupted rewrapping can be rerun.",
   "Starta applikationspoolen och verifiera nya och äldre hemlighetsversioner, audit och integritet. Behåll äldre nycklar under hela säkerhetskopiornas återställningsperiod.": "Start the application pool and verify current and older secret versions, audit and integrity. Retain older keys throughout the backup recovery period.",
-  "TLS-certifikatet hanteras separat i webbservern. Ingen nyckel ändras eller tas bort från denna sida.": "Manage the TLS certificate separately in the web server. This page does not change or remove keys."
+  "TLS-certifikatet hanteras separat i webbservern. Ingen nyckel ändras eller tas bort från denna sida.": "Manage the TLS certificate separately in the web server. This page does not change or remove keys.",
+  "Flytta till annan grupp…": "Move to another group…",
+  "Från: {path}": "From: {path}",
+  "Till: {path}": "To: {path}",
+  "Flytten ändrar vilka grupptilldelningar som ärvs. Förhandsgranska skillnaden innan du bekräftar.": "Moving changes inherited group grants. Preview the differences before confirming.",
+  "Ingen annan tillåten destinationsgrupp finns.": "No other permitted destination group is available.",
+  "Tillkommer": "Added",
+  "Försvinner": "Removed",
+  "Behålls": "Retained",
+  "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten.": "The preview shows assignments. Group memberships may provide additional access. The server checks current permissions when moving."
 }

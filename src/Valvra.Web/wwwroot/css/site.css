@@ -59,6 +59,7 @@ dialog{overflow-y:auto}
 .button{display:inline-flex;align-items:center;justify-content:center}
 @media(forced-colors:active){.group-management summary:focus-visible{outline-color:Highlight}}
 .settings-form {max-width: 46rem;}
+.action-menu-popup{position:fixed;inset:auto;margin:0;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--white);color:var(--ink);box-shadow:0 8px 28px #0003;min-width:190px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:auto;z-index:20}.action-menu-popup:popover-open{display:flex;flex-direction:column;gap:4px}.action-menu-popup>.button{justify-content:flex-start;border:0;width:100%}.action-menu-popup>.danger{border-top:1px solid var(--border);border-radius:0}.action-menu-popup[hidden]{display:none}
 .settings-navigation{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;margin:0 0 20px}.settings-navigation [aria-current=page]{background:var(--green);color:white}.build-version{display:block;margin-top:8px}.settings-panel{padding-bottom:12px}.settings-panel>ol{padding:0 36px}.settings-panel li{margin-block:12px}
 dialog:has(.permissions-overview){width:min(1100px,calc(100vw - 32px));max-width:calc(100vw - 32px)}.permissions-overview h3{margin-top:24px}.permissions-overview td{vertical-align:top}.permissions-overview td:first-child{min-width:180px}.permissions-overview .notice{margin-bottom:16px}
 .button[aria-disabled=true]{opacity:.6;cursor:wait}

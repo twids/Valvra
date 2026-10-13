@@ -654,5 +654,14 @@
   "Planera ett underhållsfönster. Stoppa och verifiera webbplatsens applikationspool. Konfigurera nya aktiva tumavtryck och behåll äldre tillåtna/verifierande tumavtryck.": "Planera ett underhållsfönster. Stoppa och verifiera webbplatsens applikationspool. Konfigurera nya aktiva tumavtryck och behåll äldre tillåtna/verifierande tumavtryck.",
   "Kör Valvra.Web.exe --rewrap-keys från publiceringskatalogen som ett aktivt AD-personkonto med behörighetsadministration och nödvändig databas- och certifikatåtkomst. Avbruten ompackning kan köras igen.": "Kör Valvra.Web.exe --rewrap-keys från publiceringskatalogen som ett aktivt AD-personkonto med behörighetsadministration och nödvändig databas- och certifikatåtkomst. Avbruten ompackning kan köras igen.",
   "Starta applikationspoolen och verifiera nya och äldre hemlighetsversioner, audit och integritet. Behåll äldre nycklar under hela säkerhetskopiornas återställningsperiod.": "Starta applikationspoolen och verifiera nya och äldre hemlighetsversioner, audit och integritet. Behåll äldre nycklar under hela säkerhetskopiornas återställningsperiod.",
-  "TLS-certifikatet hanteras separat i webbservern. Ingen nyckel ändras eller tas bort från denna sida.": "TLS-certifikatet hanteras separat i webbservern. Ingen nyckel ändras eller tas bort från denna sida."
+  "TLS-certifikatet hanteras separat i webbservern. Ingen nyckel ändras eller tas bort från denna sida.": "TLS-certifikatet hanteras separat i webbservern. Ingen nyckel ändras eller tas bort från denna sida.",
+  "Flytta till annan grupp…": "Flytta till annan grupp…",
+  "Från: {path}": "Från: {path}",
+  "Till: {path}": "Till: {path}",
+  "Flytten ändrar vilka grupptilldelningar som ärvs. Förhandsgranska skillnaden innan du bekräftar.": "Flytten ändrar vilka grupptilldelningar som ärvs. Förhandsgranska skillnaden innan du bekräftar.",
+  "Ingen annan tillåten destinationsgrupp finns.": "Ingen annan tillåten destinationsgrupp finns.",
+  "Tillkommer": "Tillkommer",
+  "Försvinner": "Försvinner",
+  "Behålls": "Behålls",
+  "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten.": "Förhandsgranskningen visar tilldelningar. Gruppmedlemskap kan ge ytterligare åtkomst. Servern kontrollerar aktuella rättigheter vid flytten."
 }
