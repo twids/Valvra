@@ -1,5 +1,9 @@
 # Settings and administration
 
+Settings is split into **People & permissions**, **Import**, **Directory**, **Certificates & security**, and **About**. Access administrators start with permissions; system administrators without that role start with Directory. Section links support reload and browser history. Import requires Access Administrator plus destination content permissions. Directory edits are retained only in this tab; delayed responses do not overwrite newer edits.
+
+The footer and About show the running assembly version; About also shows build metadata. Certificates & security is read-only and restricted to access/system administrators. It shows configured active and retained encryption, audit, and integrity certificate metadata, expiry, and private-key presence. Presence does not prove private-key access or recoverability. Rotation remains the maintenance workflow in [Operations](OPERATIONS.md#certificate-rotation); this page cannot replace/delete keys. TLS is managed separately in the web server.
+
 **Settings** is available in the main menu for access and system administrators. Routine directory administration requires no setup code or restart. All administrative API requests check permissions on the server; the menu is not the security boundary. Writes require a CSRF token and signed audit records.
 
 ## Directory connection

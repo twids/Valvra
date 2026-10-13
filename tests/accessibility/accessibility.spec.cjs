@@ -119,6 +119,8 @@ test('resource tables and password/license dialogs satisfy automated WCAG rules'
         if (name === 'Behörigheter') {
             await page.getByRole('button', {name: '+ Tilldela åtkomst', exact: true}).click();
             await audit(page);
+            await page.keyboard.press('Escape');
+            await expect(page.getByRole('dialog', {name: 'Behörigheter · Databasplattform', exact:true})).toBeVisible();
         }
         await page.keyboard.press('Escape');
         await expect(page.getByRole('dialog')).not.toBeVisible();
@@ -157,7 +159,7 @@ test('saving returns focus to the page heading when the original row was replace
     await page.getByRole('button', {name: 'Spara', exact: true}).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
     await expect(page.getByRole('heading', {name: 'Databasplattform', exact: true})).toBeFocused();
-    await expect(page.locator('#notice')).toContainText('sparats och auditerats');
+    await expect(page.locator('#notice')).toContainText('Klart och auditerat: Ändra licens');
 });
 
 test('focus-loss security retains metadata, clears secret fields and avoids live-region disclosure', async ({page}) => {

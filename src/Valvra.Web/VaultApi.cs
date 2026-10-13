@@ -22,6 +22,7 @@ public static class VaultApi
 {
     public static void MapVaultApi(this WebApplication app)
     {
+        app.MapImportApi();
         var api = app.MapGroup("/api").RequireAuthorization();
         api.MapPost("/targets/{kind}/{id:guid}/delete", async (TargetKind kind, Guid id, DeleteRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => { await vault.DeleteEmptyTargetAsync(actor, kind, id, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
@@ -36,6 +37,7 @@ public static class VaultApi
             {
                 await audit.RecordAsync(actor, "Session.Identified", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
                 return Results.Ok(new { actor.DisplayName, actor.Provider, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor, actor.IsSystemAdministrator,
+                    applicationVersion = BuildInformation.Version, build = BuildInformation.Build,
                     csrfToken = csrf.GetAndStoreTokens(ctx).RequestToken });
             }));
 

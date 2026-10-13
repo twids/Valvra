@@ -59,6 +59,10 @@ dialog{overflow-y:auto}
 .button{display:inline-flex;align-items:center;justify-content:center}
 @media(forced-colors:active){.group-management summary:focus-visible{outline-color:Highlight}}
 .settings-form {max-width: 46rem;}
+.settings-navigation{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;margin:0 0 20px}.settings-navigation [aria-current=page]{background:var(--green);color:white}.build-version{display:block;margin-top:8px}.settings-panel{padding-bottom:12px}.settings-panel>ol{padding:0 36px}.settings-panel li{margin-block:12px}
+dialog:has(.permissions-overview){width:min(1100px,calc(100vw - 32px));max-width:calc(100vw - 32px)}.permissions-overview h3{margin-top:24px}.permissions-overview td{vertical-align:top}.permissions-overview td:first-child{min-width:180px}.permissions-overview .notice{margin-bottom:16px}
+.button[aria-disabled=true]{opacity:.6;cursor:wait}
+.notice{display:flex;align-items:center;justify-content:space-between;gap:12px}.notice[hidden]{display:none}.notice>span{min-width:0;overflow-wrap:anywhere}.notice>.button{flex-shrink:0}
 .settings-panel > p, .settings-panel > form {margin: 1rem;}
 .settings-form details {margin: 1rem 0;}
 .settings-form summary {cursor: pointer; margin-bottom: .8rem;}

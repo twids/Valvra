@@ -45,25 +45,56 @@ test('admin management alone cannot import; writable existing resource needs no 
 test('ambiguous sibling resources fail before writes',()=>{
     assert.throws(()=>plan(mapped('title,password\nA,pw'),[group],[{id:'a',groupId:'g',name:'Konton',permissions:5},{id:'b',groupId:'g',name:'konton',permissions:5}],'g',null));
 });
-test('execution reads only metadata and skips duplicate titles without revealing or overwriting',async()=>{
+test('execution uses administrator batches and honors server duplicate results without revealing values',async()=>{
     const preview=plan(mapped('title,password\nExisting,pw\nNew,pw\nnew,pw'),[],[{id:'r',name:'R',permissions:5}],null,'r');
     const calls=[];
-    const report=await execute(preview,async(path,body)=>{calls.push([path,body]);return body?{id:'new'}:[{title:'existing'}];},()=>false,()=>{});
+    const report=await execute(preview,async(path,body)=>{calls.push(path);return {results:body.operations.map((x,i)=>({key:x.key,id:'new',created:i===1}))};},()=>false,()=>{});
     assert.equal(report.created,1); assert.equal(report.skipped,2); assert.equal(report.stopped,false);
-    assert.deepEqual(calls.map(x=>x[0]),['/resources/r/secrets','/resources/r/secrets']);
+    assert.deepEqual(calls,['/imports/batch']);
     assert.equal(preview.entries[1].payload.password,'');
 });
 test('execution reports an uncertain row on a failed write and never retries it',async()=>{
     const preview=plan(mapped('title,password\nA,pw\nB,pw'),[],[{id:'r',name:'R',permissions:5}],null,'r');
     let writes=0;
-    const report=await execute(preview,async(path,body)=>{if(!body)return [];if(++writes===2)throw Error('secret must not be echoed');return {id:'a'};},()=>false,()=>{});
+    const report=await execute(preview,async(path,body)=>{writes++;return {results:[{key:body.operations[0].key,id:'a',created:true}],errorCode:'Unavailable',failedKey:body.operations[1].key,uncertainRow:3};},()=>false,()=>{});
     assert.equal(report.created,1); assert.equal(report.uncertainRow,3); assert.equal(report.stopped,true);
-    assert.equal(JSON.stringify(report).includes('secret'),false); assert.equal(writes,2);
+    assert.equal(JSON.stringify(report).includes('secret'),false); assert.equal(writes,1);
 });
-test('cancellation stops between requests and hierarchy writes use resolved IDs',async()=>{
-    const preview=plan(mapped('title,password,group\nA,pw,One/Two'),[group],[],'g',null);
+test('cancellation stops between bounded batches and hierarchy references remain explicit',async()=>{
+    const rows = 'title,password,group\n'+Array.from({length:20},(_,i)=>`A${i},pw,One/Two`).join('\n');
+    const preview=plan(mapped(rows),[group],[],'g',null);
     const calls=[]; let stopped=false;
-    const report=await execute(preview,async(path,body)=>{calls.push([path,body]);if(path==='/resources')stopped=true;return {id:'id'+calls.length};},()=>stopped,()=>{});
-    assert.equal(report.created,0); assert.equal(report.groups,2); assert.equal(report.resources,1); assert.equal(report.stopped,true);
-    assert.equal(calls[1][1].parentId,'id1'); assert.equal(calls[2][1].groupId,'id2');
+    const report=await execute(preview,async(path,body)=>{calls.push(body.operations);stopped=true;return {results:body.operations.map(x=>({key:x.key,id:'id-'+x.key,created:true}))};},()=>stopped,()=>{});
+    assert.equal(report.created,9); assert.equal(report.groups,2); assert.equal(report.resources,1); assert.equal(report.stopped,true);
+    assert.equal(calls.length,1); assert.equal(calls[0].length,12);
+    assert.equal(calls[0][1].target,'group:0'); assert.equal(calls[0][2].target,'group:1');
+});
+
+test('transport failure is uncertain and source error text is never returned or retried',async()=>{
+    const preview=plan(mapped('title,password\nA,pw'),[],[{id:'r',name:'R',permissions:5}],null,'r');
+    let calls=0;
+    const report=await execute(preview,async()=>{calls++;throw Error('PRIVATE-SOURCE-VALUE');},()=>false,()=>{});
+    assert.equal(calls,1); assert.equal(report.errorCode,'Transport'); assert.equal(report.uncertainRow,-1);
+    assert.equal(JSON.stringify(report).includes('PRIVATE-SOURCE-VALUE'),false);
+});
+
+test('1000 entries use bounded batches rather than one request per password',async()=>{
+    const preview=plan(mapped('title,password\n'+Array.from({length:1000},(_,i)=>`Entry${i},pw`).join('\n')),[],[{id:'r',name:'R',permissions:5}],null,'r');
+    let calls=0;
+    const report=await execute(preview,async(path,body)=>{calls++;assert.ok(body.operations.length<=12);return {results:body.operations.map(x=>({key:x.key,id:'id',created:true}))};},()=>false,()=>{});
+    assert.equal(calls,84); assert.equal(report.created,1000); assert.equal(report.stopped,false);
+});
+
+test('only pre-processing rate-limit rejection is retried',async()=>{
+    const preview=plan(mapped('title,password\nA,pw'),[],[{id:'r',name:'R',permissions:5}],null,'r');
+    let calls=0;
+    const report=await execute(preview,async(path,body)=>{if(++calls===1){const e=Error('limit');e.status=429;e.retryAfter=.001;throw e;}return {results:body.operations.map(x=>({key:x.key,id:'id',created:true}))};},()=>false,()=>{});
+    assert.equal(calls,2); assert.equal(report.created,1); assert.equal(report.stopped,false);
+});
+
+test('JSON escaping cannot exceed the bounded request size',async()=>{
+    const entries=Array.from({length:12},(_,i)=>({row:i+2,title:'A'+i,resourceId:'r',payload:{username:'u',password:'\\'.repeat(65536),notes:'\\'.repeat(65536)}}));
+    let calls=0;
+    const report=await execute({groups:[],resources:[],entries},async(path,body)=>{calls++;assert.ok(new TextEncoder().encode(JSON.stringify(body)).length<=1536*1024);return {results:body.operations.map(x=>({key:x.key,id:'id',created:true}))};},()=>false,()=>{});
+    assert.ok(calls>1); assert.equal(report.created,12);
 });

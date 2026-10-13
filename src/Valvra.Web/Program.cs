@@ -60,7 +60,7 @@ try
     builder.Services.AddRazorPages(options =>
     {
         // Explicit UI routes share the authenticated shell. Never rewrite API/static paths.
-        foreach (var route in new[] { "/resources", "/resources/{resourceId}", "/groups", "/groups/{groupId}", "/groups/{groupId}/resources/{resourceId}", "/licenses", "/audit", "/settings" })
+        foreach (var route in new[] { "/resources", "/resources/{resourceId}", "/groups", "/groups/{groupId}", "/groups/{groupId}/resources/{resourceId}", "/licenses", "/audit", "/settings", "/settings/{section}" })
             options.Conventions.AddPageRoute("/Index", route);
     });
     builder.Services.AddSingleton<UiText>();

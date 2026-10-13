@@ -9,6 +9,7 @@
         const view = Object.keys(roots).find(key => roots[key] === "/" + parts[0]);
         if (!view) return null;
         if (parts.length === 1) return { view };
+        if (view === "settings" && parts.length === 2 && ["people","import","directory","certificates","about"].includes(parts[1])) return {view,section:parts[1]};
         const id = value => identifier.test(value || "") ? value.toLowerCase() : null;
         if (view === "vault" && parts.length === 2 && id(parts[1])) return { view, resourceId: id(parts[1]) };
         if (view === "groups" && id(parts[1])) {
@@ -20,6 +21,7 @@
     function url(route) {
         if (!route || !roots[route.view]) throw new Error("Invalid route");
         let path = roots[route.view];
+        if (route.section != null) { if (route.view !== "settings" || !["people","import","directory","certificates","about"].includes(route.section)) throw new Error("Invalid settings section"); path += "/" + route.section; }
         for (const value of [route.groupId, route.resourceId]) if (value != null && !identifier.test(value)) throw new Error("Invalid route identifier");
         if (route.view === "groups" && route.groupId) path += "/" + route.groupId.toLowerCase();
         if (route.resourceId) {
