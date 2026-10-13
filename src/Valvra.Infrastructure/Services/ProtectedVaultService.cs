@@ -31,9 +31,9 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
         string? ldapProfileId, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.CreateSecretAsync(actor, resourceId, title, payload, ldapProfileId, correlation, ct), ct);
 
-    public Task UpdateSecretAsync(Actor actor, Guid id, string title, SecretPayload payload,
-        string? ldapProfileId, long revision, string correlation, CancellationToken ct) =>
-        integrity.RunAsync(() => operations.UpdateSecretAsync(actor, id, title, payload, ldapProfileId, revision, correlation, ct), ct);
+    public Task UpdateSecretAsync(Actor actor, Guid id, string title, SecretPayload? payload,
+        string? ldapProfileId, long revision, string correlation, CancellationToken ct, SecretChange secretChange = SecretChange.Replace) =>
+        integrity.RunAsync(() => operations.UpdateSecretAsync(actor, id, title, payload, ldapProfileId, revision, correlation, ct, secretChange), ct);
 
     public Task<SecretPayload> RevealSecretAsync(Actor actor, Guid id, int? version, string action,
         string correlation, CancellationToken ct) =>

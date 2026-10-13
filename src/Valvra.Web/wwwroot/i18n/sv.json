@@ -711,5 +711,14 @@
   "Fälten töms om {seconds} sekunder.": "Fälten töms om {seconds} sekunder.",
   "Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata.": "Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata.",
   "Välj registrerad aktör": "Välj registrerad aktör",
-  "Välj registrerad operation": "Välj registrerad operation"
+  "Välj registrerad operation": "Välj registrerad operation",
+  "Välj att bevara eller ersätta alla hemliga fält.": "Välj att bevara eller ersätta alla hemliga fält.",
+  "Ange alla hemliga fält för det nya lösenordet.": "Ange alla hemliga fält för det nya lösenordet.",
+  "Ange ett lösenord för ersättningen.": "Ange ett lösenord för ersättningen.",
+  "Lösenord och hemliga fält": "Lösenord och hemliga fält",
+  "Ersätt alla hemliga fält": "Ersätt alla hemliga fält",
+  "Läs sparade värden för ersättning": "Läs sparade värden för ersättning",
+  "Välj ersättning först.": "Välj ersättning först.",
+  "Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen.": "Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen.",
+  "Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas.": "Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas."
 }

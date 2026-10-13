@@ -13,6 +13,7 @@
     let countdownTimer;
     let pendingMetadataRead;
     let dialogEpoch = 0;
+    let dialogInstance=0,activeSubmission=null,resetReplacement;
     let revealedDialog = false;
     let dialogOpener;
     let dialogBack;
@@ -104,13 +105,14 @@
         return cleared;
     }
     function updateSecretSubmitState() {
-        const missing = $("dialog-content").dataset.importCleared === "true" || Array.from($("dialog-content").querySelectorAll("input,textarea")).some(x => x.required && (x.type === "password" || x.dataset.sensitive) && !x.value.trim());
+        const missing = activeSubmission===dialogInstance || $("dialog-content").dataset.importCleared === "true" || Array.from($("dialog-content").querySelectorAll("input,textarea")).some(x => x.required && (x.type === "password" || x.dataset.sensitive) && !x.value.trim());
         $("dialog-actions").querySelectorAll("button").forEach(x => { if (x.type === "submit") x.disabled = missing; });
     }
     function protectFocusLoss() {
         window.ValvraImport?.clear("blur");
         pendingMetadataRead?.();pendingMetadataRead=null;
         dialogEpoch++; const cleared = clearSecrets();
+        resetReplacement?.();
         if (revealedDialog) { closeDialog(); return; }
         if ($("dialog").open) {
             updateSecretSubmitState();
@@ -119,6 +121,7 @@
     }
     function closeDialog() {
         dialogBack = null;
+        resetReplacement=null;dialogInstance++;
         pendingMetadataRead=null;
         window.ValvraImport?.clear();
         const wasOpen = $("dialog").open;
@@ -136,12 +139,16 @@
         const actions = $("dialog-actions"); actions.append(button(t(options.back ? "← Tillbaka" : submit ? "Avbryt" : "Stäng"), dismissDialog));
         if (submit) { const save = node("button", submitLabel, "button primary"); save.type = "submit"; actions.append(save); }
         $("dialog-form").onsubmit = async event => {
-            event.preventDefault(); if (!submit || !$("dialog").open || document.hidden || !document.hasFocus()) return;
+            event.preventDefault(); if (!submit || !$("dialog").open || document.hidden || !document.hasFocus() || activeSubmission===dialogInstance) return;
             const controls = Array.from(actions.querySelectorAll("button")); controls.forEach(x => x.disabled = true);
-            const submittedEpoch = dialogEpoch;
-            try { const message = await submit(); if (message === false || submittedEpoch !== dialogEpoch) return; closeDialog(); const confirmation = message === undefined ? t("Klart och auditerat: {action}.", {action: String(title)}) : message; if (options.afterSave) await options.afterSave(confirmation); else notice(confirmation); }
-            catch (error) { if (submittedEpoch === dialogEpoch) $("dialog-error").textContent = error.message; else notice(error.message, true); }
-            finally { controls.forEach(x => x.disabled = false); updateSecretSubmitState(); }
+            const submittedInstance=dialogInstance;activeSubmission=submittedInstance;let completed=false;
+            try { const message = await submit(); if (message === false) return;completed=true;
+                const sameDialog=submittedInstance===dialogInstance;if(sameDialog)closeDialog();
+                const confirmation = message === undefined ? t("Klart och auditerat: {action}.", {action: String(title)}) : message;
+                if (sameDialog && options.afterSave && !document.hidden && document.hasFocus()) await options.afterSave(confirmation); else notice(confirmation);
+            }
+            catch (error) { if (submittedInstance === dialogInstance) $("dialog-error").textContent = error.message; else notice(error.message, true); }
+            finally { if(activeSubmission===submittedInstance)activeSubmission=null;if(!completed&&submittedInstance===dialogInstance){controls.forEach(x => x.disabled = false);updateSecretSubmitState();} }
         };
         $("dialog").showModal(); $("dialog-title").focus(); return content;
     }
@@ -472,23 +479,31 @@
         if (!secrets.length && !licenses.length) hint(body, t("Papperskorgen är tom."));
     }
     function secretDialog(secret) {
-        safely(async () => {
-            const epoch = ++dialogEpoch;
-            const payload = secret && has(2) ? await api(`/secrets/${secret.id}/reveal`, {}) : { username: "", password: "", notes: "" };
-            if (!canDisplay(epoch)) return;
-            let title, username, password, notes, profile;
+            let title, username, password, notes, profile,change,replacementEpoch=0;
             const body = dialog(secret ? t("Ändra lösenord") : t("Lägg till lösenord"), t("Spara"), async () => {
-                const data = { title: title.value, payload: { username: username.value, password: password.value, notes: notes.value }, ldapProfileId: profile.value || null, revision: secret?.revision || 0 };
+                const replace=change.value==="1";
+                if(replace&&!password.value.trim())throw new Error(t("Ange ett lösenord för ersättningen."));
+                const data = { title: title.value, secretChange:replace?1:0,payload: replace?{ username: username.value, password: password.value, notes: notes.value }:null, ldapProfileId: profile.value || null, revision: secret?.revision || 0 };
                 await api(secret ? `/secrets/${secret.id}/update` : `/resources/${state.resource.id}/secrets`, data); await render();
             });
-            if (secret && !has(2)) hint(body, t("Du saknar läsrätt. Alla hemliga fält ersätts med de värden du anger här."));
+            if (secret && !has(2)) hint(body, t("Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas."));
             title = field(body, t("Benämning"), "text", secret?.title || "", true); title.maxLength = 200;
-            username = field(body, t("Användarnamn"), "text", payload.username); username.dataset.sensitive = "true"; username.maxLength = 512;
-            password = field(body, t("Lösenord"), "password", payload.password, true); password.maxLength = 65536;
-            body.append(button(t("Generera lösenord"), () => { const bytes = crypto.getRandomValues(new Uint8Array(24)); password.value = Array.from(bytes, x => x.toString(16).padStart(2, "0")).join(""); updateSecretSubmitState(); }));
-            notes = field(body, t("Hemliga anteckningar"), "textarea", payload.notes); notes.maxLength = 65536;
+            change=select(body,t("Lösenord och hemliga fält"),secret?[["0",t("Behåll befintliga värden")],["1",t("Ersätt alla hemliga fält")]]:[["1",t("Ersätt alla hemliga fält")]],secret?"0":"1");
+            username = field(body, t("Användarnamn"), "text"); username.dataset.sensitive = "true"; username.maxLength = 512;
+            password = field(body, t("Lösenord"), "password","",true); password.maxLength = 65536;
+            const generate=button(t("Generera lösenord"), () => { const bytes = crypto.getRandomValues(new Uint8Array(24)); password.value = Array.from(bytes, x => x.toString(16).padStart(2, "0")).join("");replacementEpoch++; updateSecretSubmitState(); });body.append(generate);
+            notes = field(body, t("Hemliga anteckningar"), "textarea"); notes.maxLength = 65536;
+            let readSaved;
+            const update=()=>{replacementEpoch++;username.value=password.value=notes.value="";username.disabled=password.disabled=notes.disabled=generate.disabled=change.value!=="1";if(readSaved)readSaved.disabled=change.value!=="1";password.required=change.value==="1";const marker=password.labels?.[0]?.querySelectorAll("span")[1];if(marker)i18n.setText(marker,password.required?t(" (obligatoriskt)"):"");updateSecretSubmitState();};
+            change.addEventListener("change",update);update();if(secret)resetReplacement=()=>{change.value="0";update();};
+            [username,password,notes].forEach(input=>input.addEventListener("input",()=>replacementEpoch++));
+            if(secret&&has(2)){readSaved=button(t("Läs sparade värden för ersättning"),async()=>{
+                if(change.value!=="1")throw new Error(t("Välj ersättning först."));const epoch=++dialogEpoch,request=replacementEpoch;
+                const payload=await api(`/secrets/${secret.id}/reveal`,{});if(!canDisplay(epoch)||request!==replacementEpoch||change.value!=="1")return;
+                username.value=payload.username;password.value=payload.password;notes.value=payload.notes;updateSecretSubmitState();
+            });readSaved.disabled=change.value!=="1";body.append(readSaved);}
+            hint(body,t("Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen."));
             profile = select(body, t("LDAP-testprofil"), [["", t("Ingen")], ...state.profiles.map(x => [x.id, x.name])], secret?.ldapProfileId || "");
-        });
     }
     async function revealSecret(secret, version) {
         const epoch = ++dialogEpoch;

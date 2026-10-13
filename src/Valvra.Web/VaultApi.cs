@@ -11,7 +11,7 @@ public sealed record CreateGroupRequest(string Name, Guid? ParentId);
 public sealed record CreateResourceRequest(string Name, Guid GroupId);
 public sealed record RenameRequest(string Name, long Revision);
 public sealed record MoveRequest(Guid DestinationGroupId, long Revision);
-public sealed record SecretRequest(string Title, SecretPayload Payload, string? LdapProfileId, long Revision = 0);
+public sealed record SecretRequest(string Title, SecretPayload? Payload, string? LdapProfileId, long Revision = 0, SecretChange SecretChange = SecretChange.Replace);
 public sealed record RevealRequest(int? Version = null, bool Copy = false);
 public sealed record RestoreRequest(int Version, long Revision);
 public sealed record DeleteRequest(bool Deleted, long Revision);
@@ -60,13 +60,14 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor =>
             {
                 ValidateProfile(body.LdapProfileId, ldap);
+                if(body.Payload is null || body.SecretChange != SecretChange.Replace)throw new VaultValidationException("Ange alla hemliga fält för det nya lösenordet.");
                 return Results.Ok(new { id = await vault.CreateSecretAsync(actor, resourceId, body.Title, body.Payload, body.LdapProfileId, ctx.TraceIdentifier, ctx.RequestAborted) });
             }));
         api.MapPost("/secrets/{id:guid}/update", async (Guid id, SecretRequest body, HttpContext ctx, CurrentActor current, VaultService vault, LdapTestOptions ldap) =>
             await current.RunAsync(ctx, async actor =>
             {
                 ValidateProfile(body.LdapProfileId, ldap);
-                await vault.UpdateSecretAsync(actor, id, body.Title, body.Payload, body.LdapProfileId, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted);
+                await vault.UpdateSecretAsync(actor, id, body.Title, body.Payload, body.LdapProfileId, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted, body.SecretChange);
                 return Results.NoContent();
             }));
         api.MapPost("/secrets/{id:guid}/reveal", async (Guid id, RevealRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>

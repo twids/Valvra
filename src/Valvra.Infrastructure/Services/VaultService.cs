@@ -130,20 +130,25 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         }, ct, scopeHint: new(ResourceId: resourceId));
     }
 
-    public async Task UpdateSecretAsync(Actor actor, Guid id, string title, SecretPayload payload,
-        string? ldapProfileId, long revision, string correlation, CancellationToken ct)
+    public async Task UpdateSecretAsync(Actor actor, Guid id, string title, SecretPayload? payload,
+        string? ldapProfileId, long revision, string correlation, CancellationToken ct, SecretChange secretChange = SecretChange.Replace)
     {
-        Name(title); ValidatePayload(payload);
+        Name(title);
+        if (secretChange is not (SecretChange.Preserve or SecretChange.Replace)
+            || secretChange == SecretChange.Replace && payload is null || secretChange == SecretChange.Preserve && payload is not null)
+            throw new VaultValidationException("Välj att bevara eller ersätta alla hemliga fält.");
+        if(payload is not null) ValidatePayload(payload);
         var entry = await EntryAsync(id, ct);
         await access.RequireAsync(actor, TargetKind.Resource, entry.ResourceId, VaultPermission.Modify, ct);
         await audit.MutationAsync(actor, "Secret.Update", id, correlation, async token =>
         {
             await RequireFreshAsync(actor, TargetKind.Resource, entry.ResourceId, VaultPermission.Modify, token);
             Revision(entry.Revision, revision);
-            entry.CurrentVersion++; entry.Revision++; entry.Title = title.Trim(); entry.LdapProfileId = ldapProfileId;
+            entry.Revision++; entry.Title = title.Trim(); entry.LdapProfileId = ldapProfileId;
+            if(secretChange==SecretChange.Replace){entry.CurrentVersion++;
             db.SecretVersions.Add(new SecretVersion { EntryId = id, Version = entry.CurrentVersion,
                 EnvelopeJson = cipher.Encrypt(payload, id, entry.CurrentVersion, "secret", entry.ResourceId, integrity.InstallationId),
-                CreatedAt = clock.GetUtcNow(), CreatedBy = actor.SubjectId });
+                CreatedAt = clock.GetUtcNow(), CreatedBy = actor.SubjectId });}
             return true;
         }, ct);
     }
