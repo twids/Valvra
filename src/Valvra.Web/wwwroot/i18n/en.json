@@ -736,5 +736,20 @@
   "Filtren stämmer inte med auditvyn. Läs aktuella händelser.": "The filters do not match this audit view. Read current events.",
   "Uppdatera auditvyn": "Refresh audit view",
   "Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.": "Audit view captured {captured}, valid until {expires}. Signatures were verified when captured. Refresh the audit view for new events.",
-  "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.": "The audit view has no stable snapshot. Refresh before exporting."
+  "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.": "The audit view has no stable snapshot. Refresh before exporting.",
+  "Administration": "Administration",
+  "Globala roller": "Global roles",
+  "Åtkomst till resurser": "Resource access",
+  "Globala roller ger administrativa uppgifter. Åtkomst till lösenord och licenser tilldelas på resursen eller resursgruppen.": "Global roles grant administrative responsibilities. Access to passwords and licenses is assigned on the resource or resource group.",
+  "Importera till en destination där du har rätt att ändra innehåll.": "Import into a destination where you can modify content.",
+  "Hantera kataloganslutningen för inloggning och sökning.": "Manage the directory connection for sign-in and search.",
+  "Kontrollera certifikatmetadata och planera säker rotation.": "Check certificate metadata and plan safe rotation.",
+  "Versionsinformation för den körande applikationen.": "Version information for the running application.",
+  "Öppna en resurs eller resursgrupp och välj Behörigheter för att tilldela åtkomst. Globala roller ger ingen automatisk innehållsåtkomst.": "Open a resource or resource group and choose Permissions to grant access. Global roles do not automatically grant content access.",
+  "Du kan se listan.": "You can browse the list.",
+  "Du kan visa och kopiera hemligheter.": "You can reveal and copy secrets.",
+  "Du kan lägga till och ändra innehåll.": "You can add and edit content.",
+  "Du kan hantera åtkomst.": "You can manage access.",
+  "Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem.": "There are no accounts here yet. Someone with modify permission can add them.",
+  "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.": "There are no licenses here yet. Someone with modify permission can add them."
 }

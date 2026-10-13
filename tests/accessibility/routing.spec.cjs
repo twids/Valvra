@@ -22,12 +22,12 @@ test('browser back/forward traverses every main view, group and resource context
     await page.getByRole('link',{name:'Öppna resurs · Databasplattform',exact:true}).click();
     await expect(page).toHaveURL('/groups/'+group.id+'/resources/'+resource.id);
     await page.getByRole('link',{name:'Licensöversikt',exact:true}).click(); await focused(page,'Licensöversikt');
-    await page.getByRole('link',{name:'Inställningar',exact:true}).click(); await focused(page,'Inställningar');
+    await page.getByRole('link',{name:'Administration',exact:true}).click(); await focused(page,'Globala roller');
     await page.getByRole('link',{name:'Auditlogg',exact:true}).click(); await focused(page,'Auditlogg');
-    for(const title of ['Inställningar','Licensöversikt','Databasplattform','IT och infrastruktur','Resursgrupper','Dina resurser']) {
+    for(const title of ['Globala roller','Licensöversikt','Databasplattform','IT och infrastruktur','Resursgrupper','Dina resurser']) {
         await page.goBack(); await focused(page,title);
     }
-    for(const title of ['Resursgrupper','IT och infrastruktur','Databasplattform','Licensöversikt','Inställningar','Auditlogg']) {
+    for(const title of ['Resursgrupper','IT och infrastruktur','Databasplattform','Licensöversikt','Globala roller','Auditlogg']) {
         await page.goForward(); await focused(page,title);
     }
     await audit(page);
@@ -36,7 +36,7 @@ test('direct links and reload serve the authenticated shell for all views',async
     const {group,resource}=await data(page);
     for(const [path,title] of [['/resources','Dina resurser'],['/groups','Resursgrupper'],
         ['/groups/'+group.id,'IT och infrastruktur'],['/resources/'+resource.id,'Databasplattform'],
-        ['/groups/'+group.id+'/resources/'+resource.id,'Databasplattform'],['/licenses','Licensöversikt'],['/audit','Auditlogg'],['/settings','Inställningar']]) {
+        ['/groups/'+group.id+'/resources/'+resource.id,'Databasplattform'],['/licenses','Licensöversikt'],['/audit','Auditlogg'],['/settings','Globala roller']]) {
         const response=await page.goto(path); expect(response.status()).toBe(200); await visible(page,title);
         await page.reload(); await visible(page,title); await expect(page).toHaveURL(path);
     }

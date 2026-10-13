@@ -736,5 +736,20 @@
   "Filtren stämmer inte med auditvyn. Läs aktuella händelser.": "Filtren stämmer inte med auditvyn. Läs aktuella händelser.",
   "Uppdatera auditvyn": "Uppdatera auditvyn",
   "Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.": "Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.",
-  "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.": "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export."
+  "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.": "Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.",
+  "Administration": "Administration",
+  "Globala roller": "Globala roller",
+  "Åtkomst till resurser": "Åtkomst till resurser",
+  "Globala roller ger administrativa uppgifter. Åtkomst till lösenord och licenser tilldelas på resursen eller resursgruppen.": "Globala roller ger administrativa uppgifter. Åtkomst till lösenord och licenser tilldelas på resursen eller resursgruppen.",
+  "Importera till en destination där du har rätt att ändra innehåll.": "Importera till en destination där du har rätt att ändra innehåll.",
+  "Hantera kataloganslutningen för inloggning och sökning.": "Hantera kataloganslutningen för inloggning och sökning.",
+  "Kontrollera certifikatmetadata och planera säker rotation.": "Kontrollera certifikatmetadata och planera säker rotation.",
+  "Versionsinformation för den körande applikationen.": "Versionsinformation för den körande applikationen.",
+  "Öppna en resurs eller resursgrupp och välj Behörigheter för att tilldela åtkomst. Globala roller ger ingen automatisk innehållsåtkomst.": "Öppna en resurs eller resursgrupp och välj Behörigheter för att tilldela åtkomst. Globala roller ger ingen automatisk innehållsåtkomst.",
+  "Du kan se listan.": "Du kan se listan.",
+  "Du kan visa och kopiera hemligheter.": "Du kan visa och kopiera hemligheter.",
+  "Du kan lägga till och ändra innehåll.": "Du kan lägga till och ändra innehåll.",
+  "Du kan hantera åtkomst.": "Du kan hantera åtkomst.",
+  "Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem.": "Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem.",
+  "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.": "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem."
 }

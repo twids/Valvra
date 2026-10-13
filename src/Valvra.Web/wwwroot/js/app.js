@@ -54,6 +54,7 @@
             || route.view === "settings" && !state.session.isSystemAdministrator && !state.session.isAccessAdministrator
             || route.view === "settings" && state.settingsSection === "directory" && !state.session.isSystemAdministrator
             || route.view === "settings" && state.settingsSection === "import" && !state.session.isAccessAdministrator
+            || route.view === "settings" && state.settingsSection === "people" && !state.session.isAccessAdministrator
             || !!state.group && !!state.resource && !groupIds(state.group.id, true).has(state.resource.groupId);
         if (previousGroup !== state.group?.id) { state.groupSearch = ""; state.groupIncludeSubgroups = true; }
     }
@@ -217,7 +218,7 @@
         closeActionMenu?.();
         const settingsEpoch = ++renderEpoch;
         $("content").removeAttribute("aria-busy");
-        $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Inställningar") }[state.view]);
+        $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Administration") }[state.view]);
         document.querySelectorAll("[data-view]").forEach(x => { const current = x.dataset.view === state.view; x.classList.toggle("active", current); if (current) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
         if (routeUnavailable) {
             heading(t("Vyn är inte tillgänglig"), t("Länken är ogiltig, innehållet är borttaget eller du saknar behörighet."), [routeLink(t("← Alla resurser"), {view: "vault"})]); return;
@@ -430,14 +431,19 @@
         if (has(4)) secondary.push(button(t("Papperskorg"), recycleBin));
         if (resource.canManage) secondary.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
         if(secondary.length)actions.push(actionMenu(t("Resursåtgärder"),secondary));
-        heading(resource.name, t("Din åtkomst: ") + (rights(resource.permissions) || t("Behörighetsadministration")), actions);
+        const capabilities=[];
+        if(has(1))capabilities.push(t("Du kan se listan."));
+        if(has(2))capabilities.push(t("Du kan visa och kopiera hemligheter."));
+        if(has(4))capabilities.push(t("Du kan lägga till och ändra innehåll."));
+        if(resource.canManage)capabilities.push(t("Du kan hantera åtkomst."));
+        heading(resource.name,capabilities.join(" "), actions);
         appendImportAction();
-        if (state.view === "groups") groupBreadcrumb(resource.groupId, resource.name);
+        groupBreadcrumb(resource.groupId, resource.name);
         if (!has(1)) { empty($("content"), t("Du administrerar åtkomsten"), t("Tilldela metadata-, läs- eller ändringsrätt för att använda resursens innehåll.")); return; }
         const [secrets, licenses] = await Promise.all([api(`/resources/${resource.id}/secrets`), api(`/resources/${resource.id}/licenses`)]);
         if (epoch !== renderEpoch) return;
         const passwords = panel($("content"), t("Lösenord"), has(4) ? [button(t("+ Lägg till lösenord"), () => secretDialog(), "primary")] : []);
-        if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t("Lägg till ett konto som hör till den här resursen."));
+        if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t(has(4)?"Lägg till ett konto som hör till den här resursen.":"Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem."));
         else table(passwords, [t("Konto"), "Version", t("Åtgärder")], secrets.map(secret => {
             const actions = node("div", undefined, "actions");
             if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret)), button(t("Kopiera"), () => copySecret(secret)));
@@ -685,7 +691,7 @@
         }, "primary"));
     }
     function licenseTable(parent, licenses, scoped) {
-        if (!licenses.length) { empty(parent, t("Inga licenser ännu"), t("Registrera programlicenser, platser och giltighetstid.")); return; }
+        if (!licenses.length) { empty(parent, t("Inga licenser ännu"), t((scoped?has(4):state.resources.some(x=>(x.permissions&5)===5))?"Registrera programlicenser, platser och giltighetstid.":"Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.")); return; }
         table(parent, [t("Produkt"), t("Platser"), t("Giltig till"), t("Åtgärder")], licenses.map(license => {
             const resource = state.resources.find(x => x.id === license.resourceId); const actions = node("div", undefined, "actions");
             if (resource?.permissions & 2) actions.append(button(t("Visa nyckel"), () => revealLicense(license)));
