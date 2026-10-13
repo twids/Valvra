@@ -71,6 +71,8 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
 
     public Task<IReadOnlyList<LicenseView>> LicensesAsync(Actor actor, Guid resourceId, CancellationToken ct) =>
         integrity.RunAsync(() => operations.LicensesAsync(actor, resourceId, ct), ct);
+    public Task<LicenseOverviewPage> LicenseOverviewAsync(Actor actor,int offset,CancellationToken ct)=>
+        integrity.RunAsync(()=>operations.LicenseOverviewAsync(actor,offset,ct),ct);
 
     public Task<Guid> SaveLicenseAsync(Actor actor, Guid? id, Guid resourceId, string product, string vendor,
         string purchaseReference, int seats, DateTimeOffset? expiresAt, LicensePayload? payload, long revision, string correlation, CancellationToken ct,

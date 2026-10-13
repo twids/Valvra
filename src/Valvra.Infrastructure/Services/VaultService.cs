@@ -16,6 +16,7 @@ public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, st
 public sealed record LicenseView(Guid Id, Guid ResourceId, string Product, string Vendor, string PurchaseReference,
     int Seats, int AssignedSeats, DateTimeOffset? ExpiresAt, long Revision, int CurrentVersion);
 public sealed record LicenseAssignmentView(Guid Id,Guid LicenseId,string? UserProvider,string? UserId,Guid? ResourceId,int Seats,DateTimeOffset CreatedAt,string? UserName=null,string? SamAccountName=null);
+public sealed record LicenseOverviewPage(IReadOnlyList<LicenseView> Items,bool HasMore);
 public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList<ResourceOwner> Owners, IReadOnlyList<DirectorySubject>? Subjects = null,
     VaultPermission EffectivePermissions = VaultPermission.None);
 
@@ -314,6 +315,15 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         return await db.Licenses.AsNoTracking().Where(x => x.ResourceId == resourceId && !x.Deleted).OrderBy(x => x.Product)
             .Select(x => new LicenseView(x.Id, x.ResourceId, x.Product, x.Vendor, x.PurchaseReference, x.Seats,
                 db.Assignments.Where(a => a.LicenseId == x.Id).Sum(a => (int?)a.Seats) ?? 0, x.ExpiresAt, x.Revision, x.SecretVersion)).ToListAsync(ct);
+    }
+    public async Task<LicenseOverviewPage> LicenseOverviewAsync(Actor actor,int offset,CancellationToken ct)
+    {
+        if(offset is <0 or >20000)throw new VaultValidationException("Ogiltig sidposition.");
+        var ids=(await ResourcesAsync(actor,ct)).Where(x=>x.Permissions.HasFlag(VaultPermission.Metadata)).Select(x=>x.Id).ToArray();
+        var rows=await db.Licenses.AsNoTracking().Where(x=>ids.Contains(x.ResourceId)&&!x.Deleted).OrderBy(x=>x.Id).Skip(offset).Take(201)
+            .Select(x=>new LicenseView(x.Id,x.ResourceId,x.Product,x.Vendor,x.PurchaseReference,x.Seats,
+                db.Assignments.Where(a=>a.LicenseId==x.Id).Sum(a=>(int?)a.Seats)??0,x.ExpiresAt,x.Revision,x.SecretVersion)).ToListAsync(ct);
+        return new(rows.Take(200).ToArray(),rows.Count>200);
     }
 
     public async Task<Guid> SaveLicenseAsync(Actor actor, Guid? id, Guid resourceId, string product, string vendor,

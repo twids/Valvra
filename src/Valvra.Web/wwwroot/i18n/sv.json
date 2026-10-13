@@ -727,5 +727,8 @@
   "Återta {seats} platser från {recipient}?": "Återta {seats} platser från {recipient}?",
   "Inga tilldelningar ännu.": "Inga tilldelningar ännu.",
   "Tilldela platser": "Tilldela platser",
-  "Återta platser": "Återta platser"
+  "Återta platser": "Återta platser",
+  "Licensöversikten kunde inte läsas färdigt.": "Licensöversikten kunde inte läsas färdigt.",
+  "Ofullständig översikt: sammanfattningar, sökning och sortering gäller bara inlästa licenser.": "Ofullständig översikt: sammanfattningar, sökning och sortering gäller bara inlästa licenser.",
+  "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon.": "Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon."
 }

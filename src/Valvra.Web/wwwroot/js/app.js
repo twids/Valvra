@@ -76,6 +76,7 @@
     }
     const has = bit => !!(state.resource && (state.resource.permissions & bit));
     const date = value => value ? new Date(value).toLocaleString(i18n.locale) : "—";
+    const calendarDate=value=>{const valueDate=new Date(value);return valueDate.getFullYear()+"-"+String(valueDate.getMonth()+1).padStart(2,"0")+"-"+String(valueDate.getDate()).padStart(2,"0");};
     const rights = value => [[1, "Metadata"], [2, t("Läsa")], [4, t("Ändra")], [8, t("Behörigheter")], [16, "LDAP-test"]].filter(([bit]) => value & bit).map(([, name]) => name).join(", ");
     function clearNotice() { clearTimeout(noticeTimer); $("notice").hidden = true; }
     function notice(message, error = false) {
@@ -706,8 +707,17 @@
                 if(writableResources.length)licenseDialog(null,writableResources);
                 else hint(dialog(t("Lägg till licens")),t("Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination."));
             }, "primary")]);
-        const licenses = (await Promise.all(state.resources.filter(x => x.permissions & 1).map(x => api(`/resources/${x.id}/licenses`)))).flat();
+        const resume=state.licenseResume;state.licenseResume=null;
+        const licenses=resume?.licenses.slice()||[];let offset=resume?.offset||0,hasMore=true,loadError;
+        try{
+            for(let page=0;page<100&&hasMore&&offset<20000;page++){
+                const result=await api(`/licenses/overview?offset=${offset}`);if(epoch!==renderEpoch)return;
+                licenses.push(...result.items.filter(item=>!licenses.some(existing=>existing.id===item.id)));offset+=result.items.length;hasMore=result.hasMore;
+                if(hasMore&&!result.items.length)throw new Error(t("Licensöversikten kunde inte läsas färdigt."));
+            }
+        }catch(error){if(epoch!==renderEpoch)return;if(!licenses.length)throw error;loadError=error.message;}
         if (epoch !== renderEpoch) return;
+        if(hasMore){const partial=node("section",undefined,"notice error");partial.append(node("p",t("Ofullständig översikt: sammanfattningar, sökning och sortering gäller bara inlästa licenser.")));if(loadError){partial.append(node("p",loadError),button(t("Försök igen"),()=>{if(epoch!==renderEpoch)return;state.licenseResume={licenses,offset};return render();}));}else partial.append(routeLink(t("← Alla resurser"),{view:"vault"}));$("content").append(partial);}
         const expiring=x=>x.expiresAt&&new Date(x.expiresAt)<new Date(Date.now()+30*86400000);
         const stats=node("div",undefined,"summary-grid"),toolbar=node("div",undefined,"toolbar"); $("content").append(stats,toolbar);
         const search=field(controlGroup(toolbar),t("Sök licenser"),"search",state.licenseFilters.search||"");
@@ -733,19 +743,21 @@
     }
     function licenseDialog(license, writableResources) {
             const resourceId = license?.resourceId || state.resource?.id;
+            const originalExpiry=license?.expiresAt||null,originalDate=originalExpiry?calendarDate(originalExpiry):"";
             let resourcePicker;
             let product, vendor, reference, seats, expiry, key, notes, change;
             const body = dialog(license ? t("Ändra licens") : t("Lägg till licens"), t("Spara"), async () => {
                 const mode = Number(change.value);
                 if (mode === 1 && !key.value.trim()) throw new Error(t("Ange en ny licensnyckel eller välj att behålla eller tömma nyckeln."));
                 await api(license ? `/licenses/${license.id}/update` : "/licenses", { resourceId: resourcePicker ? resourcePicker.value : resourceId, product: product.value, vendor: vendor.value, purchaseReference: reference.value,
-                    seats: Number(seats.value), expiresAt: expiry.value ? new Date(expiry.value + "T23:59:59").toISOString() : null,
+                    seats: Number(seats.value), expiresAt: expiry.value===originalDate?originalExpiry:expiry.value ? new Date(expiry.value + "T23:59:59").toISOString() : null,
                     secretChange: mode, payload: mode === 1 ? { licenseKey: key.value, notes: notes.value } : null, revision: license?.revision || 0 }); await render();
             });
             if (writableResources) { resourcePicker = select(body, t("Resurs"), [["",t("Välj en destinationsresurs")],...writableResources.map(x => [x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],""); resourcePicker.required=true; }
             product = field(body, t("Produkt"), "text", license?.product || "", true); vendor = field(body, t("Leverantör"), "text", license?.vendor || "");
             reference = field(body, t("Inköpsreferens"), "text", license?.purchaseReference || ""); seats = field(body, t("Antal platser"), "number", String(license?.seats || 1), true); seats.min = "1"; seats.max = "1000000";
-            expiry = field(body, t("Giltig till"), "date", license?.expiresAt?.slice(0, 10) || "");
+            expiry = field(body, t("Giltig till"), "date", originalDate);
+            hint(body,t("Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon."));
             change = select(body, t("Licensnyckel och hemliga anteckningar"), license ? [["0", t("Behåll befintliga värden")], ["1", t("Ersätt med nya värden")], ["2", t("Töm värdena uttryckligen")]] : [["1", t("Spara ny licensnyckel")]], license ? "0" : "1");
             key = field(body, t("Ny licensnyckel"), "password"); notes = field(body, t("Nya hemliga anteckningar"), "textarea"); key.maxLength = notes.maxLength = 65536;
             const update = () => { key.value = notes.value = ""; key.disabled = notes.disabled = change.value !== "1"; key.required = change.value === "1"; updateSecretSubmitState(); };

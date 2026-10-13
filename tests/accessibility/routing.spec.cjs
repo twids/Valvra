@@ -120,12 +120,12 @@ test('missing and inaccessible links reveal no target metadata or protected API 
 test('late license and audit responses cannot append into a different route',async({page})=>{
     await data(page); await page.goto('/resources');
     let release; const pending=new Promise(r=>release=r);
-    await page.route('**/api/resources/*/licenses',async route=>{const response=await route.fetch(); await pending; await route.fulfill({response});});
-    const requested=page.waitForRequest(r=>r.url().endsWith('/licenses')&&r.url().includes('/api/'));
+    await page.route('**/api/licenses/overview?*',async route=>{const response=await route.fetch(); await pending; await route.fulfill({response});});
+    const requested=page.waitForRequest(r=>r.url().includes('/api/licenses/overview?'));
     await page.getByRole('link',{name:'Licensöversikt',exact:true}).click(); await requested;
     await page.goBack(); await focused(page,'Dina resurser'); release(); await page.waitForLoadState('networkidle');
     await expect(page.getByRole('heading',{name:'Programlicenser',exact:true})).toHaveCount(0);
-    await page.unroute('**/api/resources/*/licenses');
+    await page.unroute('**/api/licenses/overview?*');
     let releaseAudit; const auditPending=new Promise(r=>releaseAudit=r);
     await page.route('**/api/audit/targets',async route=>{const response=await route.fetch(); await auditPending; await route.fulfill({response});});
     const auditRequested=page.waitForRequest(r=>r.url().endsWith('/api/audit/targets'));

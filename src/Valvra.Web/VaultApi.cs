@@ -107,6 +107,8 @@ public static class VaultApi
 
         api.MapGet("/resources/{resourceId:guid}/licenses", async (Guid resourceId, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await vault.LicensesAsync(actor, resourceId, ctx.RequestAborted))));
+        api.MapGet("/licenses/overview",async(int? offset,HttpContext ctx,CurrentActor current,VaultService vault)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await vault.LicenseOverviewAsync(actor,offset??0,ctx.RequestAborted))));
         api.MapPost("/licenses", async (LicenseRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.SaveLicenseAsync(actor, null, body.ResourceId, body.Product,
                 body.Vendor, body.PurchaseReference, body.Seats, body.ExpiresAt, body.Payload, 0, ctx.TraceIdentifier, ctx.RequestAborted, body.SecretChange) })));

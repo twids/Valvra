@@ -55,9 +55,9 @@ test('license overview explains creation when no resource is writable',async({pa
 
 test('license summaries filter metadata and search sorting clear and back preserve context',async({page})=>{
     let reveals=0;page.on('request',r=>{if(r.url().includes('/reveal'))reveals++;});
-    await page.route('**/api/resources/*/licenses',route=>route.fulfill({json:[
-        {id:'late',resourceId:'resource-1',product:'Zeta',vendor:'Vendor',assignedSeats:1,seats:5,expiresAt:'2099-01-01T00:00:00Z'},
-        {id:'soon',resourceId:'resource-1',product:'Alpha',vendor:'Vendor',assignedSeats:2,seats:2,expiresAt:'2020-01-01T00:00:00Z'}]}));
+    await page.route('**/api/licenses/overview?*',route=>route.fulfill({json:{items:Array.from({length:3},(_,i)=>[
+        {id:'late'+i,resourceId:'resource-1',product:'Zeta',vendor:'Vendor',assignedSeats:1,seats:5,expiresAt:'2099-01-01T00:00:00Z'},
+        {id:'soon'+i,resourceId:'resource-1',product:'Alpha',vendor:'Vendor',assignedSeats:2,seats:2,expiresAt:'2020-01-01T00:00:00Z'}]).flat(),hasMore:false}}));
     await page.goto('/licenses');
     await page.getByRole('button',{name:/ · Expired or expiring within 30 days$/}).click();
     await expect(page.getByRole('row').filter({hasText:'Zeta'})).toHaveCount(0);
