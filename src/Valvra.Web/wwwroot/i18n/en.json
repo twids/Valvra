@@ -197,6 +197,7 @@
   "Godkänd testserver (LDAPS)": "Approved test server (LDAPS)",
   "Godkänd: ": "Passed: ",
   "Gruppen innehåller resurser eller undergrupper.": "The group contains resources or subgroups.",
+  "Återställ uttryckligen alla åtkomstundantag under Administration före borttagning. Undantagen skyddar även historisk auditdata.": "Explicitly restore all access exclusions in Administration before deleting. Exclusions also protect historical audit data.",
   "Grupper får ha högst 128 nivåer.": "Groups may have at most 128 levels.",
   "Grupper visas när du har metadataåtkomst eller rätt att administrera dem.": "Groups are shown when you have metadata access or permission to manage them.",
   "Gruppstruktur": "Group structure",

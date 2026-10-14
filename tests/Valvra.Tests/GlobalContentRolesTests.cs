@@ -10,6 +10,35 @@ namespace Valvra.Tests;
 
 public sealed class GlobalContentRolesTests
 {
+    [Theory]
+    [InlineData(TargetKind.Group)]
+    [InlineData(TargetKind.Resource)]
+    public async Task DeletionRequiresExplicitRestorationBeforeHistoricalAuditAccessCanReopen(TargetKind kind)
+    {
+        await using var f=await VaultServiceTests.Fixture.CreateAsync();
+        var globals=new GlobalRoleService(f.Db,f.Integrity,f.Audit,new FakeDirectory(),f.Clock);
+        await globals.BootstrapAsync(f.User,"setup",default);
+        var target=kind==TargetKind.Group?await f.Vault.CreateGroupAsync(f.User,"Empty",null,"create",default):f.ResourceId;
+        var action=kind==TargetKind.Group?"Group.Delete":"Resource.Delete";
+        var exclusion=await globals.ExcludeAsync(f.User,kind,target,"ad","reader","exclude",default);
+        var reader=f.User with{SubjectId="reader"};
+        var rows=f.Transport.Events.Where(x=>x.TargetId==target&&x.Scope is not null)
+            .Select(x=>new AuditEventView(x,"hash","key",true)).ToArray();
+        Assert.NotEmpty(rows);
+        Assert.Empty(await globals.VisibleAuditAsync(reader,rows,default));
+        await Assert.ThrowsAsync<VaultValidationException>(()=>f.Vault.DeleteEmptyTargetAsync(f.User,kind,target,1,"denied",default));
+        Assert.True(kind==TargetKind.Group?await f.Db.Groups.AsNoTracking().AnyAsync(x=>x.Id==target):await f.Db.Resources.AsNoTracking().AnyAsync(x=>x.Id==target));
+        Assert.Equal(exclusion,(await f.Db.Exclusions.AsNoTracking().SingleAsync()).Id);
+        Assert.Empty(await globals.VisibleAuditAsync(reader,rows,default));
+        Assert.DoesNotContain(f.Transport.Events,x=>(x.Action==action||x.Action=="Access.Restore")&&x.Phase==AuditPhase.Committed);
+        await globals.RestoreAccessAsync(f.User,exclusion,1,"restore",default);
+        Assert.Equal(rows.Length,(await globals.VisibleAuditAsync(reader,rows,default)).Count);
+        await f.Vault.DeleteEmptyTargetAsync(f.User,kind,target,1,"delete",default);
+        Assert.False(kind==TargetKind.Group?await f.Db.Groups.AsNoTracking().AnyAsync(x=>x.Id==target):await f.Db.Resources.AsNoTracking().AnyAsync(x=>x.Id==target));
+        Assert.Single(f.Transport.Events,x=>x.Action=="Access.Restore"&&x.Phase==AuditPhase.Committed);
+        Assert.Single(f.Transport.Events,x=>x.Action==action&&x.Phase==AuditPhase.Committed);
+    }
+
     [Fact]
     public async Task ExcludedGlobalAdministratorCanRestoreOnlyOwnExclusionUntilTargetAccessIsRestored()
     {

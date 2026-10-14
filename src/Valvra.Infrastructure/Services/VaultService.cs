@@ -586,6 +586,8 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         await audit.MutationAsync(actor, kind == TargetKind.Group ? "Group.Delete" : "Resource.Delete", id, correlation, async token =>
         {
             await RequireFreshAsync(actor, kind, id, VaultPermission.ManageAccess, token);
+            if (await db.Exclusions.AnyAsync(x => x.TargetKind == kind && x.TargetId == id, token))
+                throw new VaultValidationException("Återställ uttryckligen alla åtkomstundantag under Administration före borttagning. Undantagen skyddar även historisk auditdata.");
             if (kind == TargetKind.Group)
             {
                 if (await db.Groups.AnyAsync(x => x.ParentId == id, token) || await db.Resources.AnyAsync(x => x.GroupId == id, token))
@@ -601,7 +603,6 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
             }
             db.Grants.RemoveRange(await db.Grants.Where(x => x.TargetKind == kind && x.TargetId == id).ToListAsync(token));
             db.Owners.RemoveRange(await db.Owners.Where(x => x.TargetKind == kind && x.TargetId == id).ToListAsync(token));
-            db.Exclusions.RemoveRange(await db.Exclusions.Where(x => x.TargetKind == kind && x.TargetId == id).ToListAsync(token));
             return true;
         }, ct);
     }
