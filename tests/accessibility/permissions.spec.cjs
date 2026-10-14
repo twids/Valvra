@@ -28,10 +28,22 @@ test('directory Enter searches, requires explicit selection, and invalidates a s
     await expect(results).toHaveValue(''); await expect(results.locator('option')).toHaveCount(1);
     await page.getByRole('button', {name:'Grant', exact:true}).click(); expect(writes).toBe(0);
     await search.press('Enter'); await expect(results.locator('option')).toHaveCount(3);
-    await results.selectOption('person-b'); await page.getByLabel('Read secrets', {exact:true}).check();
+    await results.selectOption('person-b'); await page.getByLabel('Access task',{exact:true}).selectOption('custom');await page.getByLabel('Read secrets', {exact:true}).check();
     const posted = page.waitForRequest(r => r.url().endsWith('/api/grants') && r.method() === 'POST');
     await page.getByRole('button', {name:'Grant', exact:true}).click();
     expect((await posted).postDataJSON()).toMatchObject({subjectId:'person-b', provider:'ad', subjectKind:0, permissions:3});
+});
+
+test('grant task presets show exact scope and preserve custom modify-only permissions',async({page})=>{
+ let posted;await page.route('**/api/grants',route=>{posted=route.request().postDataJSON();return route.fulfill({status:204});});
+ await page.route('**/api/directory?**',route=>route.fulfill({json:[{id:'stable-alex',provider:'ad',kind:0,name:'Alex Example',samAccountName:'alex.one'}]}));
+ await grant(page);const task=page.getByLabel('Access task',{exact:true});await expect(task).toHaveValue('1');
+ await page.getByLabel('Search Active Directory',{exact:true}).fill('Alex');await page.getByRole('button',{name:'Search',exact:true}).click();await page.getByLabel('Select result',{exact:true}).selectOption('stable-alex');
+ await task.selectOption('7');const summary=page.getByRole('region',{name:'Review this grant',exact:true});
+ await expect(summary).toContainText('Alex Example · alex.one');await expect(summary).toContainText('IT och infrastruktur / Databasplattform');
+ await expect(page.getByLabel('Manage permissions',{exact:true})).toBeHidden();
+ await task.selectOption('1');await task.selectOption('custom');await page.getByLabel('Modify content',{exact:true}).check();
+ await page.getByRole('button',{name:'Grant',exact:true}).click();expect(posted).toMatchObject({subjectId:'stable-alex',permissions:5});
 });
 
 test('late directory response cannot restore recipients from an old query', async ({page}) => {

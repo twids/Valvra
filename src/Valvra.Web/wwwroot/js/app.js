@@ -576,7 +576,7 @@
         let searchEpoch = 0;
         const reset = () => {
             searchEpoch++; subjects = []; results.replaceChildren(node("option", t("Sök och välj en träff"))); results.options[0].value = "";
-            status.textContent = ""; search.disabled = false; results.removeAttribute("aria-busy");
+            status.textContent = ""; search.disabled = false; results.removeAttribute("aria-busy");options.changed?.();
         };
         const runSearch = async () => {
             reset();
@@ -597,17 +597,18 @@
         const search = button(t("Sök"), runSearch, "", false); parent.append(search);
         query.addEventListener("input", reset); kind.addEventListener("change", reset);
         query.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); if (!search.disabled) safely(runSearch); } });
-        results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : ""; });
+        results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : "";options.changed?.(); });
         const pick = () => { const selected = subjects.find(x => x.id === results.value); if (!selected) throw new Error(t("Sök och välj en användare eller grupp först.")); return selected; };
         pick.onlyUsers = enabled => { if (enabled && kind.value !== "0") { kind.value = "0"; reset(); } kind.disabled = enabled; };
         if(options.usersOnly){pick.onlyUsers(true);kind.hidden=true;kind.previousElementSibling.hidden=true;}
         pick.clear=reset;
+        pick.selected=()=>subjects.find(x=>x.id===results.value);
         return pick;
     }
     function identityLabel(access, row) {
         const subject = access.subjects?.find(x => x.provider === row.provider && x.id === row.subjectId && x.kind === row.subjectKind);
         const label = node("div");
-        label.append(node("strong", subject?.name || t("Identiteten kunde inte slås upp")), node("p", (row.subjectKind === 0 ? t("Användare") : t("AD-grupp")) + " · " + row.provider, "hint"));
+        label.append(node("strong", subject?(subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")):t("Identiteten kunde inte slås upp")), node("p", (row.subjectKind === 0 ? t("Användare") : t("AD-grupp")) + " · " + row.provider, "hint"));
         const details = node("details"); details.open = !subject; details.append(node("summary", t("Identitet")), node("p", row.subjectId, "audit-id")); label.append(details); return label;
     }
     function accessSource(row, kind, target) {
@@ -655,14 +656,27 @@
             await api("/grants", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id,
                 permissions, startsAt: temp ? new Date(start.value).toISOString() : null, expiresAt: temp ? new Date(expiry.value).toISOString() : null }); await load();
         }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
-        pick = directoryPicker(body);
+        pick = directoryPicker(body,{changed:()=>summary()});
         temporary = select(body, t("Giltighet"), [["permanent", t("Tills vidare")], ["temporary", t("Tillfällig läsrätt – endast användare")]]);
+        const preset=select(body,t("Åtkomstuppgift"),[["1",t("Endast se listan")],["3",t("Läsa och kopiera")],["7",t("Läsa och ändra")],["custom",t("Anpassade rättigheter")]],"1");
         const permissions = node("fieldset"); permissions.append(node("legend", t("Rättigheter"))); body.append(permissions);
         hint(permissions, t("Metadataåtkomst ingår alltid. Välj inga ytterligare rättigheter för endast metadata."));
         [[2, t("Läsa hemligheter")], [4, t("Ändra innehåll")], [8, t("Hantera behörigheter")], [16, t("Testa mot LDAP")]].forEach(([bit, label]) => { const row = node("div", undefined, "check-row"); const input = field(row, label, "checkbox"); input.value = "on"; checks.push({ bit, input }); permissions.append(row); });
         const times = node("div", undefined, "field-row"); const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         start = field(times, t("Från"), "datetime-local", localDate(new Date())); expiry = field(times, t("Till"), "datetime-local", localDate(new Date(Date.now() + 3600000))); body.append(times); times.hidden = true;
-        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; pick.onlyUsers(temp); times.hidden = !temp; start.required = expiry.required = temp; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; }); });
+        const review=node("section",undefined,"panel");review.setAttribute("aria-label",t("Kontrollera tilldelningen"));review.append(node("h3",t("Kontrollera tilldelningen")));const reviewText=node("p");reviewText.setAttribute("role","status");review.append(reviewText);body.append(review);
+        if(kind===0)hint(review,t("Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser."));
+        function summary(){
+            if(!pick||!temporary||!start||!expiry)return;
+            const subject=pick.selected(),bits=temporary.value==="temporary"?3:checks.filter(x=>x.input.checked).reduce((value,x)=>value|x.bit,1);
+            const path=groupPath(kind===0?target.id:target.groupId).map(x=>x.name).concat(kind===1?[target.name]:[]).join(" / ");
+            reviewText.textContent=(subject?subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")+" · "+subject.provider+" · "+subject.id:t("Sök och välj en användare eller grupp först."))+" — "+path+" — "+rights(bits)+" — "+(temporary.value==="temporary"?date(start.value)+" – "+date(expiry.value):t("Tills vidare"));
+        }
+        const refreshRights=()=>{permissions.hidden=preset.value!=="custom";summary();};
+        preset.addEventListener("change",()=>{if(preset.value!=="custom")checks.forEach(x=>x.input.checked=!!(Number(preset.value)&x.bit));refreshRights();});
+        checks.forEach(x=>x.input.addEventListener("change",summary));start.addEventListener("input",summary);expiry.addEventListener("input",summary);
+        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; pick.onlyUsers(temp); times.hidden = !temp; start.required = expiry.required = temp;preset.disabled=temp;if(temp)preset.value="3"; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; });refreshRights(); });
+        refreshRights();
         hint(body, t("Metadataåtkomst ingår. Vid tillfällig rätt är Från och Till obligatoriska. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."));
     }
     function ownerDialog(kind, target) {

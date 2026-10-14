@@ -757,5 +757,12 @@
   "{shown} av {total} poster visas.": "{shown} av {total} poster visas.",
   "Inga kontotitlar matchar sökningen.": "Inga kontotitlar matchar sökningen.",
   "Inga produktnamn matchar sökningen.": "Inga produktnamn matchar sökningen.",
-  "{available} platser tillgängliga.": "{available} platser tillgängliga."
+  "{available} platser tillgängliga.": "{available} platser tillgängliga.",
+  "Åtkomstuppgift": "Åtkomstuppgift",
+  "Anpassade rättigheter": "Anpassade rättigheter",
+  "Endast se listan": "Endast se listan",
+  "Läsa och kopiera": "Läsa och kopiera",
+  "Läsa och ändra": "Läsa och ändra",
+  "Kontrollera tilldelningen": "Kontrollera tilldelningen",
+  "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser.": "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser."
 }
