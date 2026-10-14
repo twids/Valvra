@@ -143,7 +143,9 @@ public sealed class VaultIntegrity(VaultDbContext db, IIntegrityCheckpointStore 
         // in the same serializable transaction and external lease.
         if (!await db.Grants.AsNoTracking().AnyAsync(x => x.TargetKind == TargetKind.System && x.TargetId == options.InstallationId
             && x.SubjectKind == SubjectKind.User && x.Provider == actor.Provider && x.SubjectId == actor.SubjectId
-            && x.StartsAt == null && x.ExpiresAt == null && x.Permissions.HasFlag((VaultPermission)(int)GlobalRole.AccessAdministrator), ct))
+            && x.StartsAt == null && x.ExpiresAt == null
+            && (x.Permissions.HasFlag((VaultPermission)(int)GlobalRole.AccessAdministrator)
+                || x.Permissions.HasFlag((VaultPermission)(int)GlobalRole.GlobalAdministrator)), ct))
             throw new AccessDeniedException();
         // Explicit operator recovery of a failed write, not automatic rollback.
         await store.WriteAsync(new(checkpoint.Current), ct);
