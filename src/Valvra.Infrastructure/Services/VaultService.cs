@@ -15,8 +15,9 @@ public sealed record SecretView(Guid Id, string Title, int CurrentVersion, long 
 public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, string CreatedBy, string? CreatedByName = null, string? SamAccountName = null);
 public sealed record LicenseView(Guid Id, Guid ResourceId, string Product, string Vendor, string PurchaseReference,
     int Seats, int AssignedSeats, DateTimeOffset? ExpiresAt, long Revision, int CurrentVersion);
-public sealed record LicenseAssignmentView(Guid Id,Guid LicenseId,string? UserProvider,string? UserId,Guid? ResourceId,int Seats,DateTimeOffset CreatedAt,string? UserName=null,string? SamAccountName=null);
+public sealed record LicenseAssignmentView(Guid Id,Guid LicenseId,string? UserProvider,string? UserId,Guid? ResourceId,int Seats,DateTimeOffset CreatedAt,string? UserName=null,string? SamAccountName=null,bool DestinationExcluded=false);
 public sealed record LicenseOverviewPage(IReadOnlyList<LicenseView> Items,bool HasMore);
+public sealed record LicenseDestinationView(Guid Id, string Name, string Path, VaultPermission Permissions, bool CanOpenResource);
 public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList<ResourceOwner> Owners, IReadOnlyList<DirectorySubject>? Subjects = null,
     VaultPermission EffectivePermissions = VaultPermission.None);
 
@@ -318,6 +319,11 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         await access.RequireAsync(actor, TargetKind.Group, destination, VaultPermission.ManageAccess, ct);
         var targetAccess = await AccessAsync(actor, TargetKind.Group, destination, ct);
         var currentAccess = await AccessAsync(actor, kind, id, ct);
+        var oldPath = await access.GroupPathAsync(kind == TargetKind.Group ? id : (await db.Resources.AsNoTracking().SingleAsync(x => x.Id == id, ct)).GroupId, ct);
+        var newPath = await access.GroupPathAsync(destination, ct);
+        var removed = oldPath.Except(newPath).Where(x => kind != TargetKind.Group || x != id).ToArray();
+        if (await db.Exclusions.AnyAsync(x => x.TargetKind == TargetKind.Group && removed.Contains(x.TargetId), ct))
+            throw new VaultValidationException("Flytten skulle upphäva ett ärvt åtkomstundantag. Återställ undantaget uttryckligen före flytten.");
         var directGrants = currentAccess.Grants.Where(x => x.TargetKind == kind && x.TargetId == id);
         var directOwners = currentAccess.Owners.Where(x => x.TargetKind == kind && x.TargetId == id);
         if (kind == TargetKind.Group && (await access.GroupPathAsync(destination, ct)).Contains(id))
@@ -348,9 +354,35 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         }, ct);
     }
 
+    public async Task<IReadOnlyList<LicenseDestinationView>> LicenseDestinationsAsync(Actor actor, CancellationToken ct)
+    {
+        var result = new List<LicenseDestinationView>();
+        var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+        foreach (var resource in await db.Resources.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct))
+        {
+            var permissions = await access.EffectiveAsync(actor, TargetKind.Resource, resource.Id, ct);
+            var canOpen = permissions.HasFlag(VaultPermission.Metadata) || await access.CanManageAsync(actor, TargetKind.Resource, resource.Id, ct);
+            if (actor.IsEnabled && actor.IsLicenseAdministrator && !await access.IsExcludedAsync(actor, TargetKind.Resource, resource.Id, ct))
+                permissions |= VaultPermission.Metadata | VaultPermission.Modify;
+            if (!permissions.HasFlag(VaultPermission.Metadata)) continue;
+            var names = new List<string>();
+            var path = await access.GroupPathAsync(resource.GroupId, ct);
+            Guid? current=resource.GroupId;
+            while(current is {} groupId)
+            {
+                if (actor.IsLicenseAdministrator || (await access.EffectiveAsync(actor, TargetKind.Group, groupId, ct)).HasFlag(VaultPermission.Metadata))
+                    names.Insert(0,groups[groupId].Name);
+                current=groups[groupId].ParentId;
+            }
+            names.Add(resource.Name);
+            result.Add(new(resource.Id, resource.Name, string.Join(" / ", names), permissions, canOpen));
+        }
+        return result;
+    }
+
     public async Task<IReadOnlyList<LicenseView>> LicensesAsync(Actor actor, Guid resourceId, CancellationToken ct)
     {
-        await access.RequireAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Metadata, ct);
+        await access.RequireLicenseAsync(actor, resourceId, VaultPermission.Metadata, ct);
         return await db.Licenses.AsNoTracking().Where(x => x.ResourceId == resourceId && !x.Deleted).OrderBy(x => x.Product)
             .Select(x => new LicenseView(x.Id, x.ResourceId, x.Product, x.Vendor, x.PurchaseReference, x.Seats,
                 db.Assignments.Where(a => a.LicenseId == x.Id).Sum(a => (int?)a.Seats) ?? 0, x.ExpiresAt, x.Revision, x.SecretVersion)).ToListAsync(ct);
@@ -358,7 +390,7 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     public async Task<LicenseOverviewPage> LicenseOverviewAsync(Actor actor,int offset,CancellationToken ct)
     {
         if(offset is <0 or >20000)throw new VaultValidationException("Ogiltig sidposition.");
-        var ids=(await ResourcesAsync(actor,ct)).Where(x=>x.Permissions.HasFlag(VaultPermission.Metadata)).Select(x=>x.Id).ToArray();
+        var ids=(await LicenseDestinationsAsync(actor,ct)).Where(x=>x.Permissions.HasFlag(VaultPermission.Metadata)).Select(x=>x.Id).ToArray();
         var rows=await db.Licenses.AsNoTracking().Where(x=>ids.Contains(x.ResourceId)&&!x.Deleted).OrderBy(x=>x.Id).Skip(offset).Take(201)
             .Select(x=>new LicenseView(x.Id,x.ResourceId,x.Product,x.Vendor,x.PurchaseReference,x.Seats,
                 db.Assignments.Where(a=>a.LicenseId==x.Id).Sum(a=>(int?)a.Seats)??0,x.ExpiresAt,x.Revision,x.SecretVersion)).ToListAsync(ct);
@@ -387,10 +419,10 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
             Revision(license.Revision, revision);
         }
         else license = new SoftwareLicense { Id = Guid.NewGuid(), ResourceId = resourceId };
-        await access.RequireAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Modify, ct);
+        await access.RequireLicenseAsync(actor, resourceId, VaultPermission.Modify, ct);
         return await audit.MutationAsync(actor, id is null ? "License.Create" : "License.Update", license.Id, correlation, async token =>
         {
-            await RequireFreshAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Modify, token);
+            await RequireLicenseFreshAsync(actor, resourceId, VaultPermission.Modify, token);
             var assigned = await db.Assignments.Where(x => x.LicenseId == license.Id).SumAsync(x => (int?)x.Seats, token) ?? 0;
             if (seats < assigned) throw new VaultValidationException("Antal platser understiger befintliga tilldelningar.");
             if (id is null) db.Licenses.Add(license);
@@ -424,7 +456,7 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     public async Task<IReadOnlyList<SecretVersionView>> LicenseVersionsAsync(Actor actor, Guid id, CancellationToken ct)
     {
         var license = await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && !x.Deleted, ct) ?? throw new AccessDeniedException();
-        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Metadata, ct);
+        await access.RequireLicenseAsync(actor, license.ResourceId, VaultPermission.Metadata, ct);
         var versions = await db.LicenseVersions.AsNoTracking().Where(x => x.LicenseId == id).OrderByDescending(x => x.Version)
             .Select(x => new SecretVersionView(x.Version, x.CreatedAt, x.CreatedBy, null, null)).ToListAsync(ct);
         return await VersionNamesAsync(versions,ct);
@@ -433,7 +465,7 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     public async Task RestoreLicenseVersionAsync(Actor actor, Guid id, int version, long revision, string correlation, CancellationToken ct)
     {
         var license = await db.Licenses.SingleOrDefaultAsync(x => x.Id == id && !x.Deleted, ct) ?? throw new AccessDeniedException();
-        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.ReadSecret | VaultPermission.Modify, ct);
+        await access.RequireLicenseAsync(actor, license.ResourceId, VaultPermission.ReadSecret | VaultPermission.Modify, ct);
         var payload = await RevealLicenseAsync(actor, id, correlation, ct, version);
         // Restore is an explicit operation; clearing a historic empty version is deliberate.
         var change = string.IsNullOrWhiteSpace(payload.LicenseKey) ? SecretChange.Clear : SecretChange.Replace;
@@ -444,15 +476,18 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     public async Task<IReadOnlyList<DirectorySubject>> LicensePeopleAsync(Actor actor,Guid licenseId,string query,CancellationToken ct)
     {
         var license=await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==licenseId&&!x.Deleted,ct)??throw new AccessDeniedException();
-        await access.RequireAsync(actor,TargetKind.Resource,license.ResourceId,VaultPermission.Modify,ct);
+        await access.RequireLicenseAsync(actor,license.ResourceId,VaultPermission.Modify,ct);
         if(query.Trim().Length is <2 or >128)throw new VaultValidationException("Ange 2–128 tecken för katalogsökning.");
         return await directory.SearchAsync(query.Trim(),SubjectKind.User,ct);
     }
     public async Task<IReadOnlyList<LicenseAssignmentView>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct)
     {
         var license = await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x => x.Id == licenseId && !x.Deleted, ct) ?? throw new AccessDeniedException();
-        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Metadata, ct);
+        await access.RequireLicenseAsync(actor, license.ResourceId, VaultPermission.Metadata, ct);
         var rows=await db.Assignments.AsNoTracking().Where(x=>x.LicenseId==licenseId).ToListAsync(ct);
+        var excludedDestinations=new HashSet<Guid>();
+        foreach(var target in rows.Where(x=>x.ResourceId.HasValue).Select(x=>x.ResourceId!.Value).Distinct())
+            if(await access.IsExcludedAsync(actor,TargetKind.Resource,target,ct))excludedDestinations.Add(target);
         var names=new Dictionary<(string,string),DirectorySubject>();
         using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(TimeSpan.FromSeconds(5));
         foreach(var (provider,id) in rows.Where(x=>x.UserProvider is not null&&x.UserId is not null).Select(x=>(x.UserProvider!,x.UserId!)).Distinct().Take(100)){
@@ -463,7 +498,7 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
             catch(OperationCanceledException)when(!ct.IsCancellationRequested){break;}
         }
         ct.ThrowIfCancellationRequested();
-        return rows.Select(x=>{names.TryGetValue((x.UserProvider??"",x.UserId??""),out var subject);return new LicenseAssignmentView(x.Id,x.LicenseId,x.UserProvider,x.UserId,x.ResourceId,x.Seats,x.CreatedAt,subject?.Name,subject?.SamAccountName);}).ToArray();
+        return rows.Select(x=>{names.TryGetValue((x.UserProvider??"",x.UserId??""),out var subject);var excluded=x.ResourceId is {} target&&excludedDestinations.Contains(target);return new LicenseAssignmentView(x.Id,x.LicenseId,x.UserProvider,x.UserId,excluded?null:x.ResourceId,x.Seats,x.CreatedAt,subject?.Name,subject?.SamAccountName,excluded);}).ToArray();
     }
 
     public async Task<Guid> AssignLicenseAsync(Actor actor, LicenseAssignment assignment, string correlation, CancellationToken ct)
@@ -473,15 +508,17 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
             || assignment.ResourceId is null && string.IsNullOrWhiteSpace(assignment.UserProvider))
             throw new VaultValidationException("Tilldela positiva platser till antingen en användare eller en resurs.");
         var license = await db.Licenses.SingleOrDefaultAsync(x => x.Id == assignment.LicenseId && !x.Deleted, ct) ?? throw new AccessDeniedException();
-        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Modify, ct);
+        await access.RequireLicenseAsync(actor, license.ResourceId, VaultPermission.Modify, ct);
         if (assignment.ResourceId is null)
             await ValidateSubjectAsync(assignment.UserProvider!, assignment.UserId!, SubjectKind.User, ct);
         if (assignment.ResourceId is { } target)
-            await access.RequireAsync(actor, TargetKind.Resource, target, VaultPermission.Metadata, ct);
+            await access.RequireLicenseAsync(actor, target, VaultPermission.Metadata, ct);
         assignment.Id = Guid.NewGuid(); assignment.CreatedAt = clock.GetUtcNow();
         return await audit.MutationAsync(actor, "License.Assign", license.Id, correlation, async token =>
         {
-            await RequireFreshAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Modify, token);
+            await RequireLicenseFreshAsync(actor, license.ResourceId, VaultPermission.Modify, token);
+            if (assignment.ResourceId is { } destination)
+                await access.RequireLicenseAsync(await FreshActorAsync(actor, token), destination, VaultPermission.Metadata, token);
             var used = await db.Assignments.Where(x => x.LicenseId == license.Id).SumAsync(x => (int?)x.Seats, token) ?? 0;
             if (used + assignment.Seats > license.Seats) throw new VaultValidationException("Licensen saknar lediga platser.");
             // Reserve the parent row with a revision update; concurrent allocations cannot both commit.
@@ -495,9 +532,12 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     {
         var assignment = await db.Assignments.SingleOrDefaultAsync(x => x.Id == assignmentId, ct) ?? throw new AccessDeniedException();
         var license = await db.Licenses.SingleAsync(x => x.Id == assignment.LicenseId, ct);
-        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Modify, ct);
+        await access.RequireLicenseAsync(actor, license.ResourceId, VaultPermission.Modify, ct);
+        if(assignment.ResourceId is {} destination&&await access.IsExcludedAsync(actor,TargetKind.Resource,destination,ct))throw new AccessDeniedException();
         await audit.MutationAsync(actor, "License.Unassign", license.Id, correlation, async token =>
-        { await RequireFreshAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Modify, token); db.Assignments.Remove(assignment); return true; }, ct);
+        { await RequireLicenseFreshAsync(actor, license.ResourceId, VaultPermission.Modify, token);
+            if(assignment.ResourceId is {} target&&await access.IsExcludedAsync(await FreshActorAsync(actor,token),TargetKind.Resource,target,token))throw new AccessDeniedException();
+            db.Assignments.Remove(assignment); return true; }, ct);
     }
 
     private async Task<SecretEntry> EntryAsync(Guid id, CancellationToken ct) =>
@@ -531,6 +571,7 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
             }
             db.Grants.RemoveRange(await db.Grants.Where(x => x.TargetKind == kind && x.TargetId == id).ToListAsync(token));
             db.Owners.RemoveRange(await db.Owners.Where(x => x.TargetKind == kind && x.TargetId == id).ToListAsync(token));
+            db.Exclusions.RemoveRange(await db.Exclusions.Where(x => x.TargetKind == kind && x.TargetId == id).ToListAsync(token));
             return true;
         }, ct);
     }
@@ -538,14 +579,14 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     public async Task SetLicenseDeletedAsync(Actor actor, Guid id, bool deleted, long revision, string correlation, CancellationToken ct)
     {
         var license = await db.Licenses.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new AccessDeniedException();
-        await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Modify, ct);
+        await access.RequireLicenseAsync(actor, license.ResourceId, VaultPermission.Modify, ct);
         await audit.MutationAsync(actor, deleted ? "License.Delete" : "License.Undelete", id, correlation, async token =>
-        { await RequireFreshAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Modify, token); Revision(license.Revision, revision); license.Deleted = deleted; license.Revision++; return true; }, ct);
+        { await RequireLicenseFreshAsync(actor, license.ResourceId, VaultPermission.Modify, token); Revision(license.Revision, revision); license.Deleted = deleted; license.Revision++; return true; }, ct);
     }
 
     public async Task<IReadOnlyList<LicenseView>> DeletedLicensesAsync(Actor actor, Guid resourceId, CancellationToken ct)
     {
-        await access.RequireAsync(actor, TargetKind.Resource, resourceId, VaultPermission.Metadata, ct);
+        await access.RequireLicenseAsync(actor, resourceId, VaultPermission.Metadata, ct);
         return await db.Licenses.AsNoTracking().Where(x => x.ResourceId == resourceId && x.Deleted).OrderBy(x => x.Product)
             .Select(x => new LicenseView(x.Id, x.ResourceId, x.Product, x.Vendor, x.PurchaseReference, x.Seats,
                 db.Assignments.Where(a => a.LicenseId == x.Id).Sum(a => (int?)a.Seats) ?? 0, x.ExpiresAt, x.Revision, x.SecretVersion)).ToListAsync(ct);
@@ -576,6 +617,8 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         if (provider != directory.ProviderId || await directory.FindAsync(id, kind, ct) is null)
             throw new VaultValidationException("Identiteten finns inte i den konfigurerade katalogen.");
     }
+    private async Task RequireLicenseFreshAsync(Actor actor, Guid target, VaultPermission permission, CancellationToken ct) =>
+        await access.RequireLicenseAsync(await FreshActorAsync(actor, ct), target, permission, ct);
     private async Task RequireFreshAsync(Actor actor, TargetKind kind, Guid target, VaultPermission permission, CancellationToken ct) =>
         await access.RequireAsync(await FreshActorAsync(actor, ct), kind, target, permission, ct);
     private async Task<Actor> FreshActorAsync(Actor actor, CancellationToken ct)
@@ -585,7 +628,8 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         // CurrentActor loads global roles from the verified vault. The external
         // integrity lease spans this operation, so only directory status and
         // memberships need refreshing here; directory role flags are ignored.
-        return fresh with { IsAccessAdministrator = actor.IsAccessAdministrator, IsSystemAdministrator = actor.IsSystemAdministrator, IsAuditor = actor.IsAuditor };
+        return fresh with { IsAccessAdministrator = actor.IsAccessAdministrator, IsSystemAdministrator = actor.IsSystemAdministrator, IsAuditor = actor.IsAuditor,
+            IsGlobalAdministrator = actor.IsGlobalAdministrator, IsLicenseAdministrator = actor.IsLicenseAdministrator };
     }
     private static void Revision(long actual, long expected)
     { if (actual != expected) throw new VaultConflictException("Posten har ändrats. Ladda om före nytt försök."); }

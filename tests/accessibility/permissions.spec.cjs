@@ -105,7 +105,7 @@ test('global role search distinguishes duplicate display names by account name a
     await expect(page.getByRole('dialog').locator('img')).toHaveCount(0);
     await page.getByRole('button',{name:display+' · alex.two',exact:true}).click();
     await expect(page.getByRole('dialog').getByRole('status')).toHaveText(display+' · alex.two · ad · person-two');
-    await page.getByRole('checkbox').last().check();
+    await page.getByRole('checkbox',{name:'Auditor',exact:true}).check();
     await page.getByRole('button',{name:'Save',exact:true}).click();
     await expect.poll(()=>posted).toMatchObject({provider:'ad',subjectId:'person-two',kind:0,roles:128});
     expect(posted).not.toHaveProperty('samAccountName');expect(posted).not.toHaveProperty('name');

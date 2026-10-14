@@ -98,7 +98,7 @@ test('history closes and clears sensitive dialogs without replaying reveals or d
     await clickAction(page,'Ändra · Exempellicens');
     await page.getByLabel('Produkt (obligatoriskt)',{exact:true}).fill('PRIVATE-DRAFT');
     await page.getByLabel('Licensnyckel och hemliga anteckningar',{exact:true}).selectOption('1');
-    await page.getByLabel('Ny licensnyckel',{exact:true}).fill('SYNTHETIC-SECRET-DRAFT');
+    await page.getByLabel('Ny licensnyckel (obligatoriskt)',{exact:true}).fill('SYNTHETIC-SECRET-DRAFT');
     const historyState=await page.evaluate(()=>history.state);
     expect(Object.keys(historyState)).toEqual(['valvraEntry']);
     expect(JSON.stringify(historyState)).not.toContain('DRAFT'); expect(page.url()).not.toContain('DRAFT');

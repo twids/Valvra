@@ -11,6 +11,13 @@ public sealed class AuditSnapshotTests{
   Assert.Throws<AccessDeniedException>(()=>store.Page(Auditor("other"),token,query));Assert.Throws<AccessDeniedException>(()=>store.Page(Auditor() with{IsAuditor=false},token,query));
   Assert.Throws<VaultValidationException>(()=>store.Page(Auditor(),token,query with{Action="Different"}));clock.Now=clock.Now.AddMinutes(6);Assert.Throws<VaultConflictException>(()=>store.Page(Auditor(),token,query));
  }
+ [Fact]public void ChangedAccessPolicyInvalidatesCapturedPagesBeforePagination(){
+  var store=new AuditSnapshotStore();var query=new AuditQuery(null,null,null,null,null);
+  var token=store.Create(Auditor(),query,Enumerable.Range(0,300).Select(i=>new AuditEventView(Event(i),"hash","key",true)).ToArray(),"before");
+  Assert.Equal(200,store.Page(Auditor(),token,query,"before").Events.Count);
+  Assert.Throws<VaultConflictException>(()=>store.Page(Auditor(),token,query,"after"));
+  Assert.Throws<VaultConflictException>(()=>store.Page(Auditor(),token,query with{Offset=200},"before"));
+ }
  [Fact]public void CacheRetainsOnlyTwoViewsPerOwnerAndRejectsOversizeSnapshots(){
   var store=new AuditSnapshotStore();var query=new AuditQuery(null,null,null,null,null);var first=store.Create(Auditor(),query,[]);store.Create(Auditor(),query,[]);var last=store.Create(Auditor(),query,[]);
   Assert.Throws<VaultConflictException>(()=>store.Page(Auditor(),first,query));Assert.Empty(store.Page(Auditor(),last,query).Events);

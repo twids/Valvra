@@ -3,13 +3,18 @@ using Valvra.Core;
 using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Data;
 using Valvra.Infrastructure.Security;
+using Valvra.Infrastructure.Authorization;
 
 namespace Valvra.Infrastructure.Services;
 
 public sealed record GlobalRoleView(Guid Id, string Provider, string SubjectId, GlobalRole Roles, long Revision, string? Name);
+public sealed record ExclusionView(Guid Id, TargetKind TargetKind, Guid TargetId, string TargetName, string Provider,
+    string SubjectId, string? Name, string CreatedBy, DateTimeOffset CreatedAt, long Revision);
 public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrity, AuditService audit, IDirectoryProvider directory, TimeProvider clock)
 {
-    private const GlobalRole All = GlobalRole.AccessAdministrator | GlobalRole.SystemAdministrator | GlobalRole.Auditor;
+    private const GlobalRole All = GlobalRole.AccessAdministrator | GlobalRole.SystemAdministrator | GlobalRole.Auditor
+        | GlobalRole.GlobalAdministrator | GlobalRole.LicenseAdministrator;
+    private static bool Capability(GlobalRole roles, GlobalRole required) => roles.HasFlag(required) || roles.HasFlag(GlobalRole.GlobalAdministrator);
     private Task<List<AccessGrant>> Rows(CancellationToken ct) => db.Grants.Where(x => x.TargetKind == TargetKind.System
         && x.TargetId == integrity.InstallationId).ToListAsync(ct);
     public Task<Actor> ApplyAsync(Actor actor, CancellationToken ct) => integrity.RunAsync(async () =>
@@ -17,9 +22,11 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
         var roles = (await Rows(ct)).Where(x => x.SubjectKind == SubjectKind.User && x.Provider == actor.Provider
             && x.SubjectId == actor.SubjectId && x.StartsAt is null && x.ExpiresAt is null)
             .Aggregate(GlobalRole.None, (result, x) => result | (GlobalRole)(int)x.Permissions);
-        return actor with { IsAccessAdministrator = actor.IsEnabled && roles.HasFlag(GlobalRole.AccessAdministrator),
-            IsSystemAdministrator = actor.IsEnabled && roles.HasFlag(GlobalRole.SystemAdministrator),
-            IsAuditor = actor.IsEnabled && roles.HasFlag(GlobalRole.Auditor) };
+        return actor with { IsAccessAdministrator = actor.IsEnabled && Capability(roles, GlobalRole.AccessAdministrator),
+            IsSystemAdministrator = actor.IsEnabled && Capability(roles, GlobalRole.SystemAdministrator),
+            IsAuditor = actor.IsEnabled && Capability(roles, GlobalRole.Auditor),
+            IsGlobalAdministrator = actor.IsEnabled && roles.HasFlag(GlobalRole.GlobalAdministrator),
+            IsLicenseAdministrator = actor.IsEnabled && roles.HasFlag(GlobalRole.LicenseAdministrator) };
     }, ct);
     public async Task RequireAsync(Actor actor, GlobalRole required, CancellationToken ct)
     {
@@ -27,6 +34,9 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
         if (!fresh.IsEnabled || (required switch {
             GlobalRole.AccessAdministrator => !fresh.IsAccessAdministrator,
             GlobalRole.SystemAdministrator => !fresh.IsSystemAdministrator,
+            GlobalRole.GlobalAdministrator => !fresh.IsGlobalAdministrator,
+            GlobalRole.LicenseAdministrator => !fresh.IsLicenseAdministrator,
+            GlobalRole.Auditor => !fresh.IsAuditor,
             _ => true })) throw new AccessDeniedException();
     }
     public Task<IReadOnlyList<GlobalRoleView>> ReadAsync(Actor actor, CancellationToken ct) => integrity.RunAsync<IReadOnlyList<GlobalRoleView>>(async () =>
@@ -60,11 +70,12 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
                     if (subject.Kind != SubjectKind.User || subject.Provider != provider || subject.Id != subjectId) throw new AccessDeniedException();
                 }
                 foreach (var essential in new[] { GlobalRole.AccessAdministrator, GlobalRole.SystemAdministrator })
-                    if (existing is not null && ((GlobalRole)(int)existing.Permissions).HasFlag(essential) && !roles.HasFlag(essential))
+                    if (existing is not null && Capability((GlobalRole)(int)existing.Permissions, essential) && !Capability(roles, essential))
                     {
                         var replacement = false;
                         foreach (var other in rows.Where(x => x.Id != existing.Id && x.Provider == directory.ProviderId && x.SubjectKind == SubjectKind.User
-                            && x.StartsAt is null && x.ExpiresAt is null && ((GlobalRole)(int)x.Permissions).HasFlag(essential)))
+                            && x.StartsAt is null && x.ExpiresAt is null && (((GlobalRole)(int)x.Permissions).HasFlag(essential)
+                                || ((GlobalRole)(int)x.Permissions).HasFlag(GlobalRole.GlobalAdministrator))))
                         {
                             try
                             {
@@ -84,6 +95,86 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
                 return grant.Id;
             }, ct, System.Text.Json.JsonSerializer.Serialize(new { provider, subjectId, roles = (int)roles }));
         }, ct);
+    public Task<IReadOnlyList<ExclusionView>> ExclusionsAsync(Actor actor, CancellationToken ct) => integrity.RunAsync<IReadOnlyList<ExclusionView>>(async () =>
+    {
+        await RequireAsync(actor, GlobalRole.AccessAdministrator, ct);
+        var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+        var resources = await db.Resources.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+        var result = new List<ExclusionView>();
+        foreach (var row in await db.Exclusions.AsNoTracking().OrderBy(x => x.CreatedAt).ToListAsync(ct))
+        {
+            var names = new List<string>();
+            Guid? groupId = row.TargetKind == TargetKind.Group ? row.TargetId : resources.GetValueOrDefault(row.TargetId)?.GroupId;
+            var visited = new HashSet<Guid>();
+            while (groupId is { } id && visited.Add(id) && visited.Count <= 128 && groups.TryGetValue(id, out var group))
+            { names.Insert(0, group.Name); groupId = group.ParentId; }
+            if (row.TargetKind == TargetKind.Resource) names.Add(resources.GetValueOrDefault(row.TargetId)?.Name ?? row.TargetId.ToString());
+            result.Add(new(row.Id,row.TargetKind,row.TargetId,string.Join(" / ",names),row.Provider,row.SubjectId,
+                null,row.CreatedBy,row.CreatedAt,row.Revision));
+        }
+        return result;
+    }, ct);
+
+    public Task<IReadOnlyList<AuditEventView>> VisibleAuditAsync(Actor actor, IReadOnlyList<AuditEventView> rows, CancellationToken ct) => integrity.RunAsync<IReadOnlyList<AuditEventView>>(async () =>
+    {
+        var exclusions=await db.Exclusions.AsNoTracking().Where(x=>x.Provider==actor.Provider&&x.SubjectId==actor.SubjectId).ToListAsync(ct);
+        if(exclusions.Count==0)return rows;
+        var access=new AccessService(db,clock);var deniedResources=new HashSet<Guid>();var deniedGroups=new HashSet<Guid>();
+        foreach(var resource in await db.Resources.AsNoTracking().ToListAsync(ct))
+            if(await access.IsExcludedAsync(actor,TargetKind.Resource,resource.Id,ct))deniedResources.Add(resource.Id);
+        foreach(var group in await db.Groups.AsNoTracking().ToListAsync(ct))
+            if(await access.IsExcludedAsync(actor,TargetKind.Group,group.Id,ct))deniedGroups.Add(group.Id);
+        foreach(var exclusion in exclusions)
+            if(exclusion.TargetKind==TargetKind.Resource)deniedResources.Add(exclusion.TargetId);else deniedGroups.Add(exclusion.TargetId);
+        // Unknown legacy scope cannot safely be attributed while exclusions exist. Never alter signed payloads.
+        return rows.Where(x=>!x.SignatureValid || x.Event.Scope is {} scope
+            && !(scope.ResourceId is {} resourceId&&deniedResources.Contains(resourceId))
+            && !deniedGroups.Contains(scope.GroupId)&&!scope.GroupPath.Any(g=>deniedGroups.Contains(g.Id))).ToArray();
+    },ct);
+
+    public Task<string> AuditAccessStampAsync(Actor actor,CancellationToken ct)=>integrity.RunAsync(async()=>
+    {
+        var exclusions=await db.Exclusions.AsNoTracking().Where(x=>x.Provider==actor.Provider&&x.SubjectId==actor.SubjectId).OrderBy(x=>x.Id).ToListAsync(ct);
+        if(exclusions.Count==0)return "";
+        var groups=await db.Groups.AsNoTracking().OrderBy(x=>x.Id).Select(x=>new{x.Id,x.ParentId}).ToListAsync(ct);
+        var resources=await db.Resources.AsNoTracking().OrderBy(x=>x.Id).Select(x=>new{x.Id,x.GroupId}).ToListAsync(ct);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new{exclusions,groups,resources})));
+    },ct);
+
+    public Task<Guid> ExcludeAsync(Actor actor, TargetKind kind, Guid target, string provider, string subjectId, string correlation, CancellationToken ct) => integrity.RunAsync(async () =>
+    {
+        await RequireAsync(actor, GlobalRole.AccessAdministrator, ct);
+        var access = new AccessService(db, clock);
+        await access.RequireAsync(await ApplyAsync(actor, ct), kind, target, VaultPermission.ManageAccess, ct);
+        if (provider != directory.ProviderId || provider.Length > 128 || string.IsNullOrWhiteSpace(subjectId) || subjectId.Length > 512 || kind is not (TargetKind.Group or TargetKind.Resource))
+            throw new VaultValidationException("Välj ett personkonto och en resurs eller resursgrupp.");
+        var person = await directory.FindAsync(subjectId, SubjectKind.User, ct) ?? throw new VaultValidationException("Personkontot kunde inte verifieras.");
+        if (person.Provider != provider || person.Id != subjectId || person.Kind != SubjectKind.User) throw new AccessDeniedException();
+        return await audit.MutationAsync(actor,"Access.Exclude",target,correlation,async token =>
+        {
+            await RequireAsync(actor,GlobalRole.AccessAdministrator,token);
+            await access.RequireAsync(await ApplyAsync(actor,token),kind,target,VaultPermission.ManageAccess,token);
+            if(await db.Exclusions.AnyAsync(x=>x.TargetKind==kind&&x.TargetId==target&&x.Provider==provider&&x.SubjectId==subjectId,token))
+                throw new VaultConflictException("Ett uttryckligt undantag finns redan för personen och destinationen.");
+            var row=new AccessExclusion{TargetKind=kind,TargetId=target,Provider=provider,SubjectId=subjectId,
+                CreatedBy=actor.SubjectId,CreatedAt=clock.GetUtcNow(),Revision=1};db.Exclusions.Add(row);return row.Id;
+        },ct,System.Text.Json.JsonSerializer.Serialize(new{provider,subjectId,kind,target}));
+    },ct);
+
+    public Task RestoreAccessAsync(Actor actor, Guid id, long revision, string correlation, CancellationToken ct) => integrity.RunAsync(async () =>
+    {
+        await RequireAsync(actor,GlobalRole.AccessAdministrator,ct);
+        var row=await db.Exclusions.SingleOrDefaultAsync(x=>x.Id==id,ct)??throw new AccessDeniedException();
+        await audit.MutationAsync(actor,"Access.Restore",row.TargetId,correlation,async token=>
+        {
+            var fresh=await ApplyAsync(actor,token);
+            await RequireAsync(fresh,GlobalRole.AccessAdministrator,token);
+            if(!fresh.IsGlobalAdministrator)await new AccessService(db,clock).RequireAsync(fresh,row.TargetKind,row.TargetId,VaultPermission.ManageAccess,token);
+            if(row.Revision!=revision)throw new VaultConflictException("Posten har ändrats. Ladda om före nytt försök.");
+            db.Exclusions.Remove(row);return true;
+        },ct,System.Text.Json.JsonSerializer.Serialize(new{row.Id,row.Provider,row.SubjectId,row.TargetKind,row.TargetId,row.Revision}));
+    },ct);
+
     // Only the operator-authorized setup path calls this method. There is no
     // first-login endpoint; concurrent/partial retries cannot claim another user.
     public Task BootstrapAsync(Actor installer, string correlation, CancellationToken ct) => integrity.RunAsync(async () =>

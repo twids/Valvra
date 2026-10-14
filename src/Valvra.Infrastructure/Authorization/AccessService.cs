@@ -23,6 +23,8 @@ public sealed class AccessService(VaultDbContext db, TimeProvider clock)
     public async Task<VaultPermission> EffectiveAsync(Actor actor, TargetKind kind, Guid id, CancellationToken ct)
     {
         var (path, resourceId) = await ResolveTargetAsync(kind, id, ct);
+        if (!actor.IsEnabled || await ExcludedAsync(actor, path, resourceId, ct)) return VaultPermission.None;
+        if (actor.IsGlobalAdministrator) return (VaultPermission)31;
         var grants = await db.Grants.AsNoTracking().Where(x => path.Contains(x.TargetId)
             && x.TargetKind == TargetKind.Group || x.TargetKind == TargetKind.Resource && x.TargetId == resourceId).ToListAsync(ct);
         return PermissionEvaluator.Effective(actor, grants, path, resourceId, clock.GetUtcNow());
@@ -31,6 +33,8 @@ public sealed class AccessService(VaultDbContext db, TimeProvider clock)
     public async Task<bool> CanManageAsync(Actor actor, TargetKind kind, Guid id, CancellationToken ct)
     {
         var (path, resourceId) = await ResolveTargetAsync(kind, id, ct);
+        if (!actor.IsEnabled || await ExcludedAsync(actor, path, resourceId, ct)) return false;
+        if (actor.IsGlobalAdministrator) return true;
         var grants = await db.Grants.AsNoTracking().Where(x => path.Contains(x.TargetId)
             && x.TargetKind == TargetKind.Group || x.TargetKind == TargetKind.Resource && x.TargetId == resourceId).ToListAsync(ct);
         var owners = await db.Owners.AsNoTracking().Where(x => path.Contains(x.TargetId)
@@ -46,6 +50,25 @@ public sealed class AccessService(VaultDbContext db, TimeProvider clock)
             if (!await CanManageAsync(actor, kind, id, ct)) throw new AccessDeniedException();
         }
         else if (!(await EffectiveAsync(actor, kind, id, ct)).HasFlag(required)) throw new AccessDeniedException();
+    }
+
+    public async Task<bool> IsExcludedAsync(Actor actor, TargetKind kind, Guid id, CancellationToken ct)
+    {
+        var (path, resourceId) = await ResolveTargetAsync(kind, id, ct);
+        return await ExcludedAsync(actor, path, resourceId, ct);
+    }
+
+    private Task<bool> ExcludedAsync(Actor actor, HashSet<Guid> path, Guid? resourceId, CancellationToken ct) =>
+        db.Exclusions.AsNoTracking().AnyAsync(x => x.Provider == actor.Provider && x.SubjectId == actor.SubjectId
+            && (x.TargetKind == TargetKind.Group && path.Contains(x.TargetId)
+                || x.TargetKind == TargetKind.Resource && x.TargetId == resourceId), ct);
+
+    public async Task RequireLicenseAsync(Actor actor, Guid resourceId, VaultPermission required, CancellationToken ct)
+    {
+        // The global license role never supplies secret-read, password metadata or access-management rights.
+        if (actor.IsEnabled && actor.IsLicenseAdministrator && (required & ~(VaultPermission.Metadata | VaultPermission.Modify)) == 0
+            && !await IsExcludedAsync(actor, TargetKind.Resource, resourceId, ct)) return;
+        await RequireAsync(actor, TargetKind.Resource, resourceId, required, ct);
     }
 
     private async Task<(HashSet<Guid> Path, Guid? ResourceId)> ResolveTargetAsync(TargetKind kind, Guid id, CancellationToken ct)

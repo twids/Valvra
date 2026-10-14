@@ -8,7 +8,7 @@ public enum VaultPermission
 
 public enum TargetKind { Group, Resource, System }
 [Flags]
-public enum GlobalRole { None = 0, AccessAdministrator = 32, SystemAdministrator = 64, Auditor = 128 }
+public enum GlobalRole { None = 0, AccessAdministrator = 32, SystemAdministrator = 64, Auditor = 128, GlobalAdministrator = 256, LicenseAdministrator = 512 }
 public enum SubjectKind { User, Group }
 public enum AuditPhase { Event, Intent, Committed, Failed }
 
@@ -40,6 +40,18 @@ public sealed class AccessGrant
     public DateTimeOffset? StartsAt { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public string GrantedBy { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public long Revision { get; set; }
+}
+
+public sealed class AccessExclusion
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public TargetKind TargetKind { get; set; }
+    public Guid TargetId { get; set; }
+    public string Provider { get; set; } = "";
+    public string SubjectId { get; set; } = "";
+    public string CreatedBy { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
     public long Revision { get; set; }
 }

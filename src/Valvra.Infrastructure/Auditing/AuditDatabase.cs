@@ -178,7 +178,7 @@ public sealed class AuditReader(AuditDatabaseOptions options, IAuditSigner signe
     private async Task<AuditTargetOptions> ReadTargetsCoreAsync(Actor actor, CancellationToken ct) =>
         BuildTargets(await ReadAllAsync(actor, ct));
 
-    internal static AuditTargetOptions BuildTargets(IEnumerable<AuditEventView> events)
+    public static AuditTargetOptions BuildTargets(IEnumerable<AuditEventView> events)
     {
         var resources = new Dictionary<Guid, string>(); var groups = new Dictionary<Guid, string>();
         var invalid = 0; var actors=new HashSet<(string Provider,string Id)>();var actions=new HashSet<string>();

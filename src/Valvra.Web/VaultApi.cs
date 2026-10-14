@@ -16,6 +16,8 @@ public sealed record RevealRequest(int? Version = null, bool Copy = false);
 public sealed record RestoreRequest(int Version, long Revision);
 public sealed record DeleteRequest(bool Deleted, long Revision);
 public sealed record GrantUpdateRequest(VaultPermission Permissions, DateTimeOffset? StartsAt, DateTimeOffset? ExpiresAt, long Revision);
+public sealed record ExclusionRequest(TargetKind TargetKind, Guid TargetId, string Provider, string SubjectId);
+public sealed record AccessRestoreRequest(long Revision);
 public sealed record LicenseRequest(Guid ResourceId, string Product, string Vendor, string PurchaseReference,
     int Seats, DateTimeOffset? ExpiresAt, LicensePayload? Payload, long Revision = 0, SecretChange SecretChange = SecretChange.Preserve);
 
@@ -25,6 +27,12 @@ public static class VaultApi
     {
         app.MapImportApi();
         var api = app.MapGroup("/api").RequireAuthorization();
+        api.MapGet("/settings/exclusions",async(HttpContext ctx,CurrentActor current,GlobalRoleService roles)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await roles.ExclusionsAsync(actor,ctx.RequestAborted))));
+        api.MapPost("/settings/exclusions",async(ExclusionRequest body,HttpContext ctx,CurrentActor current,GlobalRoleService roles)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(new{id=await roles.ExcludeAsync(actor,body.TargetKind,body.TargetId,body.Provider,body.SubjectId,ctx.TraceIdentifier,ctx.RequestAborted)})));
+        api.MapPost("/settings/exclusions/{id:guid}/restore",async(Guid id,AccessRestoreRequest body,HttpContext ctx,CurrentActor current,GlobalRoleService roles)=>
+            await current.RunAsync(ctx,async actor=>{await roles.RestoreAccessAsync(actor,id,body.Revision,ctx.TraceIdentifier,ctx.RequestAborted);return Results.NoContent();}));
         api.MapPost("/targets/{kind}/{id:guid}/delete", async (TargetKind kind, Guid id, DeleteRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => { await vault.DeleteEmptyTargetAsync(actor, kind, id, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
         api.MapGet("/resources/{resourceId:guid}/deleted-secrets", async (Guid resourceId, HttpContext ctx, CurrentActor current, VaultService vault) =>
@@ -37,7 +45,7 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor =>
             {
                 await audit.RecordAsync(actor, "Session.Identified", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
-                return Results.Ok(new { actor.DisplayName, actor.Provider, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor, actor.IsSystemAdministrator,
+                return Results.Ok(new { actor.DisplayName, actor.Provider, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor, actor.IsSystemAdministrator, actor.IsGlobalAdministrator, actor.IsLicenseAdministrator,
                     applicationVersion = BuildInformation.Version, build = BuildInformation.Build,
                     csrfToken = csrf.GetAndStoreTokens(ctx).RequestToken });
             }));
@@ -110,6 +118,8 @@ public static class VaultApi
 
         api.MapGet("/resources/{resourceId:guid}/licenses", async (Guid resourceId, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await vault.LicensesAsync(actor, resourceId, ctx.RequestAborted))));
+        api.MapGet("/licenses/destinations",async(HttpContext ctx,CurrentActor current,VaultService vault)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await vault.LicenseDestinationsAsync(actor,ctx.RequestAborted))));
         api.MapGet("/licenses/overview",async(int? offset,HttpContext ctx,CurrentActor current,VaultService vault)=>
             await current.RunAsync(ctx,async actor=>Results.Ok(await vault.LicenseOverviewAsync(actor,offset??0,ctx.RequestAborted))));
         api.MapPost("/licenses", async (LicenseRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
@@ -134,22 +144,25 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => { await vault.UnassignLicenseAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
 
         api.MapGet("/audit", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader,AuditSnapshotStore snapshots) =>
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader,AuditSnapshotStore snapshots,GlobalRoleService globals) =>
             await current.RunAsync(ctx, async actor => {
                 var query=new AuditQuery(from,to,actorId,action,targetId,offset??0,resourceId,groupId,includeSubgroups??true,actorProvider);
                 if(query.Offset is <0 or >1000000)throw new VaultValidationException("Ogiltig sidposition.");
-                var token=snapshotId??snapshots.Create(actor,query,await reader.ReadSnapshotAsync(actor,query,ctx.RequestAborted));
-                var page=snapshots.Page(actor,token,query);ctx.Response.Headers["X-Valvra-Audit-Snapshot"]=page.Id.ToString();
-                ctx.Response.Headers["X-Valvra-Audit-Captured"]=page.CapturedAt.ToString("O");ctx.Response.Headers["X-Valvra-Audit-Expires"]=page.ExpiresAt.ToString("O");return Results.Ok(page.Events);
+                var stamp=await globals.AuditAccessStampAsync(actor,ctx.RequestAborted);
+                var token=snapshotId??snapshots.Create(actor,query,await globals.VisibleAuditAsync(actor,await reader.ReadSnapshotAsync(actor,query,ctx.RequestAborted),ctx.RequestAborted),stamp);
+                var page=snapshots.Page(actor,token,query,stamp);ctx.Response.Headers["X-Valvra-Audit-Snapshot"]=page.Id.ToString();
+                ctx.Response.Headers["X-Valvra-Audit-Captured"]=page.CapturedAt.ToString("O");ctx.Response.Headers["X-Valvra-Audit-Expires"]=page.ExpiresAt.ToString("O");return Results.Ok(await globals.VisibleAuditAsync(actor,page.Events,ctx.RequestAborted));
             }));
-        api.MapGet("/audit/targets", async (HttpContext ctx, CurrentActor current, IAuditReader reader, IDirectoryProvider directory) =>
-            await current.RunAsync(ctx, async actor => Results.Ok(await AuditPresentation.NamesAsync(actor,await reader.ReadTargetsAsync(actor, ctx.RequestAborted),directory,ctx.RequestAborted))));
+        api.MapGet("/audit/targets", async (HttpContext ctx, CurrentActor current, IAuditReader reader, IDirectoryProvider directory,GlobalRoleService globals) =>
+            await current.RunAsync(ctx, async actor => Results.Ok(await AuditPresentation.NamesAsync(actor,AuditReader.BuildTargets(await globals.VisibleAuditAsync(actor,await reader.ReadSnapshotAsync(actor,new AuditQuery(null,null,null,null,null),ctx.RequestAborted),ctx.RequestAborted)),directory,ctx.RequestAborted))));
         api.MapGet("/audit/export", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit,AuditSnapshotStore snapshots) =>
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit,AuditSnapshotStore snapshots,GlobalRoleService globals) =>
             await current.RunAsync(ctx, async actor =>
             {
                 var query=new AuditQuery(from,to,actorId,action,targetId,offset??0,resourceId,groupId,includeSubgroups??true,actorProvider);
-                var events=snapshotId is {} token?snapshots.Page(actor,token,query).Events:await reader.ReadAsync(actor,query,ctx.RequestAborted);
+                var stamp=await globals.AuditAccessStampAsync(actor,ctx.RequestAborted);
+                var events=snapshotId is {} token?snapshots.Page(actor,token,query,stamp).Events:await reader.ReadAsync(actor,query,ctx.RequestAborted);
+                events=await globals.VisibleAuditAsync(actor,events,ctx.RequestAborted);
                 await audit.RecordAsync(actor, "Audit.Export", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
                 return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(events), "application/json", "valvra-audit.json");
             }));

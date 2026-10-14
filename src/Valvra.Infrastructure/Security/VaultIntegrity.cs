@@ -182,7 +182,7 @@ public sealed class VaultIntegrity(VaultDbContext db, IIntegrityCheckpointStore 
         var rows = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
         async Task Add<T>() where T : class
         { foreach (var row in await db.Set<T>().AsNoTracking().ToListAsync(ct)) rows.Add(RowKey(row), Serialize(row)); }
-        await Add<ResourceGroup>(); await Add<VaultResource>(); await Add<AccessGrant>(); await Add<ResourceOwner>();
+        await Add<ResourceGroup>(); await Add<VaultResource>(); await Add<AccessGrant>(); await Add<ResourceOwner>(); await Add<AccessExclusion>();
         await Add<SecretEntry>(); await Add<SecretVersion>(); await Add<SoftwareLicense>(); await Add<LicenseVersion>();
         await Add<LicenseAssignment>(); await Add<AuditRecord>();
         return rows;
@@ -191,7 +191,7 @@ public sealed class VaultIntegrity(VaultDbContext db, IIntegrityCheckpointStore 
     private static string RowKey(object value) => value switch
     {
         ResourceGroup x => $"group/{x.Id:D}", VaultResource x => $"resource/{x.Id:D}",
-        AccessGrant x => $"grant/{x.Id:D}", ResourceOwner x => $"owner/{x.Id:D}",
+        AccessGrant x => $"grant/{x.Id:D}", ResourceOwner x => $"owner/{x.Id:D}", AccessExclusion x => $"exclusion/{x.Id:D}",
         SecretEntry x => $"secret/{x.Id:D}", SecretVersion x => $"secret-version/{x.EntryId:D}/{x.Version}",
         SoftwareLicense x => $"license/{x.Id:D}", LicenseVersion x => $"license-version/{x.LicenseId:D}/{x.Version}",
         LicenseAssignment x => $"assignment/{x.Id:D}", AuditRecord x => $"audit/{x.Id:D}",

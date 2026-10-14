@@ -3,7 +3,8 @@ using System.Security.Claims;
 namespace Valvra.Core;
 
 public sealed record Actor(string Provider, string SubjectId, string DisplayName,
-    IReadOnlySet<string> GroupIds, bool IsEnabled, bool IsAccessAdministrator, bool IsAuditor, bool IsSystemAdministrator = false);
+    IReadOnlySet<string> GroupIds, bool IsEnabled, bool IsAccessAdministrator, bool IsAuditor, bool IsSystemAdministrator = false,
+    bool IsGlobalAdministrator = false, bool IsLicenseAdministrator = false);
 public sealed record DirectorySubject(string Provider, string Id, string Name, SubjectKind Kind, string? SamAccountName = null);
 
 public interface IIdentityProvider

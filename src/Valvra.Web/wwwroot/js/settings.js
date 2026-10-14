@@ -2,7 +2,7 @@
 (() => {
     // Configuration drafts contain directory metadata only, never connection secrets.
     let draft, query = "ad", busy = false, dirty = false, draftEpoch = 0;
-    const roleLabels = [[32, "Behörighetsadministratör"], [64, "Systemadministratör"], [128, "Auditläsare"]];
+    const roleLabels = [[32, "Behörighetsadministratör"], [64, "Systemadministratör"], [128, "Auditläsare"], [256,"Global administratör"], [512,"Licensansvarig"]];
     async function render(ui) {
         const {state, api, node, button, field, table, hint, heading, dialog, notice, t} = ui;
         const panel=(parent,title,actions)=>{const section=ui.panel(parent,title,actions);section.classList.add("settings-panel");const body=node("div",undefined,"panel-body");section.append(body);return body;};
@@ -109,12 +109,12 @@
         }
         if (section !== "people") return;
         const access=panel(content,t("Åtkomst till resurser"));
-        hint(access,t("Öppna en resurs eller resursgrupp och välj Behörigheter för att tilldela åtkomst. Globala roller ger ingen automatisk innehållsåtkomst."));
+        hint(access,t("Global administratör har innehållsåtkomst utom vid uttryckliga undantag. Licensansvarig administrerar licenser utan automatisk läsrätt till nycklar. Övrig innehållsåtkomst tilldelas på resurser och resursgrupper."));
         access.append(ui.routeLink(t("Resurser"),{view:"vault"}),ui.routeLink(t("Resursgrupper"),{view:"groups"}));
         const roles = await api("/settings/roles");
         if (!ui.isCurrent() || state.view !== "settings") return;
         const administrators = panel(content, t("Globala rättigheter"), state.session.isAccessAdministrator ? [button(t("+ Tilldela personkonto"), () => editRole())] : []);
-        hint(administrators, t("Tilldelas endast personkonton. Ger ingen automatisk läsrätt till lösenord eller licensnycklar. Den sista administratören för en rättighet kan inte tas bort."));
+        hint(administrators, t("Tilldelas endast personkonton. Global administratör får full innehållsåtkomst och kan uttryckligen återställa sina egna undantag. Licensansvarig får ingen automatisk läsrätt till lösenord eller licensnycklar."));
         function personLabel(role) {
             const label = node("div");
             const name = role.subjectId === state.session.subjectId && role.provider === state.session.provider ? state.session.displayName : role.name;
@@ -127,6 +127,27 @@
             state.session.isAccessAdministrator ? button(t("Ändra"), () => editRole(role)) : "—"
         ]));
         hint(administrators, t("Behörighetsadministratören tilldelar åtkomst och globala rättigheter. Systemadministratören hanterar kataloginställningar. Auditläsaren granskar auditloggen."));
+        if(state.session.isAccessAdministrator){
+            const exclusions=await api("/settings/exclusions");if(!ui.isCurrent())return;
+            const box=panel(content,t("Uttryckliga åtkomstundantag"),[button(t("+ Undanta personkonto"),()=>{
+                let person,target;
+                const body=dialog(t("Undanta åtkomst"),t("Undanta åtkomst"),async()=>{
+                    const selected=person();if(!selected||!target.value)throw new Error(t("Välj ett personkonto och en destination."));
+                    const [kind,id]=target.value.split(":");await api("/settings/exclusions",{targetKind:Number(kind),targetId:id,provider:selected.provider,subjectId:selected.id});await ui.render();
+                });
+                person=ui.directoryPicker(body,{searchPath:"/settings/people",usersOnly:true});
+                target=ui.select(body,t("Destination"),[["",t("Välj en destination")],...state.groups.map(x=>["0:"+x.id,t("Resursgrupp")+" · "+x.name+" · "+x.id]),...state.resources.map(x=>["1:"+x.id,t("Resurs")+" · "+x.name+" · "+x.id])],"");target.required=true;
+                hint(body,t("Undantaget går före alla roller, ägarskap och tilldelningar. En resursgrupp omfattar hela underträdet. Åtkomsten återkommer först efter uttrycklig återställning. En global administratör kan återställa sin egen åtkomst."));
+            })]);
+            hint(box,t("Undantaget går före alla roller, ägarskap och tilldelningar. En resursgrupp omfattar hela underträdet. Åtkomsten återkommer först efter uttrycklig återställning. En global administratör kan återställa sin egen åtkomst."));
+            const account=(provider,id)=>{const role=roles.find(x=>x.provider===provider&&x.subjectId===id);return (role?.name?role.name+" · ":"")+id+" · "+provider;};
+            table(box,[t("Personkonto"),t("Destination"),t("Skapad"),t("Ändrad av"),t("Åtgärder")],exclusions.map(x=>[
+                account(x.provider,x.subjectId),x.targetName+" · "+t(x.targetKind===0?"Gruppen och dess underträd":"Endast denna resurs"),new Date(x.createdAt).toLocaleString(window.ValvraI18n.locale),account(x.provider,x.createdBy),button(t("Återställ åtkomst"),()=>{
+                    const body=dialog(t("Återställ åtkomst"),t("Återställ åtkomst"),async()=>{await api(`/settings/exclusions/${x.id}/restore`,{revision:x.revision});await ui.refreshSession();await ui.render();});
+                    hint(body,x.subjectId+" · "+x.targetName);hint(body,t("Undantaget tas bort. Personens aktuella roller och tilldelningar börjar gälla igen. Andra ärvda undantag måste återställas separat."));
+                })]));
+            if(!exclusions.length)hint(box,t("Inga uttryckliga undantag."));
+        }
         async function editRole(existing) {
             let subject = existing ? {provider: existing.provider, id: existing.subjectId} : null;
             const checks = [];
