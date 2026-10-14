@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 – 2026-10-14
+
+- Overhaul resource browsing, mobile actions, navigation, success/error feedback and accessible dialogs. Show the running version and consistent resource paths, add metadata-only content search and explain the caller's capabilities.
+- Separate Administration into scoped global-role, import, directory, certificate and About sections. Distinguish resource access from global roles, show readable account names, require explicit recipients, and guide grants with least-privilege presets and exact scope/rights/duration review.
+- Require Access Administrator plus destination content rights for password import. Add destination readiness checks, recoverable mapping/Preview Back, safe file reselection, bounded audited batches and explicit partial/uncertain-write reporting. Never overwrite existing passwords or automatically retry uncertain writes.
+- Preserve encrypted password fields by default when editing metadata. Make replacement explicit, clear replacement values on focus loss, reject stale reads and acknowledge completed mutations without enabling duplicate submissions.
+- Improve license creation, filtering, assignment and reclaim workflows. Keep license/path/seat context, use scoped recipient search and bounded aggregate metadata loading with partial-result recovery. Preserve unchanged expiry instants across time zones.
+- Make audit investigation actions, phases and outcomes readable while retaining technical evidence and conspicuous invalid-signature records. Keep paging/export on bounded actor/filter-bound snapshots with fresh authorization and required export audit acknowledgement.
+- Add read-only certificate status and rotation guidance. Rotation remains an operator maintenance task; no browser key-changing endpoint is introduced.
+
+Package: `Valvra-1.3.0-win-x64.zip` and `SHA256SUMS.txt`, built for Windows/IIS with stable .NET 10. No database schema changes or data conversion are required from 1.2.4. Preserve `App_Data`, protected installation state, integrity checkpoints and certificates; use the in-place upgrade checklist and do not rerun setup. Import now requires the Access Administrator role in addition to destination rights. Audit snapshots are process-local, expire after five minutes and require refresh after recycling or switching workers.
+
 ## 1.2.4 – 2026-10-12
 
 - Save incomplete setup settings as an encrypted server-side draft from any step, without requiring connection or validation checks to pass.

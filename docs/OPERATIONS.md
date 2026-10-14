@@ -35,6 +35,14 @@ The command removes a prepared checkpoint only if the database's exact hash stil
 
 ## Changing the installation
 
+### Update to 1.3.0
+
+Use `Valvra-1.3.0-win-x64.zip` and the complete [in-place upgrade checklist](#in-place-upgrade-checklist). The UX overhaul requires **no database schema changes or data conversion** from 1.2.4; earlier supported version paths below remain applicable. Keep the same Windows installation, databases, service identity, `App_Data`, protected configuration, checkpoints and certificates. Do not rerun setup.
+
+After upgrading, check the footer/About version, Administration navigation, resource paths and reader/editor capabilities with synthetic records. Verify that metadata edits preserve secret fields, explicit replacement still works and focus loss clears sensitive values. Import requires Access Administrator plus metadata/modify rights at the destination. Test a small import and its inherited access before importing real data. See [Administration](SETTINGS.md) and [Import](IMPORT.md).
+
+Audit paging/export uses actor/filter-bound, process-local snapshots with five-minute expiry. Recycling, eviction or another worker requires an explicit refresh. Keep the single-worker configuration below; do not assume a snapshot token works across workers. Large audit views require narrower filters, and license overviews explicitly mark capped/failed loads as partial. Certificate status does not prove private-key access or recovery; rotation remains the operator workflow below.
+
 ### Update to 1.2.4
 
 Use `Valvra-1.2.4-win-x64.zip` and follow the complete [in-place upgrade checklist](#in-place-upgrade-checklist) below. Version 1.2.4 adds resumable setup drafts without saving passwords or setup codes and requires **no database schema changes or data conversion** from 1.0.x, 1.1.0, 1.2.0, 1.2.1, 1.2.2 or 1.2.3. See [the dependency baseline](DEPENDENCIES.md) for reviewed versions and the .NET 10 compatibility exception. Version 1.2.0 introduced diagnostic file logging and setup troubleshooting. Logging is enabled by default under `App_Data/Logs`; ensure the application pool identity has write permission, keep logs outside the web root, and review size and retention settings below. After upgrading, also verify an import with synthetic data in a group with the intended inherited access; see [the import guide](IMPORT.md).
@@ -56,7 +64,7 @@ This procedure updates an existing Windows/IIS installation on the **same Window
 3. Download the target release ZIP and its `SHA256SUMS.txt`. In PowerShell, calculate the ZIP's hash, for example:
 
    ```powershell
-   Get-FileHash -LiteralPath 'C:\Temp\Valvra-1.2.4-win-x64.zip' -Algorithm SHA256
+   Get-FileHash -LiteralPath 'C:\Temp\Valvra-1.3.0-win-x64.zip' -Algorithm SHA256
    ```
 
    Compare the complete hash with the entry for that ZIP in `SHA256SUMS.txt`. Stop if they differ.
