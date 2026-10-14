@@ -6,6 +6,8 @@ namespace Valvra.Infrastructure.Services;
 // All public vault operations enter a verified snapshot before reading database state.
 public sealed class VaultService(VaultOperations operations, VaultIntegrity integrity)
 {
+    public Task<IReadOnlyList<DirectorySubject>> ActivePeopleAsync(Actor actor,Guid? licenseId,CancellationToken ct)=>
+        integrity.RunAsync(()=>operations.ActivePeopleAsync(actor,licenseId,ct),ct);
     public Task<IReadOnlyList<GroupView>> GroupsAsync(Actor actor, CancellationToken ct) =>
         integrity.RunAsync(() => operations.GroupsAsync(actor, ct), ct);
 

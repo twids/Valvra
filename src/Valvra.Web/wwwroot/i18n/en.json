@@ -695,7 +695,7 @@
   "Registrerade operationer": "Recorded operations",
   "Välj eller ange ID nedan": "Select or enter ID below",
   "Välj eller ange kod nedan": "Select or enter code below",
-  "Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt.": "Actor names are current directory names, not historical names. Up to 100 recorded actors are listed; IDs and operation codes can be entered manually.",
+  "Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt.": "Account names come from the current directory. Up to 100 recorded actors are shown. Operation codes can be entered manually.",
   "Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.": "Changed filters have not been applied. Results and export use the last applied filters.",
   "Tidigare resultat visas. Uppdateringen misslyckades.": "Previous results are shown. The update failed.",
   "Inga resultat har lästs ännu.": "No results have been loaded yet.",
@@ -833,5 +833,11 @@
   "Papperskorg för licenser": "License recycle bin",
   "Undantagen destination": "Excluded destination",
   "Kontrollera uttryckliga åtkomstundantag i Administration. Att öppna sidan återställer inte åtkomsten.": "Check explicit access exclusions in Administration. Opening the page does not restore access.",
-  "Öppna": "Open"
+  "Öppna": "Open",
+  "Okänt eller borttaget konto": "Unknown or removed account",
+  "Okänd resurs": "Unknown resource",
+  "Inloggad som {name}.": "Signed in as {name}.",
+  "Tidigare aktiva användare. Sök i katalogen för att lägga till fler.": "Previously active users. Search the directory to add more.",
+  "Aktiva användare kunde inte läsas. Sök i katalogen.": "Active users could not be loaded. Search the directory.",
+  "Kontonamn": "Account name"
 }

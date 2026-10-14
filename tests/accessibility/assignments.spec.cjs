@@ -15,6 +15,6 @@ test('assignment destination is explicit and Add/Cancel return to overview',asyn
 test('assignment users use scoped search and readable account names',async({page})=>{
  await page.route('**/api/licenses/*/people?*',route=>route.fulfill({json:[{id:'outsider',provider:'ad',kind:0,name:'Alex Example',samAccountName:'alex.one'}]}));
  await open(page);await page.getByRole('button',{name:'+ Assign seats',exact:true}).click();await page.getByLabel('Search Active Directory',{exact:true}).fill('Alex');await page.getByRole('button',{name:'Search',exact:true}).click();
- await expect(page.getByLabel('Select result',{exact:true})).toContainText('Alex Example · alex.one · outsider');await page.getByLabel('Select result',{exact:true}).selectOption('outsider');
+ await expect(page.getByLabel('Select result',{exact:true})).toContainText('Alex Example · alex.one');await page.getByLabel('Select result',{exact:true}).selectOption('outsider');
  await page.getByRole('button',{name:'Assign seats',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('1 of 20 seats assigned.');
 });

@@ -27,6 +27,12 @@ public static class VaultApi
     {
         app.MapImportApi();
         var api = app.MapGroup("/api").RequireAuthorization();
+        api.MapGet("/directory/active",async(HttpContext ctx,CurrentActor current,VaultService vault)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await vault.ActivePeopleAsync(actor,null,ctx.RequestAborted))));
+        api.MapGet("/settings/people/active",async(HttpContext ctx,CurrentActor current,VaultService vault,GlobalRoleService globals)=>
+            await current.RunAsync(ctx,async actor=>{await globals.RequireAsync(actor,GlobalRole.AccessAdministrator,ctx.RequestAborted);return Results.Ok(await vault.ActivePeopleAsync(actor,null,ctx.RequestAborted));}));
+        api.MapGet("/licenses/{id:guid}/people/active",async(Guid id,HttpContext ctx,CurrentActor current,VaultService vault)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await vault.ActivePeopleAsync(actor,id,ctx.RequestAborted))));
         api.MapGet("/settings/exclusions",async(HttpContext ctx,CurrentActor current,GlobalRoleService roles)=>
             await current.RunAsync(ctx,async actor=>Results.Ok(await roles.ExclusionsAsync(actor,ctx.RequestAborted))));
         api.MapPost("/settings/exclusions",async(ExclusionRequest body,HttpContext ctx,CurrentActor current,GlobalRoleService roles)=>
@@ -45,7 +51,7 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor =>
             {
                 await audit.RecordAsync(actor, "Session.Identified", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
-                return Results.Ok(new { actor.DisplayName, actor.Provider, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor, actor.IsSystemAdministrator, actor.IsGlobalAdministrator, actor.IsLicenseAdministrator,
+                return Results.Ok(new { actor.DisplayName, actor.SamAccountName, actor.Provider, actor.SubjectId, actor.IsAccessAdministrator, actor.IsAuditor, actor.IsSystemAdministrator, actor.IsGlobalAdministrator, actor.IsLicenseAdministrator,
                     applicationVersion = BuildInformation.Version, build = BuildInformation.Build,
                     csrfToken = csrf.GetAndStoreTokens(ctx).RequestToken });
             }));

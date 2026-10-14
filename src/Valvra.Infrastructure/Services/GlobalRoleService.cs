@@ -4,12 +4,14 @@ using Valvra.Infrastructure.Auditing;
 using Valvra.Infrastructure.Data;
 using Valvra.Infrastructure.Security;
 using Valvra.Infrastructure.Authorization;
+using System.DirectoryServices.Protocols;
 
 namespace Valvra.Infrastructure.Services;
 
-public sealed record GlobalRoleView(Guid Id, string Provider, string SubjectId, GlobalRole Roles, long Revision, string? Name);
+public sealed record GlobalRoleView(Guid Id, string Provider, string SubjectId, GlobalRole Roles, long Revision, string? Name, string? SamAccountName=null);
 public sealed record ExclusionView(Guid Id, TargetKind TargetKind, Guid TargetId, string TargetName, string Provider,
-    string SubjectId, string? Name, string CreatedBy, DateTimeOffset CreatedAt, long Revision);
+    string SubjectId, string? Name, string CreatedBy, DateTimeOffset CreatedAt, long Revision,
+    string? SamAccountName=null,string? CreatedByName=null,string? CreatedBySamAccountName=null);
 public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrity, AuditService audit, IDirectoryProvider directory, TimeProvider clock)
 {
     private const GlobalRole All = GlobalRole.AccessAdministrator | GlobalRole.SystemAdministrator | GlobalRole.Auditor
@@ -48,7 +50,7 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
         {
             var person = row.Provider == directory.ProviderId ? await directory.FindAsync(row.SubjectId, SubjectKind.User, ct) : null;
             if (person is not null && (person.Provider != row.Provider || person.Id != row.SubjectId || person.Kind != SubjectKind.User)) throw new AccessDeniedException();
-            result.Add(new(row.Id, row.Provider, row.SubjectId, (GlobalRole)(int)row.Permissions, row.Revision, person?.Name));
+            result.Add(new(row.Id, row.Provider, row.SubjectId, (GlobalRole)(int)row.Permissions, row.Revision, person?.Name, person?.SamAccountName));
         }
         return result;
     }, ct);
@@ -101,7 +103,19 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
         var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
         var resources = await db.Resources.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
         var result = new List<ExclusionView>();
-        foreach (var row in await db.Exclusions.AsNoTracking().OrderBy(x => x.CreatedAt).ToListAsync(ct))
+        var rows=await db.Exclusions.AsNoTracking().OrderBy(x=>x.CreatedAt).ToListAsync(ct);
+        var people=new Dictionary<string,DirectorySubject>(StringComparer.Ordinal);
+        using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(TimeSpan.FromSeconds(5));
+        foreach(var subjectId in rows.Where(x=>x.Provider==directory.ProviderId).SelectMany(x=>new[]{x.SubjectId,x.CreatedBy}).Distinct().Take(100))
+        {
+            if(budget.IsCancellationRequested)break;
+            try{var person=await directory.FindAsync(subjectId,SubjectKind.User,budget.Token);if(person is null)continue;
+                if(person.Provider!=directory.ProviderId||person.Id!=subjectId||person.Kind!=SubjectKind.User)throw new AccessDeniedException();people[subjectId]=person;}
+            catch(Exception error)when(error is VaultUnavailableException or LdapException or DirectoryOperationException){break;}
+            catch(OperationCanceledException)when(!ct.IsCancellationRequested){break;}
+        }
+        ct.ThrowIfCancellationRequested();
+        foreach (var row in rows)
         {
             var names = new List<string>();
             Guid? groupId = row.TargetKind == TargetKind.Group ? row.TargetId : resources.GetValueOrDefault(row.TargetId)?.GroupId;
@@ -109,8 +123,11 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
             while (groupId is { } id && visited.Add(id) && visited.Count <= 128 && groups.TryGetValue(id, out var group))
             { names.Insert(0, group.Name); groupId = group.ParentId; }
             if (row.TargetKind == TargetKind.Resource) names.Add(resources.GetValueOrDefault(row.TargetId)?.Name ?? row.TargetId.ToString());
+            people.TryGetValue(row.SubjectId,out var person);people.TryGetValue(row.CreatedBy,out var creator);
             result.Add(new(row.Id,row.TargetKind,row.TargetId,string.Join(" / ",names),row.Provider,row.SubjectId,
-                null,row.CreatedBy,row.CreatedAt,row.Revision));
+                row.Provider==directory.ProviderId?person?.Name:null,row.CreatedBy,row.CreatedAt,row.Revision,
+                row.Provider==directory.ProviderId?person?.SamAccountName:null,
+                row.Provider==directory.ProviderId?creator?.Name:null,row.Provider==directory.ProviderId?creator?.SamAccountName:null));
         }
         return result;
     }, ct);

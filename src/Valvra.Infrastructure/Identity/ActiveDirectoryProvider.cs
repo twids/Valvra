@@ -61,7 +61,7 @@ public sealed class ActiveDirectoryProvider(ActiveDirectoryOptions options) : ID
                 }
             }
             cancellationToken.ThrowIfCancellationRequested();
-            return new Actor("ad", Sid(user), Text(user, "displayName", "sAMAccountName"), groups, true, false, false);
+            return new Actor("ad", Sid(user), Text(user, "displayName", "sAMAccountName"), groups, true, false, false, SamAccountName: Text(user,"sAMAccountName"));
         }
         catch (Exception ex) when (ex is LdapException or DirectoryOperationException)
         {

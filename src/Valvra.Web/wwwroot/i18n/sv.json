@@ -695,7 +695,7 @@
   "Registrerade operationer": "Registrerade operationer",
   "Välj eller ange ID nedan": "Välj eller ange ID nedan",
   "Välj eller ange kod nedan": "Välj eller ange kod nedan",
-  "Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt.": "Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt.",
+  "Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt.": "Kontonamn kommer från den aktuella katalogen. Högst 100 registrerade aktörer visas. Operationskod kan anges manuellt.",
   "Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.": "Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.",
   "Tidigare resultat visas. Uppdateringen misslyckades.": "Tidigare resultat visas. Uppdateringen misslyckades.",
   "Inga resultat har lästs ännu.": "Inga resultat har lästs ännu.",
@@ -833,5 +833,11 @@
   "Papperskorg för licenser": "Papperskorg för licenser",
   "Undantagen destination": "Undantagen destination",
   "Kontrollera uttryckliga åtkomstundantag i Administration. Att öppna sidan återställer inte åtkomsten.": "Kontrollera uttryckliga åtkomstundantag i Administration. Att öppna sidan återställer inte åtkomsten.",
-  "Öppna": "Öppna"
+  "Öppna": "Öppna",
+  "Okänt eller borttaget konto": "Okänt eller borttaget konto",
+  "Okänd resurs": "Okänd resurs",
+  "Inloggad som {name}.": "Inloggad som {name}.",
+  "Tidigare aktiva användare. Sök i katalogen för att lägga till fler.": "Tidigare aktiva användare. Sök i katalogen för att lägga till fler.",
+  "Aktiva användare kunde inte läsas. Sök i katalogen.": "Aktiva användare kunde inte läsas. Sök i katalogen.",
+  "Kontonamn": "Kontonamn"
 }

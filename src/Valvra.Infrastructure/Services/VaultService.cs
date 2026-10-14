@@ -24,6 +24,36 @@ public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList
 public sealed class VaultOperations(VaultDbContext db, AccessService access, AuditService audit, ISecretCipher cipher, TimeProvider clock,
     IDirectoryProvider directory, VaultIntegrity integrity)
 {
+    public async Task<IReadOnlyList<DirectorySubject>> ActivePeopleAsync(Actor actor,Guid? licenseId,CancellationToken ct)
+    {
+        if(licenseId is {} id)
+        {
+            var license=await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&!x.Deleted,ct)??throw new AccessDeniedException();
+            await access.RequireLicenseAsync(actor,license.ResourceId,VaultPermission.Modify,ct);
+        }
+        else if(!actor.IsEnabled||!actor.IsAccessAdministrator&&!(await GroupsAsync(actor,ct)).Any(x=>x.CanManage)&&!(await ResourcesAsync(actor,ct)).Any(x=>x.CanManage))
+            throw new AccessDeniedException();
+        var recent=await db.Audit.AsNoTracking().Where(x=>x.Action=="Session.Identified"&&x.ActorProvider==directory.ProviderId)
+            .OrderByDescending(x=>x.Timestamp).Take(5000).Select(x=>x.ActorId).ToListAsync(ct);
+        var result=new List<DirectorySubject>();
+        using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(TimeSpan.FromSeconds(5));
+        foreach(var subjectId in recent.Prepend(actor.SubjectId).Distinct(StringComparer.Ordinal).Take(100))
+        {
+            if(budget.IsCancellationRequested)break;
+            try
+            {
+                var subject=await directory.FindAsync(subjectId,SubjectKind.User,budget.Token);
+                if(subject is null)continue;
+                if(subject.Provider!=actor.Provider||subject.Id!=subjectId||subject.Kind!=SubjectKind.User)throw new AccessDeniedException();
+                result.Add(subject);
+            }
+            catch(Exception error)when(error is VaultUnavailableException or LdapException or DirectoryOperationException){break;}
+            catch(OperationCanceledException)when(!ct.IsCancellationRequested){break;}
+        }
+        ct.ThrowIfCancellationRequested();
+        return result.OrderBy(x=>x.SamAccountName??x.Name,StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     public async Task<IReadOnlyList<GroupView>> GroupsAsync(Actor actor, CancellationToken ct)
     {
         var result = new List<GroupView>();

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Make password/license creation discoverable when content permissions are missing, and keep the unaffected content panel available after a failed read.
+- Edit existing direct resource/group grants with fixed recipients, revision checks and exact permission/schedule preservation. Verify multi-level inheritance and revocation.
+- Simplify license creation, identify the resource and seat usage before deletion, provide license recovery from the overview, and improve settings form spacing.
+- Add explicitly assigned Global Administrator and License Administrator roles, integrity-protected personal resource/subtree exclusions and separately audited restoration. License administration never implicitly reads passwords or license keys. This change requires the database upgrade in `docs/GLOBAL-ROLES-UPGRADE.md`.
+- Show account names and sAMAccountName instead of SIDs in application identity displays. Suggest previously active, currently enabled people while preserving explicit recipient selection and directory search.
+- Update vulnerable Negotiate/PKCS packages and the required directory-services dependency to stable .NET 10.0.13; retain vulnerability auditing.
+
 ## 1.3.0 – 2026-10-14
 
 - Overhaul resource browsing, mobile actions, navigation, success/error feedback and accessible dialogs. Show the running version and consistent resource paths, add metadata-only content search and explain the caller's capabilities.

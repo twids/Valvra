@@ -24,7 +24,7 @@ public static class AuditPresentation
                     if(subject is not null)
                     {
                         if(subject.Provider!=item.Provider||subject.Id!=item.Id||subject.Kind!=SubjectKind.User)throw new AccessDeniedException();
-                        value=item with{Name=subject.Name};
+                        value=item with{Name=subject.Name,SamAccountName=subject.SamAccountName};
                     }
                 }
                 catch(Exception error) when(error is VaultUnavailableException or LdapException or DirectoryOperationException) { budget.Cancel(); }

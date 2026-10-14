@@ -16,7 +16,7 @@ test('audit resource/group filters and export share criteria and preserve access
     await page.getByLabel('Inkludera undergrupper', {exact: true}).uncheck();
     await page.getByText('Avancerade filter',{exact:true}).click();
     await page.getByLabel('Operation', {exact: true}).fill('Secret.Create');
-    await page.getByLabel('Aktörens ID', {exact: true}).fill('user');
+    await page.getByLabel('Person eller tjänst',{exact:true}).selectOption({label:'user'});
     const response = page.waitForResponse(r => r.url().includes('/api/audit?') && r.request().method() === 'GET');
     await page.getByRole('button', {name: 'Filtrera', exact: true}).click();
     const filtered = await (await response).json();

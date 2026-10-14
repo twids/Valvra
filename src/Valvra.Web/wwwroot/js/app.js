@@ -4,6 +4,7 @@
     const i18n = window.ValvraI18n;
     const navigation = window.ValvraNavigation;
     const t = (key, values) => i18n.message(key, values);
+    const friendlyAccount=(name,sam)=>[name,sam].filter(value=>typeof value==="string"&&value.trim()&&!/S-\d-(?:\d+-)*\d+/i.test(value)).filter((value,index,all)=>all.indexOf(value)===index).join(" · ")||t("Okänt eller borttaget konto");
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
         resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), contentFilters:{}, licenseFilters:{}, auditFilters: {} };
     let renderEpoch = 0;
@@ -229,7 +230,7 @@
         if (state.view === "vault") { if (state.resource) await resourcePage(); else resourcesPage(); }
         else if (state.view === "groups") { if (state.resource) await resourcePage(); else if (state.group) groupPage(); else groupsPage(); }
         else if (state.view === "licenses") await licenseOverview();
-        else if (state.view === "settings") await window.ValvraSettings.render({state, api, node, button, field, select, directoryPicker, panel, table, hint, heading, dialog, notice, t, render, refreshSession, routeLink,
+        else if (state.view === "settings") await window.ValvraSettings.render({state, api, node, button, field, select, directoryPicker, friendlyAccount, panel, table, hint, heading, dialog, notice, t, render, refreshSession, routeLink,
             openImport:() => window.ValvraImport.open({state, api, node, button, field, select, hint, table, dialog, notice, load, t}), isCurrent: () => settingsEpoch === renderEpoch});
         else await auditPage();
         } catch(error) {
@@ -598,7 +599,7 @@
                 const found = await api((options.searchPath||"/directory")+`?query=${encodeURIComponent(text)}&kind=${kind.value}`);
                 if (epoch !== searchEpoch || !results.isConnected || !$("dialog").open) return;
                 subjects = found;
-                subjects.forEach(subject => { const o = node("option", subject.name + (subject.samAccountName?" · "+subject.samAccountName:"")+" · " + subject.id); o.value = subject.id; results.append(o); });
+                subjects.forEach(subject => { const o = node("option", friendlyAccount(subject.name,subject.samAccountName)); o.value = subject.id; results.append(o); });
                 status.textContent = subjects.length ? subjects.length + t(" träffar. Välj en träff i listan.") : t("Inga träffar");
                 results.focus();
             } catch (error) { if (epoch === searchEpoch && results.isConnected) status.textContent = error.message; }
@@ -607,10 +608,16 @@
         const search = button(t("Sök"), runSearch, "", false); parent.append(search);
         query.addEventListener("input", reset); kind.addEventListener("change", reset);
         query.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); if (!search.disabled) safely(runSearch); } });
-        results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : "";options.changed?.(); });
+        results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? friendlyAccount(subject.name,subject.samAccountName) : "";options.changed?.(); });
         const pick = () => { const selected = subjects.find(x => x.id === results.value); if (!selected) throw new Error(t("Sök och välj en användare eller grupp först.")); return selected; };
         pick.onlyUsers = enabled => { if (enabled && kind.value !== "0") { kind.value = "0"; reset(); } kind.disabled = enabled; };
         if(options.usersOnly){pick.onlyUsers(true);kind.hidden=true;kind.previousElementSibling.hidden=true;}
+        const initialEpoch=searchEpoch;
+        api((options.searchPath||"/directory")+"/active").then(people=>{
+            if(initialEpoch!==searchEpoch||!results.isConnected||!$("dialog").open||kind.value!=="0")return;
+            subjects=people;subjects.forEach(subject=>{const option=node("option",friendlyAccount(subject.name,subject.samAccountName));option.value=subject.id;results.append(option);});
+            status.textContent=t("Tidigare aktiva användare. Sök i katalogen för att lägga till fler.");
+        }).catch(()=>{if(initialEpoch===searchEpoch&&results.isConnected)status.textContent=t("Aktiva användare kunde inte läsas. Sök i katalogen.");});
         pick.clear=reset;
         pick.selected=()=>subjects.find(x=>x.id===results.value);
         return pick;
@@ -618,8 +625,7 @@
     function identityLabel(access, row) {
         const subject = access.subjects?.find(x => x.provider === row.provider && x.id === row.subjectId && x.kind === row.subjectKind);
         const label = node("div");
-        label.append(node("strong", subject?(subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")):t("Identiteten kunde inte slås upp")), node("p", (row.subjectKind === 0 ? t("Användare") : t("AD-grupp")) + " · " + row.provider, "hint"));
-        const details = node("details"); details.open = !subject; details.append(node("summary", t("Identitet")), node("p", row.subjectId, "audit-id")); label.append(details); return label;
+        label.append(node("strong", friendlyAccount(subject?.name,subject?.samAccountName)), node("p", (row.subjectKind === 0 ? t("Användare") : t("AD-grupp")) + " · " + row.provider, "hint"));return label;
     }
     function accessSource(row, kind, target) {
         if (row.targetKind === kind && row.targetId === target.id) return node("span", t("Direkt"), "badge");
@@ -635,7 +641,7 @@
         if (feedback) { const result = node("p", feedback, "notice"); result.setAttribute("role", "status"); body.append(result); }
         hint(body, t("Tilldelningar summeras. Ärvd åtkomst ändras på den överordnade gruppen. Ägare och behörighetsadministratörer kan tilldela sig själva läsrätt."));
         hint(body, t("Din effektiva innehållsåtkomst just nu: {rights}.", {rights:rights(access.effectivePermissions || 0) || t("Ingen") }));
-        hint(body,t("Inloggad identitet: {name} · {provider} · {id}.",{name:state.session.displayName,provider:state.session.provider,id:state.session.subjectId}));
+        hint(body,t("Inloggad som {name}.",{name:friendlyAccount(state.session.displayName,state.session.samAccountName)}));
         const actions = node("div", undefined, "actions"); actions.append(button(t("+ Tilldela åtkomst"), () => grantDialog(kind, target)), button(t("+ Lägg till ägare"), () => ownerDialog(kind, target))); body.append(actions);
         body.append(node("h3", t("Tilldelad åtkomst")));
         if (!access.grants.length) hint(body, t("Inga direkta eller ärvda tilldelningar. Ägare och globala administratörer kan fortfarande hantera åtkomst."));
@@ -687,7 +693,7 @@
             if(!pick||!temporary||!start||!expiry)return;
             const subject=pick.selected(),bits=temporary.value==="temporary"?3:checks.filter(x=>x.input.checked).reduce((value,x)=>value|x.bit,existing?(metadata.checked?1:0):1);
             const path=groupPath(kind===0?target.id:target.groupId).map(x=>x.name).concat(kind===1?[target.name]:[]).join(" / ");
-            reviewText.textContent=(subject?subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")+" · "+subject.provider+" · "+subject.id:t("Sök och välj en användare eller grupp först."))+" — "+path+" — "+rights(bits)+" — "+(temporary.value==="temporary"?date(start.value)+" – "+date(expiry.value):temporary.value==="scheduled"?date(start.value)+" – "+t("Tills vidare"):t("Tills vidare"));
+            reviewText.textContent=(subject?friendlyAccount(subject.name,subject.samAccountName):t("Sök och välj en användare eller grupp först."))+" — "+path+" — "+rights(bits)+" — "+(temporary.value==="temporary"?date(start.value)+" – "+date(expiry.value):temporary.value==="scheduled"?date(start.value)+" – "+t("Tills vidare"):t("Tills vidare"));
         }
         const refreshRights=()=>{permissions.hidden=preset.value!=="custom";summary();};
         preset.addEventListener("change",()=>{if(preset.value!=="custom"){if(metadata)metadata.checked=true;checks.forEach(x=>x.input.checked=!!(Number(preset.value)&x.bit));}refreshRights();});
@@ -857,7 +863,7 @@
         const notes = field(body, t("Anteckningar"), "textarea", payload.notes); notes.readOnly = true;
         hint(body, t("Visningen är auditerad. Fälten töms efter 30 sekunder eller när sidan tappar fokus."));revealCountdown(body);
     }
-    function versionCreator(version){const label=node('div');label.append(node('strong',(version.createdByName||version.createdBy)+(version.samAccountName?' · '+version.samAccountName:'')));if(version.createdByName){const details=node('details');details.append(node('summary',t('Registrerad identitet')),node('p',version.createdBy,'audit-id'));label.append(details);}return label;}
+    function versionCreator(version){return node('strong',friendlyAccount(version.createdByName,version.samAccountName));}
     async function licenseHistory(license, resource) {
         const loaded=await metadataDialog(t("Versionshistorik · ")+license.product,()=>api(`/licenses/${license.id}/versions`),()=>licenseHistory(license,resource));if(!loaded)return;
         const {body,value:versions}=loaded;
@@ -898,8 +904,8 @@
             seats = field(form, t("Antal platser"), "number", "1", true); seats.min = "1"; seats.max = String(available);
         });add.disabled=!available;body.append(add);if(!available)hint(body,t("Alla platser är tilldelade. Återta en tilldelning innan du lägger till en ny."));}
         table(body, [t("Tilldelad till"), t("Platser"), t("Datum"), ""], assignments.map(x => {
-            const target=(state.licenseResources||state.resources).find(r=>r.id===x.resourceId),label=x.destinationExcluded?t("Undantagen destination"):x.userId?(x.userName||x.userId)+(x.samAccountName?" · "+x.samAccountName:""):(target?(target.path||groupPath(target.groupId).map(g=>g.name).concat(target.name).join(" / ")):x.resourceId);
-            const identity=node("div");identity.append(node("strong",label),node("p",x.userId?(x.userProvider+" · "+x.userId):x.resourceId,"hint audit-id"));
+            const target=(state.licenseResources||state.resources).find(r=>r.id===x.resourceId),label=x.destinationExcluded?t("Undantagen destination"):x.userId?friendlyAccount(x.userName,x.samAccountName):(target?(target.path||groupPath(target.groupId).map(g=>g.name).concat(target.name).join(" / ")):t("Okänd resurs"));
+            const identity=node("div");identity.append(node("strong",label));
             return[identity,String(x.seats),date(x.createdAt),!x.destinationExcluded&&(resource?.permissions&4)?button(t("Återta platser"),()=>{
                 const confirmation=dialog(t("Bekräfta återtagning"),t("Återta platser"),async()=>{await api(`/assignments/${x.id}/remove`,{});await load();},{back:returnToOverview,afterSave:message=>assignmentDialog(license,resource,message)});
                 hint(confirmation,t("Återta {seats} platser från {recipient}?",{seats:x.seats,recipient:label}));
@@ -925,8 +931,9 @@
         const filter = (label, type, parent=toolbar) => { const group = node("div"); parent.append(group); return field(group, label, type); };
         const from = filter(t("Från"), "datetime-local"), to = filter(t("Till (exklusive)"), "datetime-local");
         const actor = filter(t("Aktörens ID"), "text",technicalFilters), action = filter(t("Operation"), "text",technicalFilters); $("content").append(toolbar,advanced);
+        actor.hidden=true;actor.labels[0].hidden=true;
         const actorChoices=targets.actors||[],actionChoices=targets.actions||[];
-        const actorChoice=select(controlGroup(toolbar),t("Person eller tjänst"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
+        const actorChoice=select(controlGroup(toolbar),t("Person eller tjänst"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),friendlyAccount(x.name,x.samAccountName)])]);
         const operationChoice=select(controlGroup(toolbar),t("Åtgärd"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
         actorChoice.disabled=operationChoice.disabled=targetsUnavailable;
         hint(advanced,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
@@ -978,9 +985,9 @@
                 const outcomes={Requested:"Begärd",Committed:"Bekräftad ändring",CommitUncertain:"Kan ha sparats. Kontrollera destinationen före ett nytt försök.",Success:"Lyckades",Denied:"Nekad",Failed:"Misslyckad",InvalidSignature:"Ogiltig signatur"};
                 outcome.append(node("strong",x.signatureValid?t(Object.hasOwn(phases,x.event.phase)?phases[x.event.phase]:"Händelse"):t("Ej verifierat")));if(x.signatureValid)outcome.append(node("p",t(Object.hasOwn(outcomes,x.event.outcome)?outcomes[x.event.outcome]:x.event.outcome),"hint"));
                 const details=node("details");details.append(node("summary",t("Tekniska detaljer")));
-                const facts=[["ID",x.event.id],[t("Operations-ID"),x.event.operationId],[t("Korrelations-ID"),x.event.correlationId],[t("Aktör"),[x.event.actorProvider,x.event.actorId].filter(Boolean).join(" · ")],[t("Operation"),x.event.action],[t("Steg"),x.event.phase],[t("Resultat"),x.event.outcome]];
+                const facts=[["ID",x.event.id],[t("Operations-ID"),x.event.operationId],[t("Korrelations-ID"),x.event.correlationId],[t("Aktör"),friendlyAccount(actor?.name,actor?.samAccountName)],[t("Operation"),x.event.action],[t("Steg"),x.event.phase],[t("Resultat"),x.event.outcome]];
                 facts.forEach(([label,value])=>details.append(node("p",label+": "+String(value??"—"),"audit-id")));
-                return [date(x.event.timestamp),node("span",actor?.name||x.event.actorId),auditActionLabel(x.event.action),auditScopeLabel(x),outcome,node("span",x.signatureValid?t("Giltig signatur"):t("Ogiltig signatur"),"badge"+(x.signatureValid?"":" error")),details];
+                return [date(x.event.timestamp),node("span",friendlyAccount(actor?.name,actor?.samAccountName)),auditActionLabel(x.event.action),auditScopeLabel(x),outcome,node("span",x.signatureValid?t("Giltig signatur"):t("Ogiltig signatur"),"badge"+(x.signatureValid?"":" error")),details];
             }));
             }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;if(error.status===409)snapshotExpired=true;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t(error.status===409?"Uppdatera auditvyn":"Försök igen"),()=>paint(error.status===409?{...requested,snapshotId:undefined,offset:0}:requested)));}
             finally{if(epoch===renderEpoch&&requestEpoch===paintEpoch){results.removeAttribute("aria-busy");availability(false);}}
@@ -1031,7 +1038,7 @@
     ["pointerdown", "keydown"].forEach(type => document.addEventListener(type, () => lastActivity = Date.now()));
     setInterval(() => { if (Date.now() - lastActivity > 300000) protectFocusLoss(); }, 10000);
     async function refreshSession() {
-        state.session = await api("/session"); i18n.setText($("identity"), state.session.displayName);
+        state.session = await api("/session"); i18n.setText($("identity"), friendlyAccount(state.session.displayName,state.session.samAccountName));
         $("audit-nav").hidden = !state.session.isAuditor;
         if ($("settings-nav")) $("settings-nav").hidden = !state.session.isAccessAdministrator && !state.session.isSystemAdministrator;
         if (routeReady) resolveRoute(navigation.parse(window.location.pathname));

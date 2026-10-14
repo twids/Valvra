@@ -5,6 +5,7 @@
     const roleLabels = [[32, "Behörighetsadministratör"], [64, "Systemadministratör"], [128, "Auditläsare"], [256,"Global administratör"], [512,"Licensansvarig"]];
     async function render(ui) {
         const {state, api, node, button, field, table, hint, heading, dialog, notice, t} = ui;
+        const friendlyAccount=ui.friendlyAccount;
         const panel=(parent,title,actions)=>{const section=ui.panel(parent,title,actions);section.classList.add("settings-panel");const body=node("div",undefined,"panel-body");section.append(body);return body;};
         const content = document.getElementById("content");
         const section = state.settingsSection;
@@ -99,7 +100,7 @@
                     if (saving) { if (submittedEpoch === draftEpoch) { draft = response; dirty = false; } else { draft = {...draft,revision:response.revision}; dirty = true; } notice(t("Kataloginställningarna har sparats och gäller för nya förfrågningar.")); }
                     else {
                         result.append(node("p", t("Anslutningen och ditt personkonto har verifierats.")));
-                        table(result, [t("Typ"), t("Namn"), t("Identitet")], [...response.users.map(x => [t("Personkonto"), x.name, x.id]), ...response.groups.map(x => [t("Behörighetsgrupp"), x.name, x.id])]);
+                        table(result, [t("Typ"), t("Namn"), t("Kontonamn")], [...response.users.map(x => [t("Personkonto"), friendlyAccount(x.name), friendlyAccount(null,x.samAccountName)]), ...response.groups.map(x => [t("Behörighetsgrupp"), friendlyAccount(x.name), friendlyAccount(null,x.samAccountName)])]);
                     }
                 } catch (failure) { error.textContent = failure.message; }
                 finally { busy = false; [test, save, reload].forEach(x => x.disabled = false); if (!ui.isCurrent() && state.view === "settings" && state.settingsSection === "directory") await ui.render(); }
@@ -118,8 +119,7 @@
         function personLabel(role) {
             const label = node("div");
             const name = role.subjectId === state.session.subjectId && role.provider === state.session.provider ? state.session.displayName : role.name;
-            label.append(node("strong", name || role.subjectId));
-            if (name && name !== role.subjectId) label.append(node("p", role.subjectId, "hint audit-id"));
+            label.append(node("strong", friendlyAccount(name,role.samAccountName)));
             return label;
         }
         table(administrators, [t("Personkonto"), t("Rättigheter"), t("Åtgärder")], roles.map(role => [personLabel(role),
@@ -140,11 +140,10 @@
                 hint(body,t("Undantaget går före alla roller, ägarskap och tilldelningar. En resursgrupp omfattar hela underträdet. Åtkomsten återkommer först efter uttrycklig återställning. En global administratör kan återställa sin egen åtkomst."));
             })]);
             hint(box,t("Undantaget går före alla roller, ägarskap och tilldelningar. En resursgrupp omfattar hela underträdet. Åtkomsten återkommer först efter uttrycklig återställning. En global administratör kan återställa sin egen åtkomst."));
-            const account=(provider,id)=>{const role=roles.find(x=>x.provider===provider&&x.subjectId===id);return (role?.name?role.name+" · ":"")+id+" · "+provider;};
             table(box,[t("Personkonto"),t("Destination"),t("Skapad"),t("Ändrad av"),t("Åtgärder")],exclusions.map(x=>[
-                account(x.provider,x.subjectId),x.targetName+" · "+t(x.targetKind===0?"Gruppen och dess underträd":"Endast denna resurs"),new Date(x.createdAt).toLocaleString(window.ValvraI18n.locale),account(x.provider,x.createdBy),button(t("Återställ åtkomst"),()=>{
+                friendlyAccount(x.name,x.samAccountName),x.targetName+" · "+t(x.targetKind===0?"Gruppen och dess underträd":"Endast denna resurs"),new Date(x.createdAt).toLocaleString(window.ValvraI18n.locale),friendlyAccount(x.createdByName,x.createdBySamAccountName),button(t("Återställ åtkomst"),()=>{
                     const body=dialog(t("Återställ åtkomst"),t("Återställ åtkomst"),async()=>{await api(`/settings/exclusions/${x.id}/restore`,{revision:x.revision});await ui.refreshSession();await ui.render();});
-                    hint(body,x.subjectId+" · "+x.targetName);hint(body,t("Undantaget tas bort. Personens aktuella roller och tilldelningar börjar gälla igen. Andra ärvda undantag måste återställas separat."));
+                    hint(body,friendlyAccount(x.name,x.samAccountName)+" · "+x.targetName);hint(body,t("Undantaget tas bort. Personens aktuella roller och tilldelningar börjar gälla igen. Andra ärvda undantag måste återställas separat."));
                 })]));
             if(!exclusions.length)hint(box,t("Inga uttryckliga undantag."));
         }
@@ -162,7 +161,10 @@
                 const search = field(body, t("Sök personkonto"), "text"); search.minLength = 2; search.maxLength = 128;
                 const results = node("div"), status = node("p"); status.setAttribute("role", "status");
                 let searchEpoch = 0;
-                const personChoiceLabel = person => person.name + (person.samAccountName ? " · " + person.samAccountName : person.name !== person.id ? " · " + person.id : "");
+                const personChoiceLabel = person => friendlyAccount(person.name,person.samAccountName);
+                const choices=people=>people.forEach(person => results.append(button(personChoiceLabel(person), () => {
+                    subject=person;status.textContent=personChoiceLabel(person);results.replaceChildren();checks[0][1].focus();
+                })));
                 const runSearch = async () => {
                     const epoch = ++searchEpoch;
                     subject = null; results.replaceChildren(); status.textContent = "";
@@ -170,17 +172,16 @@
                     const people = await api("/settings/people?query=" + encodeURIComponent(search.value.trim()));
                     if (epoch !== searchEpoch || !results.isConnected) return;
                     results.replaceChildren();
-                    people.forEach(person => results.append(button(personChoiceLabel(person), () => {
-                        subject = person; status.textContent = personChoiceLabel(person) + " · " + person.provider + " · " + person.id;
-                        results.replaceChildren();
-                        checks[0][1].focus();
-                    })));
+                    choices(people);
                     if (!people.length) status.textContent = t("Inga träffar");
                 };
                 const searchButton = button(t("Sök"), runSearch, "", false);
                 search.addEventListener("input", () => { searchEpoch++; subject = null; results.replaceChildren(); status.textContent = ""; });
                 search.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); searchButton.click(); } });
                 body.append(searchButton, results, status);
+                api("/settings/people/active").then(people=>{
+                    if(searchEpoch!==0||!results.isConnected)return;choices(people);status.textContent=t("Tidigare aktiva användare. Sök i katalogen för att lägga till fler.");
+                }).catch(()=>{if(searchEpoch===0&&results.isConnected)status.textContent=t("Aktiva användare kunde inte läsas. Sök i katalogen.");});
             }
             const rights = node("fieldset"); rights.append(node("legend", t("Rättigheter"))); body.append(rights);
             roleLabels.forEach(([bit, label]) => { const row = node("div", undefined, "check-row"), input = field(row, t(label), "checkbox"); input.checked = !!(existing?.roles & bit); checks.push([bit, input]); rights.append(row); });

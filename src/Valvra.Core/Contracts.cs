@@ -4,7 +4,7 @@ namespace Valvra.Core;
 
 public sealed record Actor(string Provider, string SubjectId, string DisplayName,
     IReadOnlySet<string> GroupIds, bool IsEnabled, bool IsAccessAdministrator, bool IsAuditor, bool IsSystemAdministrator = false,
-    bool IsGlobalAdministrator = false, bool IsLicenseAdministrator = false);
+    bool IsGlobalAdministrator = false, bool IsLicenseAdministrator = false, string? SamAccountName = null);
 public sealed record DirectorySubject(string Provider, string Id, string Name, SubjectKind Kind, string? SamAccountName = null);
 
 public interface IIdentityProvider
