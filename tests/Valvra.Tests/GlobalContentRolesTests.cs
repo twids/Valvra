@@ -11,6 +11,19 @@ namespace Valvra.Tests;
 public sealed class GlobalContentRolesTests
 {
     [Fact]
+    public async Task LicenseVersionRestorationCombinesLicenseAdministrationWithSeparatelyGrantedRead()
+    {
+        await using var f=await VaultServiceTests.Fixture.CreateAsync();
+        var actor=f.User with{SubjectId="licensing",IsAccessAdministrator=false,IsAuditor=false,IsLicenseAdministrator=true};
+        var id=await f.Vault.SaveLicenseAsync(actor,null,f.ResourceId,"Product","","",1,null,new("first-key",""),0,"create",default);
+        await f.Vault.SaveLicenseAsync(actor,id,f.ResourceId,"Product","","",1,null,new("second-key",""),1,"replace",default);
+        await Assert.ThrowsAsync<AccessDeniedException>(()=>f.Vault.RestoreLicenseVersionAsync(actor,id,1,2,"denied",default));
+        Assert.Equal(0,f.Cipher.Decryptions);
+        await f.Vault.GrantAsync(f.User,new AccessGrant{TargetKind=TargetKind.Resource,TargetId=f.ResourceId,Provider="ad",SubjectId="licensing",Permissions=VaultPermission.ReadSecret},"grant-read",default);
+        await f.Vault.RestoreLicenseVersionAsync(actor,id,1,2,"restore",default);
+        Assert.Equal("first-key",(await f.Vault.RevealLicenseAsync(actor,id,"read",default)).LicenseKey);
+    }
+    [Fact]
     public async Task EmptyExclusionTablePreservesLegacyIntegrityHashAndUnauthorizedRowDeletionFailsClosed()
     {
         await using var f=await VaultServiceTests.Fixture.CreateAsync();

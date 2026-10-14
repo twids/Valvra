@@ -66,8 +66,14 @@ public sealed class AccessService(VaultDbContext db, TimeProvider clock)
     public async Task RequireLicenseAsync(Actor actor, Guid resourceId, VaultPermission required, CancellationToken ct)
     {
         // The global license role never supplies secret-read, password metadata or access-management rights.
-        if (actor.IsEnabled && actor.IsLicenseAdministrator && (required & ~(VaultPermission.Metadata | VaultPermission.Modify)) == 0
-            && !await IsExcludedAsync(actor, TargetKind.Resource, resourceId, ct)) return;
+        if (actor.IsEnabled && actor.IsLicenseAdministrator && (required & ~(VaultPermission.Metadata | VaultPermission.Modify | VaultPermission.ReadSecret)) == 0
+            && !await IsExcludedAsync(actor, TargetKind.Resource, resourceId, ct))
+        {
+            // Combined operations still need actual content Read, while the license role supplies Modify.
+            var contentRequired=required&VaultPermission.ReadSecret;
+            if(contentRequired!=VaultPermission.None)await RequireAsync(actor,TargetKind.Resource,resourceId,contentRequired,ct);
+            return;
+        }
         await RequireAsync(actor, TargetKind.Resource, resourceId, required, ct);
     }
 
