@@ -71,9 +71,10 @@ test('resource and group filters are restored from memory during history travers
 });
 test('audit filters and paging return with the audit history entry',async({page})=>{
     await page.route('**/api/audit?*',route=>route.fulfill({json:Array.from({length:200},()=>({event:{timestamp:'2026-10-05T10:00:00Z',actorId:'synthetic-actor',action:'Secret.Read',outcome:'Success'},signatureValid:true}))}));
+    await page.route('**/api/audit/targets',route=>route.fulfill({json:{resources:[],groups:[],invalidEventCount:0,actors:[{provider:'ad',id:'synthetic-actor',name:'Synthetic Actor',samAccountName:'synthetic.actor'}],actions:['Secret.Read']}}));
     await data(page); await page.goto('/audit');
     await page.getByText('Avancerade filter',{exact:true}).click();
-    await page.getByLabel('Aktörens ID',{exact:true}).fill('synthetic-actor');
+    await page.getByLabel('Person eller tjänst',{exact:true}).selectOption({label:'Synthetic Actor · synthetic.actor'});
     await page.getByLabel('Operation',{exact:true}).fill('Secret.Read');
     await page.getByRole('button',{name:'Filtrera',exact:true}).click();
     await page.getByRole('button',{name:'Nästa →',exact:true}).click();
