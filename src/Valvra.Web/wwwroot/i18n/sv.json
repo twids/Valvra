@@ -806,5 +806,11 @@
   "Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp.": "Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp.",
   "Från ett startdatum, utan slutdatum": "Från ett startdatum, utan slutdatum",
   "Visa innehållslistor (Metadata)": "Visa innehållslistor (Metadata)",
-  "Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.": "Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."
+  "Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.": "Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.",
+  "Licensen finns i resursens papperskorg.": "Licensen finns i resursens papperskorg.",
+  "Tilldelade platser: {count}": "Tilldelade platser: {count}",
+  "Öppna resursen": "Öppna resursen",
+  "Leverantör, inköp och giltighet (valfritt)": "Leverantör, inköp och giltighet (valfritt)",
+  "Ny licensnyckel (obligatoriskt)": "Ny licensnyckel (obligatoriskt)",
+  "Licensnyckeln sparas krypterad. Läsrätt krävs för att visa den efteråt.": "Licensnyckeln sparas krypterad. Läsrätt krävs för att visa den efteråt."
 }

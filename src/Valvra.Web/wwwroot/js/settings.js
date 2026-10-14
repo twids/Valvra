@@ -4,7 +4,8 @@
     let draft, query = "ad", busy = false, dirty = false, draftEpoch = 0;
     const roleLabels = [[32, "Behörighetsadministratör"], [64, "Systemadministratör"], [128, "Auditläsare"]];
     async function render(ui) {
-        const {state, api, node, button, field, panel, table, hint, heading, dialog, notice, t} = ui;
+        const {state, api, node, button, field, table, hint, heading, dialog, notice, t} = ui;
+        const panel=(parent,title,actions)=>{const section=ui.panel(parent,title,actions);section.classList.add("settings-panel");const body=node("div",undefined,"panel-body");section.append(body);return body;};
         const content = document.getElementById("content");
         const section = state.settingsSection;
         const titles={people:"Globala roller",import:"Import",directory:"Inloggning och katalog",certificates:"Certifikat och säkerhet",about:"Om Valvra"};
@@ -50,7 +51,7 @@
             const loaded = draft || await api("/settings/directory");
             if (!ui.isCurrent() || state.view !== "settings") return;
             if (!draft) draft = loaded;
-            const directory = panel(content, t("Inloggning och katalog")); directory.classList.add("settings-panel");
+            const directory = panel(content, t("Inloggning och katalog"));
             const installed = node("p");
             installed.textContent = providers.logins.find(x => x.id === draft.loginProviderId)?.name + " · "
                 + providers.directories.find(x => x.id === draft.directoryProviderId)?.name;
@@ -59,6 +60,7 @@
             const form = node("form", undefined, "settings-form"); directory.append(form);
             const inputs = {};
             function bind(parent, key, label, type = "text", required = false, help) {
+                const group=node("div",undefined,"settings-field");parent.append(group);parent=group;
                 const input = field(parent, label, type, draft[key], required); inputs[key] = input;
                 input.maxLength = key === "server" ? 253 : 2048;
                 if (type === "number") { input.min = 1; input.max = key === "port" ? 65535 : 30; }
@@ -111,7 +113,7 @@
         access.append(ui.routeLink(t("Resurser"),{view:"vault"}),ui.routeLink(t("Resursgrupper"),{view:"groups"}));
         const roles = await api("/settings/roles");
         if (!ui.isCurrent() || state.view !== "settings") return;
-        const administrators = panel(content, t("Globala rättigheter"), state.session.isAccessAdministrator ? [button(t("+ Tilldela personkonto"), () => editRole())] : []); administrators.classList.add("settings-panel");
+        const administrators = panel(content, t("Globala rättigheter"), state.session.isAccessAdministrator ? [button(t("+ Tilldela personkonto"), () => editRole())] : []);
         hint(administrators, t("Tilldelas endast personkonton. Ger ingen automatisk läsrätt till lösenord eller licensnycklar. Den sista administratören för en rättighet kan inte tas bort."));
         function personLabel(role) {
             const label = node("div");

@@ -41,6 +41,15 @@ label { margin-top: 12px; }
 .connection-panel { padding: 16px; margin-block: 16px; }
 .setup-navigation { padding: 14px 16px; }
 .setup-check { padding-block: 10px; }
+.settings-panel {max-width: 60rem; padding-bottom: 0;}
+.settings-panel .panel-body {padding: clamp(16px, 3vw, 24px);}
+.settings-panel .settings-form {margin: 0; max-width: 46rem;}
+.settings-field {margin-block: 20px;}
+.settings-field label {margin-top: 0;}
+.settings-field .hint {margin-top: 6px;}
+.settings-form .actions {margin-top: 20px; gap: 12px;}
+.settings-panel .panel-body > a {display: inline-block; margin: 8px 16px 8px 0;}
+.field-row > .filter-control {min-width: 0;}
 
 @media (max-width: 650px) {
     .topbar { min-height: 52px; }

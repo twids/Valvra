@@ -29,10 +29,10 @@ test('license overview creates a license in the selected writable resource',asyn
     await picker.selectOption(await picker.locator('option').filter({hasText:'Windows-servrar'}).getAttribute('value'));
     const target=await picker.inputValue();
     await page.getByLabel('Product (required)',{exact:true}).fill('Overview license');
-    await page.getByLabel('New license key',{exact:true}).fill('SYNTHETIC-OVERVIEW-LICENSE');
+    await page.getByLabel('License key (required)',{exact:true}).fill('SYNTHETIC-OVERVIEW-LICENSE');
     await audit(page);
     const request=page.waitForRequest(r=>r.url().endsWith('/api/licenses')&&r.method()==='POST');
-    await page.getByRole('button',{name:'Save',exact:true}).click();
+    await page.getByRole('button',{name:'Add license',exact:true}).click();
     expect((await request).postDataJSON().resourceId).toBe(target);
     await expect(page.getByRole('dialog')).not.toBeVisible();
     await expect(page.getByRole('heading',{name:'License overview',level:1})).toBeVisible();
@@ -121,10 +121,10 @@ test('English license forms expose localized validation and retain existing focu
     await expect(page.getByRole('alert')).toContainText('Complete the required field.');
     await product.fill('English draft');
     await page.getByLabel('License key and secret notes',{exact:true}).selectOption('1');
-    await page.getByLabel('New license key',{exact:true}).fill('synthetic-only');
+    await page.getByLabel('New license key (required)',{exact:true}).fill('synthetic-only');
     await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
     await expect(product).toHaveValue('English draft');
-    await expect(page.getByLabel('New license key',{exact:true})).toHaveValue('');
+    await expect(page.getByLabel('New license key (required)',{exact:true})).toHaveValue('');
     await expect(page.getByRole('button',{name:'Save',exact:true})).toBeDisabled();
     await expect(page.getByRole('alert')).toContainText('Secret fields have been cleared.');
     await audit(page);

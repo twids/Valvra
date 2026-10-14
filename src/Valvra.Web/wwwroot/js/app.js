@@ -677,7 +677,7 @@
         [[2, t("Läsa hemligheter")], [4, t("Ändra innehåll")], [8, t("Hantera behörigheter")], [16, t("Testa mot LDAP")]].forEach(([bit, label]) => { const row = node("div", undefined, "check-row"); const input = field(row, label, "checkbox"); input.value = "on";input.checked=!!(existing?.permissions&bit); checks.push({ bit, input }); permissions.append(row); });
         const times = node("div", undefined, "field-row"); const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
         const initialStart=localDate(existing?.startsAt?new Date(existing.startsAt):new Date()),initialExpiry=localDate(existing?.expiresAt?new Date(existing.expiresAt):new Date(Date.now()+3600000));
-        start = field(times, t("Från"), "datetime-local", initialStart); expiry = field(times, t("Till"), "datetime-local", initialExpiry); body.append(times); times.hidden = !existing?.expiresAt;
+        start = field(controlGroup(times), t("Från"), "datetime-local", initialStart); expiry = field(controlGroup(times), t("Till"), "datetime-local", initialExpiry); body.append(times); times.hidden = !existing?.expiresAt;
         const review=node("section",undefined,"panel");review.setAttribute("aria-label",t("Kontrollera tilldelningen"));review.append(node("h3",t("Kontrollera tilldelningen")));const reviewText=node("p");reviewText.setAttribute("role","status");review.append(reviewText);body.append(review);
         if(kind===0)hint(review,t("Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser."));
         function summary(){
@@ -742,11 +742,15 @@
             if (resource?.permissions & 4) secondary.push(button(t("Ändra"), () => { state.resource = resource; licenseDialog(license); }));
             secondary.push(button(t("Tilldelningar"), () => assignmentDialog(license, resource)),button(t("Historik"), () => licenseHistory(license, resource)));
             if (resource?.permissions & 4) secondary.push(button(t("Ta bort"), () => {
-                const body = dialog(t("Ta bort licens · ") + license.product, t("Ta bort"), async () => { await api(`/licenses/${license.id}/deleted`, { deleted: true, revision: license.revision }); await render(); });
+                const body = dialog(t("Ta bort licens · ") + license.product, t("Ta bort"), async () => { await api(`/licenses/${license.id}/deleted`, { deleted: true, revision: license.revision }); await render();return t("Licensen finns i resursens papperskorg."); });
+                hint(body,t("Resurs")+": "+(resource?groupPath(resource.groupId).map(x=>x.name).concat(resource.name).join(" / "):license.resourceId));
+                hint(body,t("Tilldelade platser: {count}",{count:license.assignedSeats}));
                 body.append(node("p", t("Licensen flyttas till resursens papperskorg. Tilldelningar bevaras för återställning.")));
+                body.append(routeLink(t("Öppna resursen"),{view:"vault",resourceId:license.resourceId}));
             }, "danger"));
             actions.append(actionMenu(t("Fler åtgärder"),secondary,scoped ? license.product : license.product+" · "+(resource?.name||"")));
             const product = node("div"); product.append(node("strong", license.product), node("p", scoped ? license.vendor : (resource?.name || "") + " · " + license.vendor, "hint"));
+            if(!scoped&&resource)product.append(routeLink(groupPath(resource.groupId).map(x=>x.name).concat(resource.name).join(" / "),{view:"vault",resourceId:resource.id}));
             const expiry = node("span", date(license.expiresAt), license.expiresAt && new Date(license.expiresAt) < new Date(Date.now() + 30 * 86400000) ? "badge warn" : "");
             return [product, `${license.assignedSeats} / ${license.seats}`, expiry, actions];
         })).classList.add("mobile-records");
@@ -798,24 +802,29 @@
             const originalExpiry=license?.expiresAt||null,originalDate=originalExpiry?calendarDate(originalExpiry):"";
             let resourcePicker;
             let product, vendor, reference, seats, expiry, key, notes, change;
-            const body = dialog(license ? t("Ändra licens") : t("Lägg till licens"), t("Spara"), async () => {
-                const mode = Number(change.value);
+            const body = dialog(license ? t("Ändra licens") : t("Lägg till licens"), t(license?"Spara":"Lägg till licens"), async () => {
+                const mode = license ? Number(change.value) : 1;
                 if (mode === 1 && !key.value.trim()) throw new Error(t("Ange en ny licensnyckel eller välj att behålla eller tömma nyckeln."));
                 await api(license ? `/licenses/${license.id}/update` : "/licenses", { resourceId: resourcePicker ? resourcePicker.value : resourceId, product: product.value, vendor: vendor.value, purchaseReference: reference.value,
                     seats: Number(seats.value), expiresAt: expiry.value===originalDate?originalExpiry:expiry.value ? new Date(expiry.value + "T23:59:59").toISOString() : null,
                     secretChange: mode, payload: mode === 1 ? { licenseKey: key.value, notes: notes.value } : null, revision: license?.revision || 0 }); await render();
             });
             if (writableResources) { resourcePicker = select(body, t("Resurs"), [["",t("Välj en destinationsresurs")],...writableResources.map(x => [x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],""); resourcePicker.required=true; }
-            product = field(body, t("Produkt"), "text", license?.product || "", true); vendor = field(body, t("Leverantör"), "text", license?.vendor || "");
-            reference = field(body, t("Inköpsreferens"), "text", license?.purchaseReference || ""); seats = field(body, t("Antal platser"), "number", String(license?.seats || 1), true); seats.min = "1"; seats.max = "1000000";
-            expiry = field(body, t("Giltig till"), "date", originalDate);
-            hint(body,t("Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon."));
-            change = select(body, t("Licensnyckel och hemliga anteckningar"), license ? [["0", t("Behåll befintliga värden")], ["1", t("Ersätt med nya värden")], ["2", t("Töm värdena uttryckligen")]] : [["1", t("Spara ny licensnyckel")]], license ? "0" : "1");
-            key = field(body, t("Ny licensnyckel"), "password"); notes = field(body, t("Nya hemliga anteckningar"), "textarea"); key.maxLength = notes.maxLength = 65536;
-            const update = () => { key.value = notes.value = ""; key.disabled = notes.disabled = change.value !== "1"; key.required = change.value === "1"; updateSecretSubmitState(); };
-            change.addEventListener("change", update); update();
-            hint(body, t("Metadata kan ändras utan att läsa nyckeln. Ersättning och tömning skapar en ny krypterad version; tidigare värden bevaras i historiken."));
-            hint(body, t("Vid ersättning är ny licensnyckel obligatorisk. Spara blir tillgänglig när den har fyllts i."));
+            product = field(body, t("Produkt"), "text", license?.product || "", true);
+            seats = field(body, t("Antal platser"), "number", String(license?.seats || 1), true); seats.min = "1"; seats.max = "1000000";
+            if(license)change = select(body, t("Licensnyckel och hemliga anteckningar"), [["0", t("Behåll befintliga värden")], ["1", t("Ersätt med nya värden")], ["2", t("Töm värdena uttryckligen")]], "0");
+            key = field(body, t(license?"Ny licensnyckel":"Licensnyckel"), "password","",!license);
+            notes = field(body, t(license?"Nya hemliga anteckningar":"Hemliga anteckningar"), "textarea"); key.maxLength = notes.maxLength = 65536;
+            const commercial=node("details");commercial.append(node("summary",t("Leverantör, inköp och giltighet (valfritt)")));commercial.open=!!license;body.append(commercial);
+            vendor = field(commercial, t("Leverantör"), "text", license?.vendor || "");
+            reference = field(commercial, t("Inköpsreferens"), "text", license?.purchaseReference || "");
+            expiry = field(commercial, t("Giltig till"), "date", originalDate);
+            hint(commercial,t("Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon."));
+            if(license){
+                const update = () => { key.value = notes.value = ""; key.disabled = notes.disabled = change.value !== "1"; key.required = change.value === "1";key.labels[0].textContent=t(change.value==="1"?"Ny licensnyckel (obligatoriskt)":"Ny licensnyckel"); updateSecretSubmitState(); };
+                change.addEventListener("change", update); update();
+                hint(body, t("Metadata kan ändras utan att läsa nyckeln. Ersättning och tömning skapar en ny krypterad version; tidigare värden bevaras i historiken."));
+            }else hint(body,t("Licensnyckeln sparas krypterad. Läsrätt krävs för att visa den efteråt."));
     }
     async function revealLicense(license, version) {
         const epoch = ++dialogEpoch;
