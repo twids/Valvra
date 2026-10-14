@@ -764,5 +764,9 @@
   "Läsa och kopiera": "Läsa och kopiera",
   "Läsa och ändra": "Läsa och ändra",
   "Kontrollera tilldelningen": "Kontrollera tilldelningen",
-  "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser.": "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser."
+  "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser.": "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser.",
+  "Välj först en destination där du har metadata- och ändringsrätt. Skapa en resurs eller be en resursägare tilldela åtkomst innan du väljer fil.": "Välj först en destination där du har metadata- och ändringsrätt. Skapa en resurs eller be en resursägare tilldela åtkomst innan du väljer fil.",
+  "Välj filen igen": "Välj filen igen",
+  "Destinationen måste tillåta metadata och ändringar. Kontrollera mappningen i förhandsgranskningen innan något sparas.": "Destinationen måste tillåta metadata och ändringar. Kontrollera mappningen i förhandsgranskningen innan något sparas.",
+  "Visa ett ofarligt CSV-exempel": "Visa ett ofarligt CSV-exempel"
 }

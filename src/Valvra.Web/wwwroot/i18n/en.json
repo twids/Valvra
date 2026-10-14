@@ -764,5 +764,9 @@
   "Läsa och kopiera": "Reveal and copy",
   "Läsa och ändra": "Reveal and edit",
   "Kontrollera tilldelningen": "Review this grant",
-  "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser.": "This grant applies to the group and its inheriting subgroups and resources."
+  "Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser.": "This grant applies to the group and its inheriting subgroups and resources.",
+  "Välj först en destination där du har metadata- och ändringsrätt. Skapa en resurs eller be en resursägare tilldela åtkomst innan du väljer fil.": "First choose a destination where you have metadata and modify permissions. Create a resource or ask a resource owner for access before choosing a file.",
+  "Välj filen igen": "Select the file again",
+  "Destinationen måste tillåta metadata och ändringar. Kontrollera mappningen i förhandsgranskningen innan något sparas.": "The destination must allow metadata and modifications. Check the mapping in the preview before anything is saved.",
+  "Visa ett ofarligt CSV-exempel": "Show a harmless CSV example"
 }

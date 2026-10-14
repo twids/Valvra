@@ -159,20 +159,27 @@
     }
     let clearActive = () => {}, transitioning = false, activeSession = 0;
     function clear(reason = "close") { if (!transitioning) { clearActive(); if (reason !== "blur") { clearActive = () => {}; activeSession++; } } }
-    function open(ctx) {
+    function open(ctx, safeDraft = {}) {
         const {state, api, node, button, field, select, hint, table, dialog, notice, load, t} = ctx;
         if (!state.session.isAccessAdministrator) { notice(t("Import kräver behörighetsadministration."), true); return; }
+        if(!state.resources.some(x=>(x.permissions&5)===5)&&!state.groups.some(x=>x.canManage&&(x.permissions&5)===5)){
+            const body=dialog(t("Importera lösenord"));hint(body,t("Välj först en destination där du har metadata- och ändringsrätt. Skapa en resurs eller be en resursägare tilldela åtkomst innan du väljer fil."));
+            const link=node("a",t("Resurser"),"button");link.href="/resources";body.append(link);return;
+        }
         const session = ++activeSession;
-        let csv, rows = [], preview, stopped = false, busy = false, step = 0;
+        let csv, rows = [], preview, stopped = false, busy = false, step = 0, mappingDraft={...safeDraft};
         const wipe = () => {
             stopped = true;
             csv?.rows.forEach(row => row.fill("")); csv = null;
             rows.forEach(row => { row.payload.username = row.payload.password = row.payload.notes = ""; }); rows = [];
             preview?.entries.forEach(row => { row.payload.username = row.payload.password = row.payload.notes = ""; });
+            // Retain only destination IDs and user-entered configuration after clearing a file.
+            delete mappingDraft.columns;delete mappingDraft.overrides;
             if (session === activeSession && document.getElementById("dialog").open && step) {
                 document.getElementById("dialog-content").dataset.importCleared = "true";
                 document.getElementById("dialog-error").textContent = t(busy ? "Importdata har tömts. Pågående batch kan slutföras. Kontrollera destinationen före ett nytt försök." : "Importdata har tömts. Välj filen igen.");
                 document.querySelectorAll("#dialog-actions button[type=submit]").forEach(x => x.disabled = true);
+                if(!busy&&!document.getElementById("import-reselect")){const reselect=button(t("Välj filen igen"),()=>open(ctx,mappingDraft));reselect.id="import-reselect";document.getElementById("dialog-content").append(reselect);}
             }
         };
         function show(title, label, submit) {
@@ -187,9 +194,10 @@
             return names.join(" / ");
         };
         function mappingStep() {
-            step = 1; let mapping = {}, base, target, fallback, mode, overrides = {};
+            step = 1; let mapping = {}, base, target, fallback, mode, overrides = {...mappingDraft.overrides};
             const body = show("Import · Mappa kolumner", "Förhandsgranska", async () => {
                 if (stopped || !csv) throw new Error(String(t("Importdata har tömts. Välj filen igen.")));
+                remember();
                 try {
                     const selected = Object.fromEntries(Object.entries(mapping).map(([name, input]) => [name, Number(input.value)]));
                     if (mode.value === "resource") selected.path = selected.subgroup = selected.resource = -1;
@@ -216,36 +224,40 @@
             hint(body, t("Gruppsökväg: IT/Servrar eller separata kolumner för grupp och undergrupp. Högst två nivåer."));
             const suggested = suggest(csv.headers), columns = [["-1", t("Ingen kolumn")], ...csv.headers.map((header, index) => [String(index), header])];
             const labels = {title: "Titel", username: "Användarnamn", password: "Lösenord", notes: "Anteckningar", url: "URL", path: "Gruppsökväg", subgroup: "Undergrupp", resource: "Resurskolumn"};
-            for (const [name, label] of Object.entries(labels)) mapping[name] = select(body, t(label), columns, String(suggested[name]));
-            mode = select(body, t("Destination"), [["tree", t("Mappa gruppstruktur")], ["resource", t("En befintlig resurs")]], state.resource || !state.groups.some(x => x.canManage && (x.permissions & 5) === 5) ? "resource" : "tree");
+            for (const [name, label] of Object.entries(labels)) mapping[name] = select(body, t(label), columns, mappingDraft.columns?.[name]??String(suggested[name]));
+            mode = select(body, t("Destination"), [["tree", t("Mappa gruppstruktur")], ["resource", t("En befintlig resurs")]], mappingDraft.mode || (state.resource || !state.groups.some(x => x.canManage && (x.permissions & 5) === 5) ? "resource" : "tree"));
             const tree = node("div"), single = node("div"); body.append(tree, single);
-            base = select(tree, t("Basgrupp"), [["", t("Välj grupp")], ...state.groups.map(x => [x.id, groupLabel(x)])], state.group?.id);
-            fallback = field(tree, t("Resursnamn när kolumn saknas"), "text", "Import", true); fallback.maxLength = 200;
-            target = select(single, t("Resurs"), [["", t("Välj resurs")], ...state.resources.filter(x => (x.permissions & 5) === 5).map(x => [x.id, groupLabel(state.groups.find(g => g.id === x.groupId) || {name: ""}) + " / " + x.name])], state.resource?.id);
+            base = select(tree, t("Basgrupp"), [["", t("Välj grupp")], ...state.groups.map(x => [x.id, groupLabel(x)])], mappingDraft.base??state.group?.id);
+            fallback = field(tree, t("Resursnamn när kolumn saknas"), "text", mappingDraft.fallback??"Import", true); fallback.maxLength = 200;
+            target = select(single, t("Resurs"), [["", t("Välj resurs")], ...state.resources.filter(x => (x.permissions & 5) === 5).map(x => [x.id, groupLabel(state.groups.find(g => g.id === x.groupId) || {name: ""}) + " / " + x.name])], mappingDraft.target??state.resource?.id);
             const paths = node("div"); tree.append(paths);
+            function remember(){mappingDraft={columns:Object.fromEntries(Object.entries(mapping).map(([name,input])=>[name,input.value])),mode:mode.value,base:base.value,target:target.value,fallback:fallback.value,overrides:{...overrides}};}
             const update = () => {
                 tree.hidden = mode.value !== "tree"; single.hidden = mode.value !== "resource"; fallback.required = !tree.hidden;
-                paths.replaceChildren(); overrides = {};
-                if (tree.hidden) return;
+                paths.replaceChildren(); const previous=overrides;overrides = {};
+                if (tree.hidden) {remember();return;}
                 try {
                     const selected = Object.fromEntries(Object.entries(mapping).map(([name, input]) => [name, Number(input.value)]));
                     const mapped = mapRows(csv, selected, fallback.value || "Import");
                     for (const path of new Map(mapped.map(row => [JSON.stringify(row.path), row.path])).values()) {
                         const pathKey = JSON.stringify(path);
-                        const picker = select(paths, path.join(" / ") || t("Utan grupp i filen"), [["", t("Återskapa under basgruppen")], ...state.groups.map(x => [x.id, groupLabel(x)])]);
-                        picker.addEventListener("change", () => { overrides[pathKey] = picker.value; });
+                        const picker = select(paths, path.join(" / ") || t("Utan grupp i filen"), [["", t("Återskapa under basgruppen")], ...state.groups.map(x => [x.id, groupLabel(x)])],previous[pathKey]||"");
+                        overrides[pathKey]=picker.value;
+                        picker.addEventListener("change", () => { overrides[pathKey] = picker.value;remember(); });
                     }
-                } catch { /* The submit action reports validation without exposing source values. */ }
+                } catch { overrides=previous; /* Keep choices until a valid mapping establishes which paths remain. */ }
+                remember();
             };
-            Object.values(mapping).forEach(input => input.addEventListener("change", update)); mode.addEventListener("change", update); update();
+            Object.values(mapping).forEach(input => input.addEventListener("change", update)); mode.addEventListener("change", update);base.addEventListener("change",remember);target.addEventListener("change",remember);fallback.addEventListener("input",update);update();
             hint(body, t("Nya objekt ärver destinationens behörigheter. Importen tilldelar aldrig nya rättigheter."));
         }
         function previewStep() {
             step = 2;
+            let back;
             const body = show("Import · Förhandsgranskning", "Starta import", async () => {
                 if (busy) return false;
                 if (stopped) throw new Error(String(t("Importdata har tömts. Välj filen igen.")));
-                busy = true;
+                busy = true;back.disabled=true;
                 const status = node("p", t("Import pågår…")); status.setAttribute("role", "status"); body.append(status);
                 body.append(button(t("Avbryt import"), () => { stopped = true; }));
                 const report = await execute(preview, api, () => stopped || session !== activeSession, current => { if (session === activeSession) status.textContent = current.waiting ? t("Importen väntar på tjänstens anropsgräns. Avbryt stoppar nästa batch.") : t("Sparade: {created}. Överhoppade: {skipped}.", current); });
@@ -269,6 +281,8 @@
                 }
                 return false;
             });
+            // Ordinary Back keeps the in-memory file; closing/blur still invokes wipe.
+            back=button(t("← Tillbaka"),()=>{if(busy||stopped||!csv)throw new Error(String(t("Importdata har tömts. Välj filen igen.")));mappingStep();});body.append(back);
             hint(body, t("{count} poster. {groups} nya grupper och {resources} nya resurser.", {count: preview.entries.length, groups: preview.groups.length, resources: preview.resources.length}));
             hint(body, t("Befintliga titlar i samma resurs hoppas över. Inga lösenord skrivs över. Varje ändring auditeras separat."));
             hint(body, t("Avbrott stoppar efter pågående anrop. Redan sparade objekt tas inte bort."));
@@ -293,6 +307,8 @@
             } catch (error) { throw translateError(error instanceof TypeError ? new Error("Filen måste vara UTF-8-kodad.") : error); }
             return false;
         });
+        hint(body,t("Destinationen måste tillåta metadata och ändringar. Kontrollera mappningen i förhandsgranskningen innan något sparas."));
+        const sample=node("details");sample.append(node("summary",t("Visa ett ofarligt CSV-exempel")),node("pre","title,password,username\nExample account,EXAMPLE-ONLY,example-user"));body.append(sample);
         let readEpoch = 0;
         const file = field(body, t("CSV-fil"), "file", "", true); file.accept = ".csv,.tsv,text/csv,text/tab-separated-values";
         const separator = select(body, t("Avgränsare"), [["auto", t("Identifiera automatiskt")], [",", t("Komma")], [";", t("Semikolon")], ["\t", t("Tabb")]]);
