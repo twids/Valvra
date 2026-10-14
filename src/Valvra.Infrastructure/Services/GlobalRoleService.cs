@@ -186,7 +186,8 @@ public sealed class GlobalRoleService(VaultDbContext db, VaultIntegrity integrit
         {
             var fresh=await ApplyAsync(actor,token);
             await RequireAsync(fresh,GlobalRole.AccessAdministrator,token);
-            if(!fresh.IsGlobalAdministrator)await new AccessService(db,clock).RequireAsync(fresh,row.TargetKind,row.TargetId,VaultPermission.ManageAccess,token);
+            var selfRestoration=fresh.IsGlobalAdministrator&&row.Provider==fresh.Provider&&row.SubjectId==fresh.SubjectId;
+            if(!selfRestoration)await new AccessService(db,clock).RequireAsync(fresh,row.TargetKind,row.TargetId,VaultPermission.ManageAccess,token);
             if(row.Revision!=revision)throw new VaultConflictException("Posten har ändrats. Ladda om före nytt försök.");
             db.Exclusions.Remove(row);return true;
         },ct,System.Text.Json.JsonSerializer.Serialize(new{row.Id,row.Provider,row.SubjectId,row.TargetKind,row.TargetId,row.Revision}));

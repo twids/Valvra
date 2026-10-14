@@ -11,6 +11,26 @@ namespace Valvra.Tests;
 public sealed class GlobalContentRolesTests
 {
     [Fact]
+    public async Task ExcludedGlobalAdministratorCanRestoreOnlyOwnExclusionUntilTargetAccessIsRestored()
+    {
+        await using var f=await VaultServiceTests.Fixture.CreateAsync();
+        var globals=new GlobalRoleService(f.Db,f.Integrity,f.Audit,new FakeDirectory(),f.Clock);
+        await globals.BootstrapAsync(f.User,"setup",default);
+        await globals.SetAsync(f.User,"ad","admin",SubjectKind.User,GlobalRole.GlobalAdministrator,0,"assign",default);
+        var admin=await globals.ApplyAsync(f.User with{SubjectId="admin"},default);
+        var own=await globals.ExcludeAsync(f.User,TargetKind.Group,f.GroupId,"ad","admin","exclude-own",default);
+        var other=await globals.ExcludeAsync(f.User,TargetKind.Group,f.GroupId,"ad","reader","exclude-other",default);
+        await Assert.ThrowsAsync<AccessDeniedException>(()=>globals.RestoreAccessAsync(admin,other,1,"denied",default));
+        Assert.Equal(2,await f.Db.Exclusions.AsNoTracking().CountAsync());
+        Assert.DoesNotContain(f.Transport.Events,x=>x.Action=="Access.Restore"&&x.Phase==AuditPhase.Committed);
+        await globals.RestoreAccessAsync(admin,own,1,"restore-own",default);
+        Assert.Equal(other,(await f.Db.Exclusions.AsNoTracking().SingleAsync()).Id);
+        await globals.RestoreAccessAsync(admin,other,1,"restore-other",default);
+        Assert.Empty(await f.Db.Exclusions.AsNoTracking().ToListAsync());
+        Assert.Equal(2,f.Transport.Events.Count(x=>x.Action=="Access.Restore"&&x.Phase==AuditPhase.Committed));
+    }
+
+    [Fact]
     public async Task LicenseVersionRestorationCombinesLicenseAdministrationWithSeparatelyGrantedRead()
     {
         await using var f=await VaultServiceTests.Fixture.CreateAsync();
