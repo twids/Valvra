@@ -9,6 +9,18 @@ management and transitive pinning apply reviewed versions consistently across th
 application, migrations and tests. `package-lock.json` locks npm dependencies;
 GitHub Actions are pinned to release commit hashes.
 
+## Security servicing on 2026-10-14
+
+`Microsoft.AspNetCore.Authentication.Negotiate` and `System.Security.Cryptography.Pkcs`
+are pinned to stable 10.0.13. `System.DirectoryServices.Protocols` also moves to
+10.0.13 to satisfy Negotiate's dependency. NuGet auditing remains enabled with
+warnings treated as errors. The previous 10.0.12 versions are affected by
+[CVE-2026-70179](https://github.com/advisories/GHSA-vrrp-6v32-2p8g),
+[CVE-2026-84008](https://github.com/advisories/GHSA-846f-f764-76mx) and
+[CVE-2026-70162](https://github.com/advisories/GHSA-2fmv-rv2c-59x7).
+Rebuild self-contained packages with the corrected runtime; framework-dependent
+IIS installations also need the current stable .NET 10 Hosting Bundle/runtime.
+
 ## Version 1.2.1 baseline
 
 Checked against NuGet, npm and official GitHub Action releases on 2026-10-12:
