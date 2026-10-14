@@ -439,9 +439,13 @@
         heading(resource.name,capabilities.join(" "), actions);
         appendImportAction();
         groupBreadcrumb(resource.groupId, resource.name);
-        if (!has(1)) { empty($("content"), t("Du administrerar åtkomsten"), t("Tilldela metadata-, läs- eller ändringsrätt för att använda resursens innehåll.")); return; }
-        const [secrets, licenses] = await Promise.all([api(`/resources/${resource.id}/secrets`), api(`/resources/${resource.id}/licenses`)]);
+        const canAdd=has(1)&&has(4),helpId="resource-content-access";
+        const addAction=(label,action)=>{const add=button(t(label),action,"primary");if(!canAdd){add.disabled=true;add.setAttribute("aria-describedby",helpId);}return add;};
+        if(!canAdd){const explanation=node("p",t("För att lägga till lösenord eller licenser krävs både Metadata och Ändra på resursen. Administratörsrollen ger inte innehållsåtkomst automatiskt."),"hint");explanation.id=helpId;$("content").append(explanation);}
+        if (!has(1)) { empty($("content"), t("Du administrerar åtkomsten"), t("Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp."));panel($("content"),t("Lösenord"),[addAction("+ Lägg till lösenord",()=>secretDialog())]);panel($("content"),t("Licenser"),[addAction("+ Lägg till licens",()=>licenseDialog())]);return; }
+        const [secretRead,licenseRead]=await Promise.allSettled([api(`/resources/${resource.id}/secrets`),api(`/resources/${resource.id}/licenses`)]);
         if (epoch !== renderEpoch) return;
+        const secrets=secretRead.status==="fulfilled"?secretRead.value:[],licenses=licenseRead.status==="fulfilled"?licenseRead.value:[];
         const controls=node("div",undefined,"toolbar"),search=field(controls,t("Sök i resursen"),"search",state.contentFilters[resource.id]||"");
         search.maxLength=200;hint(controls,t("Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig."));
         const count=node("p",undefined,"hint");count.setAttribute("role","status");controls.append(count);
@@ -449,8 +453,9 @@
         const paint=()=>{
         const query=search.value.trim().toLocaleLowerCase(i18n.locale),visibleSecrets=secrets.filter(x=>x.title.toLocaleLowerCase(i18n.locale).includes(query)),visibleLicenses=licenses.filter(x=>x.product.toLocaleLowerCase(i18n.locale).includes(query));
         state.contentFilters[resource.id]=search.value;records.replaceChildren();count.textContent=t("{shown} av {total} poster visas.",{shown:visibleSecrets.length+visibleLicenses.length,total:secrets.length+licenses.length});
-        const passwords = panel(records, t("Lösenord"), has(4) ? [button(t("+ Lägg till lösenord"), () => secretDialog(), "primary")] : []);
-        if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t(has(4)?"Lägg till ett konto som hör till den här resursen.":"Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem."));
+        const passwords = panel(records, t("Lösenord"), [addAction("+ Lägg till lösenord",()=>secretDialog())]);
+        if(secretRead.status==="rejected"){hint(passwords,secretRead.reason.message);passwords.append(button(t("Försök igen"),()=>render()));}
+        else if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t(has(4)?"Lägg till ett konto som hör till den här resursen.":"Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem."));
         else if(!visibleSecrets.length)hint(passwords,t("Inga kontotitlar matchar sökningen."));
         else table(passwords, [t("Konto"), "Version", t("Åtgärder")], visibleSecrets.map(secret => {
             const actions = node("div", undefined, "actions");
@@ -463,8 +468,10 @@
             actions.append(actionMenu(t("Fler åtgärder"),secondary,secret.title));
             return [secret.title, String(secret.currentVersion), actions];
         })).classList.add("mobile-records");
-        const licensePanel = panel(records, t("Licenser"), has(4) ? [button(t("+ Lägg till licens"), () => licenseDialog(), "primary")] : []);
-        if(licenses.length&&!visibleLicenses.length)hint(licensePanel,t("Inga produktnamn matchar sökningen."));else licenseTable(licensePanel, visibleLicenses, true);
+        const licensePanel = panel(records, t("Licenser"), [addAction("+ Lägg till licens",()=>licenseDialog())]);
+        if(licenseRead.status==="rejected"){hint(licensePanel,licenseRead.reason.message);licensePanel.append(button(t("Försök igen"),()=>render()));}
+        else if(licenses.length&&!visibleLicenses.length)hint(licensePanel,t("Inga produktnamn matchar sökningen."));else licenseTable(licensePanel, visibleLicenses, true);
+        if(secretRead.status==="rejected"||licenseRead.status==="rejected")count.textContent=t("Översikten är ofullständig. Ett innehållsavsnitt kunde inte läsas.");
         };
         controls.append(button(t("Rensa filter"),()=>{search.value="";paint();search.focus();}));search.addEventListener("input",paint);paint();
     }
@@ -556,7 +563,7 @@
                 const confirmation = dialog(t("Återställ tidigare version"), t("Återställ"), async () => { await api(`/secrets/${secret.id}/restore`, { version: version.version, revision: secret.revision }); await render(); },{back:()=>historyDialog(secret)});
                 confirmation.append(node("p", t("Version {version} blir en ny aktuell version. Återställningen auditeras.", {version: version.version})));
             }));
-            return [String(version.version), date(version.createdAt), version.createdBy, actions];
+            return [String(version.version), date(version.createdAt), versionCreator(version), actions];
         }));
     }
     function ldapTest(secret) {
@@ -625,13 +632,15 @@
         if (feedback) { const result = node("p", feedback, "notice"); result.setAttribute("role", "status"); body.append(result); }
         hint(body, t("Tilldelningar summeras. Ärvd åtkomst ändras på den överordnade gruppen. Ägare och behörighetsadministratörer kan tilldela sig själva läsrätt."));
         hint(body, t("Din effektiva innehållsåtkomst just nu: {rights}.", {rights:rights(access.effectivePermissions || 0) || t("Ingen") }));
+        hint(body,t("Inloggad identitet: {name} · {provider} · {id}.",{name:state.session.displayName,provider:state.session.provider,id:state.session.subjectId}));
         const actions = node("div", undefined, "actions"); actions.append(button(t("+ Tilldela åtkomst"), () => grantDialog(kind, target)), button(t("+ Lägg till ägare"), () => ownerDialog(kind, target))); body.append(actions);
         body.append(node("h3", t("Tilldelad åtkomst")));
         if (!access.grants.length) hint(body, t("Inga direkta eller ärvda tilldelningar. Ägare och globala administratörer kan fortfarande hantera åtkomst."));
         else table(body, [t("Identitet"), t("Rättigheter"), t("Giltighet"), t("Källa"), ""], access.grants.map(grant => {
             const direct = grant.targetKind === kind && grant.targetId === target.id;
-            return [identityLabel(access, grant), rights(grant.permissions), grant.expiresAt ? `${date(grant.startsAt)} – ${date(grant.expiresAt)}` : t("Tills vidare"), accessSource(grant, kind, target),
-                direct ? button(t("Återkalla"), () => confirmAccessRemoval("grants", grant, access, kind, target)) : node("span", t("Ändras i källgruppen"), "hint")];
+            const controls=node("div",undefined,"actions");if(direct)controls.append(button(t("Ändra åtkomst"),()=>grantDialog(kind,target,grant,access)),button(t("Återkalla"),()=>confirmAccessRemoval("grants",grant,access,kind,target)));
+            else controls.append(node("span",t("Ändras i källgruppen"),"hint"));
+            return [identityLabel(access, grant), rights(grant.permissions), grant.expiresAt ? `${date(grant.startsAt)} – ${date(grant.expiresAt)}` : t("Tills vidare"), accessSource(grant, kind, target),controls];
         }));
         body.append(node("h3", t("Resursägare")));
         if (!access.owners.length) hint(body, t("Inga resursägare är tilldelade."));
@@ -647,37 +656,45 @@
         hint(body, t("Endast denna direkta tilldelning tas bort. Andra tilldelningar och gruppmedlemskap kan fortfarande ge åtkomst."));
         if (kind === 0) hint(body, t("Ändringen gäller även resurser och undergrupper som ärver denna tilldelning."));
     }
-    function grantDialog(kind, target) {
-        let pick, temporary, start, expiry; const checks = [];
-        const body = dialog(t("Tilldela åtkomst · ") + target.name, t("Tilldela"), async () => {
+    function grantDialog(kind, target, existing, access) {
+        let pick, temporary, start, expiry,metadata; const checks = [];
+        const body = dialog(t(existing?"Ändra åtkomst · ":"Tilldela åtkomst · ") + target.name, t(existing?"Spara":"Tilldela"), async () => {
             const subject = pick(); const temp = temporary.value === "temporary";
-            if (temp && (!start.value || !expiry.value || new Date(expiry.value) <= new Date(start.value))) throw new Error(t("Till måste vara efter Från."));
-            const permissions = temp ? 3 : checks.filter(x => x.input.checked).reduce((value, x) => value | x.bit, 1);
-            await api("/grants", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id,
-                permissions, startsAt: temp ? new Date(start.value).toISOString() : null, expiresAt: temp ? new Date(expiry.value).toISOString() : null }); await load();
+            const permissions = temp ? 3 : checks.filter(x => x.input.checked).reduce((value, x) => value | x.bit,existing?(metadata.checked?1:0):1);
+            const startsAt=temporary.value!=="permanent"?(existing?.startsAt&&start.value===initialStart?existing.startsAt:new Date(start.value).toISOString()):null;
+            const expiresAt=temp?(existing&&expiry.value===initialExpiry?existing.expiresAt:new Date(expiry.value).toISOString()):null;
+            if(temp&&(!start.value||!expiry.value||new Date(expiresAt)<=new Date(startsAt)))throw new Error(t("Till måste vara efter Från."));
+            await api(existing?`/grants/${existing.id}/update`:"/grants",existing?{permissions,startsAt,expiresAt,revision:existing.revision}:{ targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id,
+                permissions, startsAt, expiresAt }); await load();
         }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
-        pick = directoryPicker(body,{changed:()=>summary()});
-        temporary = select(body, t("Giltighet"), [["permanent", t("Tills vidare")], ["temporary", t("Tillfällig läsrätt – endast användare")]]);
-        const preset=select(body,t("Åtkomstuppgift"),[["1",t("Endast se listan")],["3",t("Läsa och kopiera")],["7",t("Läsa och ändra")],["custom",t("Anpassade rättigheter")]],"1");
+        if(existing){body.append(identityLabel(access,existing));const resolved=access.subjects?.find(x=>x.id===existing.subjectId&&x.provider===existing.provider&&x.kind===existing.subjectKind);const subject={id:existing.subjectId,provider:existing.provider,kind:existing.subjectKind,name:resolved?.name||existing.subjectId,samAccountName:resolved?.samAccountName};pick=()=>subject;pick.selected=pick;pick.onlyUsers=()=>{};}
+        else pick = directoryPicker(body,{changed:()=>summary()});
+        temporary = select(body, t("Giltighet"), [["permanent", t("Tills vidare")],...(existing?.startsAt&&!existing.expiresAt?[["scheduled",t("Från ett startdatum, utan slutdatum")]]:[]),...(!existing||existing.subjectKind===0?[["temporary", t("Tillfällig läsrätt – endast användare")]]:[])],existing?.expiresAt?"temporary":existing?.startsAt?"scheduled":"permanent");
+        const preset=select(body,t("Åtkomstuppgift"),[["1",t("Endast se listan")],["3",t("Läsa och kopiera")],["7",t("Läsa och ändra")],["custom",t("Anpassade rättigheter")]],existing?"custom":"1");
         const permissions = node("fieldset"); permissions.append(node("legend", t("Rättigheter"))); body.append(permissions);
-        hint(permissions, t("Metadataåtkomst ingår alltid. Välj inga ytterligare rättigheter för endast metadata."));
-        [[2, t("Läsa hemligheter")], [4, t("Ändra innehåll")], [8, t("Hantera behörigheter")], [16, t("Testa mot LDAP")]].forEach(([bit, label]) => { const row = node("div", undefined, "check-row"); const input = field(row, label, "checkbox"); input.value = "on"; checks.push({ bit, input }); permissions.append(row); });
-        const times = node("div", undefined, "field-row"); const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-        start = field(times, t("Från"), "datetime-local", localDate(new Date())); expiry = field(times, t("Till"), "datetime-local", localDate(new Date(Date.now() + 3600000))); body.append(times); times.hidden = true;
+        if(existing){metadata=field(permissions,t("Visa innehållslistor (Metadata)"),"checkbox");metadata.checked=!!(existing.permissions&1);}
+        else hint(permissions, t("Metadataåtkomst ingår alltid. Välj inga ytterligare rättigheter för endast metadata."));
+        [[2, t("Läsa hemligheter")], [4, t("Ändra innehåll")], [8, t("Hantera behörigheter")], [16, t("Testa mot LDAP")]].forEach(([bit, label]) => { const row = node("div", undefined, "check-row"); const input = field(row, label, "checkbox"); input.value = "on";input.checked=!!(existing?.permissions&bit); checks.push({ bit, input }); permissions.append(row); });
+        const times = node("div", undefined, "field-row"); const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+        const initialStart=localDate(existing?.startsAt?new Date(existing.startsAt):new Date()),initialExpiry=localDate(existing?.expiresAt?new Date(existing.expiresAt):new Date(Date.now()+3600000));
+        start = field(times, t("Från"), "datetime-local", initialStart); expiry = field(times, t("Till"), "datetime-local", initialExpiry); body.append(times); times.hidden = !existing?.expiresAt;
         const review=node("section",undefined,"panel");review.setAttribute("aria-label",t("Kontrollera tilldelningen"));review.append(node("h3",t("Kontrollera tilldelningen")));const reviewText=node("p");reviewText.setAttribute("role","status");review.append(reviewText);body.append(review);
         if(kind===0)hint(review,t("Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser."));
         function summary(){
             if(!pick||!temporary||!start||!expiry)return;
-            const subject=pick.selected(),bits=temporary.value==="temporary"?3:checks.filter(x=>x.input.checked).reduce((value,x)=>value|x.bit,1);
+            const subject=pick.selected(),bits=temporary.value==="temporary"?3:checks.filter(x=>x.input.checked).reduce((value,x)=>value|x.bit,existing?(metadata.checked?1:0):1);
             const path=groupPath(kind===0?target.id:target.groupId).map(x=>x.name).concat(kind===1?[target.name]:[]).join(" / ");
-            reviewText.textContent=(subject?subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")+" · "+subject.provider+" · "+subject.id:t("Sök och välj en användare eller grupp först."))+" — "+path+" — "+rights(bits)+" — "+(temporary.value==="temporary"?date(start.value)+" – "+date(expiry.value):t("Tills vidare"));
+            reviewText.textContent=(subject?subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")+" · "+subject.provider+" · "+subject.id:t("Sök och välj en användare eller grupp först."))+" — "+path+" — "+rights(bits)+" — "+(temporary.value==="temporary"?date(start.value)+" – "+date(expiry.value):temporary.value==="scheduled"?date(start.value)+" – "+t("Tills vidare"):t("Tills vidare"));
         }
         const refreshRights=()=>{permissions.hidden=preset.value!=="custom";summary();};
-        preset.addEventListener("change",()=>{if(preset.value!=="custom")checks.forEach(x=>x.input.checked=!!(Number(preset.value)&x.bit));refreshRights();});
+        preset.addEventListener("change",()=>{if(preset.value!=="custom"){if(metadata)metadata.checked=true;checks.forEach(x=>x.input.checked=!!(Number(preset.value)&x.bit));}refreshRights();});
         checks.forEach(x=>x.input.addEventListener("change",summary));start.addEventListener("input",summary);expiry.addEventListener("input",summary);
-        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; pick.onlyUsers(temp); times.hidden = !temp; start.required = expiry.required = temp;preset.disabled=temp;if(temp)preset.value="3"; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; });refreshRights(); });
+        const interval=()=>{const temp=temporary.value==="temporary";times.hidden=temporary.value==="permanent";start.required=!times.hidden;start.disabled=times.hidden;expiry.required=temp;expiry.disabled=!temp;expiry.hidden=!temp;expiry.labels[0].hidden=!temp;start.step=expiry.step="1";};
+        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; pick.onlyUsers(temp);interval();preset.disabled=temp;if(temp)preset.value="3";if(metadata){metadata.disabled=temp;if(temp)metadata.checked=true;} checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; });refreshRights(); });
+        if(metadata)metadata.addEventListener("change",summary);interval();
+        if(existing?.expiresAt){preset.disabled=true;if(metadata)metadata.disabled=true;checks.forEach(x=>x.input.disabled=true);}
         refreshRights();
-        hint(body, t("Metadataåtkomst ingår. Vid tillfällig rätt är Från och Till obligatoriska. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."));
+        hint(body, t(existing?"Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.":"Metadataåtkomst ingår. Vid tillfällig rätt är Från och Till obligatoriska. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."));
     }
     function ownerDialog(kind, target) {
         let pick; const body = dialog(t("Lägg till ägare · ") + target.name, t("Lägg till ägare"), async () => { const subject = pick(); await api("/owners", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id }); await load(); }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
@@ -810,6 +827,7 @@
         const notes = field(body, t("Anteckningar"), "textarea", payload.notes); notes.readOnly = true;
         hint(body, t("Visningen är auditerad. Fälten töms efter 30 sekunder eller när sidan tappar fokus."));revealCountdown(body);
     }
+    function versionCreator(version){const label=node('div');label.append(node('strong',(version.createdByName||version.createdBy)+(version.samAccountName?' · '+version.samAccountName:'')));if(version.createdByName){const details=node('details');details.append(node('summary',t('Registrerad identitet')),node('p',version.createdBy,'audit-id'));label.append(details);}return label;}
     async function licenseHistory(license, resource) {
         const loaded=await metadataDialog(t("Versionshistorik · ")+license.product,()=>api(`/licenses/${license.id}/versions`),()=>licenseHistory(license,resource));if(!loaded)return;
         const {body,value:versions}=loaded;
@@ -820,7 +838,7 @@
                 const confirmation = dialog(t("Återställ licensversion"), t("Återställ"), async () => { await api(`/licenses/${license.id}/restore`, { version: version.version, revision: license.revision }); await render(); },{back:()=>licenseHistory(license,resource)});
                 hint(confirmation, t("Version {version} sparas som en ny version. Nuvarande metadata behålls.", {version: version.version}));
             }));
-            return [String(version.version), date(version.createdAt), version.createdBy, actions];
+            return [String(version.version), date(version.createdAt), versionCreator(version), actions];
         }));
     }
     async function assignmentDialog(license, resource,feedback) {
@@ -946,7 +964,7 @@
         const previous=button(t("← Föregående"),()=>paint({...applied,offset:Math.max(0,applied.offset-200)})),next=button(t("Nästa →"),()=>paint({...applied,offset:applied.offset+200}));
         const paging = node("div", undefined, "actions");paging.append(previous,next);$("content").append(paging);await paint(applied);
     }
-    function auditActionLabel(code){const labels={"Group.Delete":"Ta bort resursgrupp","Resource.Delete":"Ta bort resurs","Owner.Add":"Lägg till ägare","Owner.Remove":"Ta bort ägare","GlobalRoles.Update":"Ändra globala roller","Secret.Undelete":"Återställ borttaget lösenord","License.Delete":"Ta bort licens","License.Undelete":"Återställ borttagen licens","Group.Create":"Skapa resursgrupp","Group.Rename":"Byt namn på resursgrupp","Group.Move":"Flytta resursgrupp","Resource.Create":"Skapa resurs","Resource.Rename":"Byt namn på resurs","Resource.Move":"Flytta resurs","Session.Identified":"Verifiera inloggning","Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code]):code;}
+    function auditActionLabel(code){const labels={"Access.Update":"Ändra åtkomst","Group.Delete":"Ta bort resursgrupp","Resource.Delete":"Ta bort resurs","Owner.Add":"Lägg till ägare","Owner.Remove":"Ta bort ägare","GlobalRoles.Update":"Ändra globala roller","Secret.Undelete":"Återställ borttaget lösenord","License.Delete":"Ta bort licens","License.Undelete":"Återställ borttagen licens","Group.Create":"Skapa resursgrupp","Group.Rename":"Byt namn på resursgrupp","Group.Move":"Flytta resursgrupp","Resource.Create":"Skapa resurs","Resource.Rename":"Byt namn på resurs","Resource.Move":"Flytta resurs","Session.Identified":"Verifiera inloggning","Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code]):code;}
     document.querySelectorAll("[data-view],.brand").forEach(bindRouteLink);
     window.addEventListener("resize",()=>closeActionMenu?.());
     // Scrolling a menu trigger into view can dispatch a delayed scroll after it

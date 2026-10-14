@@ -57,6 +57,10 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
     public Task RevokeAsync(Actor actor, Guid grantId, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.RevokeAsync(actor, grantId, correlation, ct), ct);
 
+    public Task UpdateGrantAsync(Actor actor, Guid grantId, VaultPermission permissions, DateTimeOffset? startsAt,
+        DateTimeOffset? expiresAt, long revision, string correlation, CancellationToken ct) =>
+        integrity.RunAsync(() => operations.UpdateGrantAsync(actor, grantId, permissions, startsAt, expiresAt, revision, correlation, ct), ct);
+
     public Task<Guid> AddOwnerAsync(Actor actor, ResourceOwner owner, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.AddOwnerAsync(actor, owner, correlation, ct), ct);
 

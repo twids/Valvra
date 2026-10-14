@@ -796,5 +796,15 @@
   "Ta bort resursgrupp": "Delete resource group",
   "Ändra globala roller": "Change global roles",
   "Återställ borttaget lösenord": "Restore deleted password",
-  "Återställ borttagen licens": "Restore deleted license"
+  "Återställ borttagen licens": "Restore deleted license",
+  "Ändra åtkomst": "Edit access",
+  "Ändra åtkomst · ": "Edit access · ",
+  "Registrerad identitet": "Recorded identity",
+  "Översikten är ofullständig. Ett innehållsavsnitt kunde inte läsas.": "This overview is incomplete. A content section could not be loaded.",
+  "Inloggad identitet: {name} · {provider} · {id}.": "Signed-in identity: {name} · {provider} · {id}.",
+  "För att lägga till lösenord eller licenser krävs både Metadata och Ändra på resursen. Administratörsrollen ger inte innehållsåtkomst automatiskt.": "Adding passwords or licenses requires both Metadata and Modify on this resource. An administrator role does not grant content access automatically.",
+  "Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp.": "Open Permissions to grant content access on the resource or its parent group.",
+  "Från ett startdatum, utan slutdatum": "From a start date, without an end date",
+  "Visa innehållslistor (Metadata)": "Browse content lists (Metadata)",
+  "Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.": "Existing permissions are preserved until you change them. Temporary access stops future releases but cannot revoke a password already copied."
 }

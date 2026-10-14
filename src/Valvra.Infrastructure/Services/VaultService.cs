@@ -12,7 +12,7 @@ namespace Valvra.Infrastructure.Services;
 public sealed record GroupView(Guid Id, Guid? ParentId, string Name, long Revision, bool CanManage, VaultPermission Permissions);
 public sealed record ResourceView(Guid Id, Guid GroupId, string Name, long Revision, VaultPermission Permissions, bool CanManage);
 public sealed record SecretView(Guid Id, string Title, int CurrentVersion, long Revision, string? LdapProfileId);
-public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, string CreatedBy);
+public sealed record SecretVersionView(int Version, DateTimeOffset CreatedAt, string CreatedBy, string? CreatedByName = null, string? SamAccountName = null);
 public sealed record LicenseView(Guid Id, Guid ResourceId, string Product, string Vendor, string PurchaseReference,
     int Seats, int AssignedSeats, DateTimeOffset? ExpiresAt, long Revision, int CurrentVersion);
 public sealed record LicenseAssignmentView(Guid Id,Guid LicenseId,string? UserProvider,string? UserId,Guid? ResourceId,int Seats,DateTimeOffset CreatedAt,string? UserName=null,string? SamAccountName=null);
@@ -175,8 +175,28 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     {
         var entry = await EntryAsync(id, ct);
         await access.RequireAsync(actor, TargetKind.Resource, entry.ResourceId, VaultPermission.Metadata, ct);
-        return await db.SecretVersions.AsNoTracking().Where(x => x.EntryId == id).OrderByDescending(x => x.Version)
-            .Select(x => new SecretVersionView(x.Version, x.CreatedAt, x.CreatedBy)).ToListAsync(ct);
+        var versions = await db.SecretVersions.AsNoTracking().Where(x => x.EntryId == id).OrderByDescending(x => x.Version)
+            .Select(x => new SecretVersionView(x.Version, x.CreatedAt, x.CreatedBy, null, null)).ToListAsync(ct);
+        return await VersionNamesAsync(versions,ct);
+    }
+
+    private async Task<IReadOnlyList<SecretVersionView>> VersionNamesAsync(List<SecretVersionView> versions, CancellationToken ct)
+    {
+        var names=new Dictionary<string,DirectorySubject>(StringComparer.Ordinal);
+        using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(TimeSpan.FromSeconds(5));
+        foreach(var id in versions.Select(x=>x.CreatedBy).Distinct(StringComparer.Ordinal).Take(100))
+        {
+            if(budget.IsCancellationRequested)break;
+            try
+            {
+                var subject=await directory.FindAsync(id,SubjectKind.User,budget.Token);
+                if(subject is not null&&subject.Provider==directory.ProviderId&&subject.Id==id&&subject.Kind==SubjectKind.User)names[id]=subject;
+            }
+            catch(Exception error) when(error is VaultUnavailableException or LdapException or DirectoryOperationException){break;}
+            catch(OperationCanceledException) when(!ct.IsCancellationRequested){break;}
+        }
+        ct.ThrowIfCancellationRequested();
+        return versions.Select(x=>names.TryGetValue(x.CreatedBy,out var person)?x with{CreatedByName=person.Name,SamAccountName=person.SamAccountName}:x).ToArray();
     }
 
     public async Task RestoreVersionAsync(Actor actor, Guid id, int version, long revision, string correlation, CancellationToken ct)
@@ -240,6 +260,25 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
         return await audit.MutationAsync(actor, "Access.Grant", grant.TargetId, correlation, async token =>
         { await RequireFreshAsync(actor, grant.TargetKind, grant.TargetId, VaultPermission.ManageAccess, token); db.Grants.Add(grant); return grant.Id; }, ct, JsonSerializer.Serialize(new
         { grant.Id, grant.Provider, grant.SubjectId, grant.SubjectKind, grant.Permissions, grant.StartsAt, grant.ExpiresAt, grant.TargetKind }));
+    }
+
+    public async Task UpdateGrantAsync(Actor actor, Guid grantId, VaultPermission permissions, DateTimeOffset? startsAt,
+        DateTimeOffset? expiresAt, long revision, string correlation, CancellationToken ct)
+    {
+        var grant = await db.Grants.SingleOrDefaultAsync(x => x.Id == grantId, ct) ?? throw new AccessDeniedException();
+        await access.RequireAsync(actor, grant.TargetKind, grant.TargetId, VaultPermission.ManageAccess, ct);
+        var candidate = new AccessGrant { TargetKind=grant.TargetKind, TargetId=grant.TargetId, Provider=grant.Provider,
+            SubjectKind=grant.SubjectKind, SubjectId=grant.SubjectId, Permissions=permissions, StartsAt=startsAt, ExpiresAt=expiresAt };
+        PermissionEvaluator.ValidateGrant(candidate);
+        await audit.MutationAsync(actor, "Access.Update", grant.TargetId, correlation, async token =>
+        {
+            await RequireFreshAsync(actor, grant.TargetKind, grant.TargetId, VaultPermission.ManageAccess, token);
+            Revision(grant.Revision, revision);
+            grant.Permissions=permissions; grant.StartsAt=startsAt; grant.ExpiresAt=expiresAt; grant.Revision++;
+            return true;
+        }, ct, JsonSerializer.Serialize(new { grant.Id, grant.Provider, grant.SubjectId, grant.SubjectKind, grant.TargetKind,
+            PreviousPermissions=grant.Permissions, Permissions=permissions, PreviousStartsAt=grant.StartsAt,
+            StartsAt=startsAt, PreviousExpiresAt=grant.ExpiresAt, ExpiresAt=expiresAt, Revision=revision }));
     }
 
     public async Task RevokeAsync(Actor actor, Guid grantId, string correlation, CancellationToken ct)
@@ -386,8 +425,9 @@ public sealed class VaultOperations(VaultDbContext db, AccessService access, Aud
     {
         var license = await db.Licenses.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && !x.Deleted, ct) ?? throw new AccessDeniedException();
         await access.RequireAsync(actor, TargetKind.Resource, license.ResourceId, VaultPermission.Metadata, ct);
-        return await db.LicenseVersions.AsNoTracking().Where(x => x.LicenseId == id).OrderByDescending(x => x.Version)
-            .Select(x => new SecretVersionView(x.Version, x.CreatedAt, x.CreatedBy)).ToListAsync(ct);
+        var versions = await db.LicenseVersions.AsNoTracking().Where(x => x.LicenseId == id).OrderByDescending(x => x.Version)
+            .Select(x => new SecretVersionView(x.Version, x.CreatedAt, x.CreatedBy, null, null)).ToListAsync(ct);
+        return await VersionNamesAsync(versions,ct);
     }
 
     public async Task RestoreLicenseVersionAsync(Actor actor, Guid id, int version, long revision, string correlation, CancellationToken ct)

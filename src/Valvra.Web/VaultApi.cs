@@ -15,6 +15,7 @@ public sealed record SecretRequest(string Title, SecretPayload? Payload, string?
 public sealed record RevealRequest(int? Version = null, bool Copy = false);
 public sealed record RestoreRequest(int Version, long Revision);
 public sealed record DeleteRequest(bool Deleted, long Revision);
+public sealed record GrantUpdateRequest(VaultPermission Permissions, DateTimeOffset? StartsAt, DateTimeOffset? ExpiresAt, long Revision);
 public sealed record LicenseRequest(Guid ResourceId, string Product, string Vendor, string PurchaseReference,
     int Seats, DateTimeOffset? ExpiresAt, LicensePayload? Payload, long Revision = 0, SecretChange SecretChange = SecretChange.Preserve);
 
@@ -89,6 +90,8 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.GrantAsync(actor, body, ctx.TraceIdentifier, ctx.RequestAborted) })));
         api.MapPost("/grants/{id:guid}/revoke", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => { await vault.RevokeAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
+        api.MapPost("/grants/{id:guid}/update", async (Guid id, GrantUpdateRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
+            await current.RunAsync(ctx, async actor => { await vault.UpdateGrantAsync(actor,id,body.Permissions,body.StartsAt,body.ExpiresAt,body.Revision,ctx.TraceIdentifier,ctx.RequestAborted); return Results.NoContent(); }));
         api.MapPost("/owners", async (ResourceOwner body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.AddOwnerAsync(actor, body, ctx.TraceIdentifier, ctx.RequestAborted) })));
         api.MapPost("/owners/{id:guid}/remove", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>

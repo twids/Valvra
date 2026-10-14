@@ -796,5 +796,15 @@
   "Ta bort resursgrupp": "Ta bort resursgrupp",
   "Ändra globala roller": "Ändra globala roller",
   "Återställ borttaget lösenord": "Återställ borttaget lösenord",
-  "Återställ borttagen licens": "Återställ borttagen licens"
+  "Återställ borttagen licens": "Återställ borttagen licens",
+  "Ändra åtkomst": "Ändra åtkomst",
+  "Ändra åtkomst · ": "Ändra åtkomst · ",
+  "Registrerad identitet": "Registrerad identitet",
+  "Översikten är ofullständig. Ett innehållsavsnitt kunde inte läsas.": "Översikten är ofullständig. Ett innehållsavsnitt kunde inte läsas.",
+  "Inloggad identitet: {name} · {provider} · {id}.": "Inloggad identitet: {name} · {provider} · {id}.",
+  "För att lägga till lösenord eller licenser krävs både Metadata och Ändra på resursen. Administratörsrollen ger inte innehållsåtkomst automatiskt.": "För att lägga till lösenord eller licenser krävs både Metadata och Ändra på resursen. Administratörsrollen ger inte innehållsåtkomst automatiskt.",
+  "Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp.": "Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp.",
+  "Från ett startdatum, utan slutdatum": "Från ett startdatum, utan slutdatum",
+  "Visa innehållslistor (Metadata)": "Visa innehållslistor (Metadata)",
+  "Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.": "Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."
 }
