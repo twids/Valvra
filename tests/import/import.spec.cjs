@@ -122,15 +122,40 @@ test('a source branch maps to an existing group without creating its source hier
     await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();
     await file(page,'title,password,group,resource\nMapped account,synthetic-mapped-secret,Old/Sub,Mapped R');
     await page.getByLabel('Old / Sub',{exact:true}).selectOption(base.id);
+    await page.getByLabel('Titel',{exact:true}).selectOption('-1');
+    await page.getByLabel('Titel',{exact:true}).selectOption('0');
+    await expect(page.getByLabel('Old / Sub',{exact:true})).toHaveValue(base.id);
+    await page.getByLabel('Användarnamn',{exact:true}).selectOption('-1');
+    await expect(page.getByLabel('Old / Sub',{exact:true})).toHaveValue(base.id);
     await page.getByRole('button',{name:'Förhandsgranska',exact:true}).click();
     await expect(page.locator('#dialog-content')).toContainText('0 nya grupper och 0 nya resurser.');
     await expect(page.locator('#dialog-content')).toContainText('Mapped R');
     await expect(page.locator('#dialog-content')).not.toContainText('Old / Sub');
+    await page.getByRole('button',{name:'← Tillbaka',exact:true}).click();
+    await expect(page.getByLabel('Old / Sub',{exact:true})).toHaveValue(base.id);await expect(page.getByLabel('Användarnamn',{exact:true})).toHaveValue('-1');
+    await page.getByRole('button',{name:'Förhandsgranska',exact:true}).click();await expect(page.locator('#dialog-content')).toContainText('0 nya grupper och 0 nya resurser.');
     await page.getByRole('button',{name:'Starta import',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Import · Resultat',exact:true})).toBeVisible();
     await expect(page.locator('#dialog-content')).toContainText('Sparade: 1. Överhoppade: 0.');
     const entries=await page.evaluate(async id=>(await fetch('/api/resources/'+id+'/secrets')).json(),resource.id);
     expect(entries.map(x=>x.title)).toEqual(['Mapped account']);
+});
+
+test('blur offers safe file reselection with destination retained and no implicit import',async({page})=>{
+ let writes=0;page.on('request',r=>{if(r.url().includes('/imports/batch'))writes++;});
+ await page.goto('/');await page.getByRole('link',{name:'Öppna resurs · Databasplattform',exact:true}).click();
+ await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();await file(page,'title,password\nRecovery,never-retain-this');
+ const target=await page.getByLabel('Resurs',{exact:true}).inputValue();
+ await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await page.getByRole('button',{name:'Välj filen igen',exact:true}).click();
+ await file(page,'title,password\nRecovery,new-synthetic-value');await expect(page.getByLabel('Resurs',{exact:true})).toHaveValue(target);
+ expect(writes).toBe(0);await expect(page.locator('#dialog-content')).not.toContainText('never-retain-this');
+});
+
+test('administrator without a writable destination sees prerequisites before file selection',async({page})=>{
+ await page.route('**/api/resources',route=>route.fulfill({json:[]}));await page.route('**/api/groups',route=>route.fulfill({json:[]}));
+ await page.goto('/settings/import');await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();
+ await expect(page.getByLabel('CSV-fil (obligatoriskt)',{exact:true})).toHaveCount(0);
+ await expect(page.getByRole('dialog')).toContainText('Välj först en destination');
 });
 test('English import mapping works on a narrow screen and previews source titles as plain text',async({page})=>{
     await page.goto('/');

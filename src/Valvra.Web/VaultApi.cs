@@ -11,7 +11,7 @@ public sealed record CreateGroupRequest(string Name, Guid? ParentId);
 public sealed record CreateResourceRequest(string Name, Guid GroupId);
 public sealed record RenameRequest(string Name, long Revision);
 public sealed record MoveRequest(Guid DestinationGroupId, long Revision);
-public sealed record SecretRequest(string Title, SecretPayload Payload, string? LdapProfileId, long Revision = 0);
+public sealed record SecretRequest(string Title, SecretPayload? Payload, string? LdapProfileId, long Revision = 0, SecretChange SecretChange = SecretChange.Replace);
 public sealed record RevealRequest(int? Version = null, bool Copy = false);
 public sealed record RestoreRequest(int Version, long Revision);
 public sealed record DeleteRequest(bool Deleted, long Revision);
@@ -60,13 +60,14 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor =>
             {
                 ValidateProfile(body.LdapProfileId, ldap);
+                if(body.Payload is null || body.SecretChange != SecretChange.Replace)throw new VaultValidationException("Ange alla hemliga fält för det nya lösenordet.");
                 return Results.Ok(new { id = await vault.CreateSecretAsync(actor, resourceId, body.Title, body.Payload, body.LdapProfileId, ctx.TraceIdentifier, ctx.RequestAborted) });
             }));
         api.MapPost("/secrets/{id:guid}/update", async (Guid id, SecretRequest body, HttpContext ctx, CurrentActor current, VaultService vault, LdapTestOptions ldap) =>
             await current.RunAsync(ctx, async actor =>
             {
                 ValidateProfile(body.LdapProfileId, ldap);
-                await vault.UpdateSecretAsync(actor, id, body.Title, body.Payload, body.LdapProfileId, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted);
+                await vault.UpdateSecretAsync(actor, id, body.Title, body.Payload, body.LdapProfileId, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted, body.SecretChange);
                 return Results.NoContent();
             }));
         api.MapPost("/secrets/{id:guid}/reveal", async (Guid id, RevealRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
@@ -106,6 +107,8 @@ public static class VaultApi
 
         api.MapGet("/resources/{resourceId:guid}/licenses", async (Guid resourceId, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await vault.LicensesAsync(actor, resourceId, ctx.RequestAborted))));
+        api.MapGet("/licenses/overview",async(int? offset,HttpContext ctx,CurrentActor current,VaultService vault)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await vault.LicenseOverviewAsync(actor,offset??0,ctx.RequestAborted))));
         api.MapPost("/licenses", async (LicenseRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.SaveLicenseAsync(actor, null, body.ResourceId, body.Product,
                 body.Vendor, body.PurchaseReference, body.Seats, body.ExpiresAt, body.Payload, 0, ctx.TraceIdentifier, ctx.RequestAborted, body.SecretChange) })));
@@ -120,23 +123,30 @@ public static class VaultApi
             await current.RunAsync(ctx, async actor => { await vault.RestoreLicenseVersionAsync(actor, id, body.Version, body.Revision, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
         api.MapGet("/licenses/{id:guid}/assignments", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await vault.AssignmentsAsync(actor, id, ctx.RequestAborted))));
+        api.MapGet("/licenses/{id:guid}/people",async(Guid id,string query,HttpContext ctx,CurrentActor current,VaultService vault)=>
+            await current.RunAsync(ctx,async actor=>Results.Ok(await vault.LicensePeopleAsync(actor,id,query,ctx.RequestAborted))));
         api.MapPost("/assignments", async (LicenseAssignment body, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => Results.Ok(new { id = await vault.AssignLicenseAsync(actor, body, ctx.TraceIdentifier, ctx.RequestAborted) })));
         api.MapPost("/assignments/{id:guid}/remove", async (Guid id, HttpContext ctx, CurrentActor current, VaultService vault) =>
             await current.RunAsync(ctx, async actor => { await vault.UnassignLicenseAsync(actor, id, ctx.TraceIdentifier, ctx.RequestAborted); return Results.NoContent(); }));
 
         api.MapGet("/audit", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider, HttpContext ctx, CurrentActor current, IAuditReader reader) =>
-            await current.RunAsync(ctx, async actor => Results.Ok(await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
-                resourceId, groupId, includeSubgroups ?? true, actorProvider), ctx.RequestAborted))));
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader,AuditSnapshotStore snapshots) =>
+            await current.RunAsync(ctx, async actor => {
+                var query=new AuditQuery(from,to,actorId,action,targetId,offset??0,resourceId,groupId,includeSubgroups??true,actorProvider);
+                if(query.Offset is <0 or >1000000)throw new VaultValidationException("Ogiltig sidposition.");
+                var token=snapshotId??snapshots.Create(actor,query,await reader.ReadSnapshotAsync(actor,query,ctx.RequestAborted));
+                var page=snapshots.Page(actor,token,query);ctx.Response.Headers["X-Valvra-Audit-Snapshot"]=page.Id.ToString();
+                ctx.Response.Headers["X-Valvra-Audit-Captured"]=page.CapturedAt.ToString("O");ctx.Response.Headers["X-Valvra-Audit-Expires"]=page.ExpiresAt.ToString("O");return Results.Ok(page.Events);
+            }));
         api.MapGet("/audit/targets", async (HttpContext ctx, CurrentActor current, IAuditReader reader, IDirectoryProvider directory) =>
             await current.RunAsync(ctx, async actor => Results.Ok(await AuditPresentation.NamesAsync(actor,await reader.ReadTargetsAsync(actor, ctx.RequestAborted),directory,ctx.RequestAborted))));
         api.MapGet("/audit/export", async (DateTimeOffset? from, DateTimeOffset? to, string? actorId, string? action,
-            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit) =>
+            Guid? targetId, int? offset, Guid? resourceId, Guid? groupId, bool? includeSubgroups, string? actorProvider,Guid? snapshotId, HttpContext ctx, CurrentActor current, IAuditReader reader, AuditService audit,AuditSnapshotStore snapshots) =>
             await current.RunAsync(ctx, async actor =>
             {
-                var events = await reader.ReadAsync(actor, new(from, to, actorId, action, targetId, offset ?? 0,
-                    resourceId, groupId, includeSubgroups ?? true, actorProvider), ctx.RequestAborted);
+                var query=new AuditQuery(from,to,actorId,action,targetId,offset??0,resourceId,groupId,includeSubgroups??true,actorProvider);
+                var events=snapshotId is {} token?snapshots.Page(actor,token,query).Events:await reader.ReadAsync(actor,query,ctx.RequestAborted);
                 await audit.RecordAsync(actor, "Audit.Export", null, "Success", ctx.TraceIdentifier, ctx.RequestAborted);
                 return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(events), "application/json", "valvra-audit.json");
             }));

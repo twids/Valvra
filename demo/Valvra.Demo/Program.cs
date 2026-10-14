@@ -52,6 +52,7 @@ public partial class DemoProgram
             ? Results.Ok(new[] { new { id = DemoData.Secret, title = "Exempelkonto", currentVersion = 1, revision = 1, ldapProfileId = (string?)null } }) : Results.NotFound());
         app.MapGet("/api/resources/{id}/licenses", (string id) => id == DemoData.Resource
             ? Results.Ok(new[] { new { id = DemoData.License, resourceId = DemoData.Resource, product = "Exempelprogram", vendor = "Exempelleverantör", purchaseReference = "DEMO-ORDER-001", seats = 10, assignedSeats = 3, expiresAt = "2027-12-31T00:00:00Z", revision = 1, currentVersion = 1 } }) : Results.NotFound());
+        app.MapGet("/api/licenses/overview",()=>new{items=new[]{new{id=DemoData.License,resourceId=DemoData.Resource,product="Exempelprogram",vendor="Exempelleverantör",purchaseReference="DEMO-ORDER-001",seats=10,assignedSeats=3,expiresAt="2027-12-31T00:00:00Z",revision=1,currentVersion=1}},hasMore=false});
         app.MapGet("/api/secrets/{id}/versions", (string id) => id == DemoData.Secret ? Results.Ok(DemoData.Versions) : Results.NotFound());
         app.MapGet("/api/licenses/{id}/versions", (string id) => id == DemoData.License ? Results.Ok(DemoData.Versions) : Results.NotFound());
         app.MapGet("/api/licenses/{id}/assignments", (string id) => id == DemoData.License

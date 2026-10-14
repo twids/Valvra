@@ -6,8 +6,8 @@ async function audit(page) {
 }
 async function open(page) {
     await page.goto('/');
-    await page.getByRole('link',{name:'Inställningar',exact:true}).click();
-    await expect(page.getByRole('heading',{name:'Inställningar',level:1})).toBeFocused();
+    await page.getByRole('link',{name:'Administration',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Globala roller',level:1})).toBeFocused();
     await expect(page.getByRole('heading',{name:'Globala rättigheter',level:2})).toBeVisible();
 }
 test('settings support keyboard navigation, directory testing and individual-only role dialogs',async({page})=>{
@@ -15,7 +15,7 @@ test('settings support keyboard navigation, directory testing and individual-onl
     await page.getByRole('link',{name:'Katalog',exact:true}).click();
     await page.getByRole('button',{name:'Testa anslutning',exact:true}).click();
     await expect(page.getByText('Example person',{exact:true})).toBeVisible(); await audit(page);
-    await page.getByRole('link',{name:'Personer och behörigheter',exact:true}).click();
+    await page.getByRole('link',{name:'Globala roller',exact:true}).click();
     await page.getByRole('button',{name:'+ Tilldela personkonto',exact:true}).click();
     await expect(page.getByRole('dialog',{name:'Tilldela globala rättigheter'})).toBeVisible();
     await expect(page.getByRole('combobox',{name:'Typ'})).toHaveCount(0);
@@ -45,7 +45,7 @@ test('ordinary users cannot navigate to settings or call administrative APIs',as
     await page.setExtraHTTPHeaders({'X-Test-Identity':'outsider'});
     await page.goto('/settings');
     await expect(page.getByRole('heading',{name:'Vyn är inte tillgänglig',level:1})).toBeVisible();
-    await expect(page.getByRole('link',{name:'Inställningar',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('link',{name:'Administration',exact:true})).toHaveCount(0);
     expect((await page.request.get('/api/settings/directory',{headers:{'X-Test-Identity':'outsider'}})).status()).toBe(403);
 });
 test('settings remain usable at 320px and with enlarged text',async({page})=>{
@@ -63,7 +63,7 @@ test('administration starts with people and deep links preserve directory drafts
     await expect(page.getByLabel('Domänkontrollantens DNS-namn (obligatoriskt)',{exact:true})).toHaveCount(0);
     await page.getByRole('link',{name:'Katalog',exact:true}).click();
     await page.getByLabel('Sökbas för personkonton (valfritt)',{exact:true}).fill('OU=Draft,DC=example,DC=test');
-    await page.getByRole('link',{name:'Personer och behörigheter',exact:true}).click();
+    await page.getByRole('link',{name:'Globala roller',exact:true}).click();
     await expect(page.getByText('Kataloginställningar har osparade ändringar. Utkastet finns kvar i denna flik.',{exact:true})).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(/\/settings\/directory$/);
@@ -92,17 +92,17 @@ test('late directory load and save responses preserve newer draft edits',async({
     });
     await page.goto('/settings/directory');
     await expect.poll(()=>loads).toBe(1);
-    await page.getByRole('link',{name:'Personer och behörigheter',exact:true}).click();
+    await page.getByRole('link',{name:'Globala roller',exact:true}).click();
     await page.getByRole('link',{name:'Katalog',exact:true}).click();
     const input=page.getByLabel('Sökbas för personkonton (valfritt)',{exact:true});
     await input.fill('OU=First,DC=example,DC=test'); releaseLoad();
     await page.getByRole('button',{name:'Spara inställningar',exact:true}).click();
     await expect.poll(()=>posted?.settings.userSearchBaseDn).toBe('OU=First,DC=example,DC=test');
-    await page.getByRole('link',{name:'Personer och behörigheter',exact:true}).click();
+    await page.getByRole('link',{name:'Globala roller',exact:true}).click();
     await page.getByRole('link',{name:'Katalog',exact:true}).click();
     await input.fill('OU=Newer,DC=example,DC=test'); releaseSave();
     await expect(page.getByRole('button',{name:'Spara inställningar',exact:true})).toBeEnabled();
-    await page.getByRole('link',{name:'Personer och behörigheter',exact:true}).click();
+    await page.getByRole('link',{name:'Globala roller',exact:true}).click();
     await page.getByRole('link',{name:'Katalog',exact:true}).click();
     await expect(page.getByLabel('Sökbas för personkonton (valfritt)',{exact:true})).toHaveValue('OU=Newer,DC=example,DC=test');
 });

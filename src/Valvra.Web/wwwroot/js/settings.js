@@ -6,9 +6,11 @@
     async function render(ui) {
         const {state, api, node, button, field, panel, table, hint, heading, dialog, notice, t} = ui;
         const content = document.getElementById("content");
-        heading(t("Inställningar"), t("Hantera kataloganslutning och personbundna administratörsrättigheter."));
         const section = state.settingsSection;
-        const sections = [["people","Personer och behörigheter",true], ["import","Import",state.session.isAccessAdministrator],
+        const titles={people:"Globala roller",import:"Import",directory:"Inloggning och katalog",certificates:"Certifikat och säkerhet",about:"Om Valvra"};
+        const descriptions={people:"Globala roller ger administrativa uppgifter. Åtkomst till lösenord och licenser tilldelas på resursen eller resursgruppen.",import:"Importera till en destination där du har rätt att ändra innehåll.",directory:"Hantera kataloganslutningen för inloggning och sökning.",certificates:"Kontrollera certifikatmetadata och planera säker rotation.",about:"Versionsinformation för den körande applikationen."};
+        heading(t(titles[section]),t(descriptions[section]));
+        const sections = [["people","Globala roller",state.session.isAccessAdministrator], ["import","Import",state.session.isAccessAdministrator],
             ["directory","Katalog",state.session.isSystemAdministrator], ["certificates","Certifikat och säkerhet",true], ["about","Om Valvra",true]];
         const tabs = node("nav", undefined, "settings-navigation"); tabs.setAttribute("aria-label", t("Inställningssektioner"));
         sections.filter(([, , visible]) => visible).forEach(([key,label]) => { const link = ui.routeLink(t(label), {view:"settings",section:key}); if (key === section) link.setAttribute("aria-current","page"); tabs.append(link); }); content.append(tabs);
@@ -104,6 +106,9 @@
             form.addEventListener("invalid", event => { event.target.setAttribute("aria-invalid", "true"); error.textContent = t("Kontrollera fältet ”{field}”. {reason}", {field: event.target.labels[0].textContent, reason: window.ValvraI18n.validation(event.target)}); }, true);
         }
         if (section !== "people") return;
+        const access=panel(content,t("Åtkomst till resurser"));
+        hint(access,t("Öppna en resurs eller resursgrupp och välj Behörigheter för att tilldela åtkomst. Globala roller ger ingen automatisk innehållsåtkomst."));
+        access.append(ui.routeLink(t("Resurser"),{view:"vault"}),ui.routeLink(t("Resursgrupper"),{view:"groups"}));
         const roles = await api("/settings/roles");
         if (!ui.isCurrent() || state.view !== "settings") return;
         const administrators = panel(content, t("Globala rättigheter"), state.session.isAccessAdministrator ? [button(t("+ Tilldela personkonto"), () => editRole())] : []); administrators.classList.add("settings-panel");
@@ -134,6 +139,7 @@
                 const search = field(body, t("Sök personkonto"), "text"); search.minLength = 2; search.maxLength = 128;
                 const results = node("div"), status = node("p"); status.setAttribute("role", "status");
                 let searchEpoch = 0;
+                const personChoiceLabel = person => person.name + (person.samAccountName ? " · " + person.samAccountName : person.name !== person.id ? " · " + person.id : "");
                 const runSearch = async () => {
                     const epoch = ++searchEpoch;
                     subject = null; results.replaceChildren(); status.textContent = "";
@@ -141,8 +147,8 @@
                     const people = await api("/settings/people?query=" + encodeURIComponent(search.value.trim()));
                     if (epoch !== searchEpoch || !results.isConnected) return;
                     results.replaceChildren();
-                    people.forEach(person => results.append(button(person.name, () => {
-                        subject = person; status.textContent = person.name + " · " + person.id;
+                    people.forEach(person => results.append(button(personChoiceLabel(person), () => {
+                        subject = person; status.textContent = personChoiceLabel(person) + " · " + person.provider + " · " + person.id;
                         results.replaceChildren();
                         checks[0][1].focus();
                     })));

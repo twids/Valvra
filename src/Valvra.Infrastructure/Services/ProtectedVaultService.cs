@@ -31,9 +31,9 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
         string? ldapProfileId, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.CreateSecretAsync(actor, resourceId, title, payload, ldapProfileId, correlation, ct), ct);
 
-    public Task UpdateSecretAsync(Actor actor, Guid id, string title, SecretPayload payload,
-        string? ldapProfileId, long revision, string correlation, CancellationToken ct) =>
-        integrity.RunAsync(() => operations.UpdateSecretAsync(actor, id, title, payload, ldapProfileId, revision, correlation, ct), ct);
+    public Task UpdateSecretAsync(Actor actor, Guid id, string title, SecretPayload? payload,
+        string? ldapProfileId, long revision, string correlation, CancellationToken ct, SecretChange secretChange = SecretChange.Replace) =>
+        integrity.RunAsync(() => operations.UpdateSecretAsync(actor, id, title, payload, ldapProfileId, revision, correlation, ct, secretChange), ct);
 
     public Task<SecretPayload> RevealSecretAsync(Actor actor, Guid id, int? version, string action,
         string correlation, CancellationToken ct) =>
@@ -71,6 +71,8 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
 
     public Task<IReadOnlyList<LicenseView>> LicensesAsync(Actor actor, Guid resourceId, CancellationToken ct) =>
         integrity.RunAsync(() => operations.LicensesAsync(actor, resourceId, ct), ct);
+    public Task<LicenseOverviewPage> LicenseOverviewAsync(Actor actor,int offset,CancellationToken ct)=>
+        integrity.RunAsync(()=>operations.LicenseOverviewAsync(actor,offset,ct),ct);
 
     public Task<Guid> SaveLicenseAsync(Actor actor, Guid? id, Guid resourceId, string product, string vendor,
         string purchaseReference, int seats, DateTimeOffset? expiresAt, LicensePayload? payload, long revision, string correlation, CancellationToken ct,
@@ -86,7 +88,9 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
     public Task RestoreLicenseVersionAsync(Actor actor, Guid id, int version, long revision, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.RestoreLicenseVersionAsync(actor, id, version, revision, correlation, ct), ct);
 
-    public Task<IReadOnlyList<LicenseAssignment>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct) =>
+    public Task<IReadOnlyList<DirectorySubject>> LicensePeopleAsync(Actor actor,Guid licenseId,string query,CancellationToken ct)=>
+        integrity.RunAsync(()=>operations.LicensePeopleAsync(actor,licenseId,query,ct),ct);
+    public Task<IReadOnlyList<LicenseAssignmentView>> AssignmentsAsync(Actor actor, Guid licenseId, CancellationToken ct) =>
         integrity.RunAsync(() => operations.AssignmentsAsync(actor, licenseId, ct), ct);
 
     public Task<Guid> AssignLicenseAsync(Actor actor, LicenseAssignment assignment, string correlation, CancellationToken ct) =>

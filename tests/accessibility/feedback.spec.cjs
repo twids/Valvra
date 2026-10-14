@@ -13,6 +13,9 @@ test('success is dismissible, expires, and does not survive navigation', async (
     await expect(page.locator('#notice')).toBeHidden();
     await page.clock.install();
     await page.getByRole('button',{name:'Refresh',exact:true}).click();
+    await expect(page.locator('#notice')).toBeVisible();
+    // Expiry pauses while the message is hovered or contains keyboard focus.
+    await page.mouse.move(0,0);
     await page.getByRole('heading',{name:'License overview',level:1}).focus();
     await page.clock.fastForward(11000);
     await expect(page.locator('#notice')).toBeHidden();

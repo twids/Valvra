@@ -5,7 +5,7 @@
     const navigation = window.ValvraNavigation;
     const t = (key, values) => i18n.message(key, values);
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
-        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), licenseFilters:{}, auditFilters: {} };
+        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), contentFilters:{}, licenseFilters:{}, auditFilters: {} };
     let renderEpoch = 0;
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
@@ -13,6 +13,7 @@
     let countdownTimer;
     let pendingMetadataRead;
     let dialogEpoch = 0;
+    let dialogInstance=0,activeSubmission=null,resetReplacement;
     let revealedDialog = false;
     let dialogOpener;
     let dialogBack;
@@ -53,6 +54,7 @@
             || route.view === "settings" && !state.session.isSystemAdministrator && !state.session.isAccessAdministrator
             || route.view === "settings" && state.settingsSection === "directory" && !state.session.isSystemAdministrator
             || route.view === "settings" && state.settingsSection === "import" && !state.session.isAccessAdministrator
+            || route.view === "settings" && state.settingsSection === "people" && !state.session.isAccessAdministrator
             || !!state.group && !!state.resource && !groupIds(state.group.id, true).has(state.resource.groupId);
         if (previousGroup !== state.group?.id) { state.groupSearch = ""; state.groupIncludeSubgroups = true; }
     }
@@ -75,6 +77,7 @@
     }
     const has = bit => !!(state.resource && (state.resource.permissions & bit));
     const date = value => value ? new Date(value).toLocaleString(i18n.locale) : "—";
+    const calendarDate=value=>{const valueDate=new Date(value);return valueDate.getFullYear()+"-"+String(valueDate.getMonth()+1).padStart(2,"0")+"-"+String(valueDate.getDate()).padStart(2,"0");};
     const rights = value => [[1, "Metadata"], [2, t("Läsa")], [4, t("Ändra")], [8, t("Behörigheter")], [16, "LDAP-test"]].filter(([bit]) => value & bit).map(([, name]) => name).join(", ");
     function clearNotice() { clearTimeout(noticeTimer); $("notice").hidden = true; }
     function notice(message, error = false) {
@@ -94,7 +97,10 @@
         if (body !== undefined) { options.method = "POST"; options.headers["Content-Type"] = "application/json"; options.headers["X-CSRF-TOKEN"] = state.session.csrfToken; options.body = JSON.stringify(body); }
         const response = await fetch("/api" + path, options);
         if (!response.ok) { const error = await response.json().catch(() => ({})); const failure = new Error(error.error || (response.status === 401 ? t("Windows-inloggningen kunde inte verifieras.") : t("Operationen kunde inte slutföras."))); failure.status = response.status; failure.retryAfter = Math.min(120, Math.max(1, Number(response.headers.get("Retry-After")) || 60)); throw failure; }
-        return response.status === 204 ? null : response.json();
+        if(response.status===204)return null;
+        const value=await response.json();
+        if(path.startsWith("/audit?")&&Array.isArray(value)){value.snapshotId=response.headers?.get?.("X-Valvra-Audit-Snapshot");value.capturedAt=response.headers?.get?.("X-Valvra-Audit-Captured");value.expiresAt=response.headers?.get?.("X-Valvra-Audit-Expires");}
+        return value;
     }
     function clearSecrets() {
         clearTimeout(secretTimer);
@@ -104,13 +110,14 @@
         return cleared;
     }
     function updateSecretSubmitState() {
-        const missing = $("dialog-content").dataset.importCleared === "true" || Array.from($("dialog-content").querySelectorAll("input,textarea")).some(x => x.required && (x.type === "password" || x.dataset.sensitive) && !x.value.trim());
+        const missing = activeSubmission===dialogInstance || $("dialog-content").dataset.importCleared === "true" || Array.from($("dialog-content").querySelectorAll("input,textarea")).some(x => x.required && (x.type === "password" || x.dataset.sensitive) && !x.value.trim());
         $("dialog-actions").querySelectorAll("button").forEach(x => { if (x.type === "submit") x.disabled = missing; });
     }
     function protectFocusLoss() {
         window.ValvraImport?.clear("blur");
         pendingMetadataRead?.();pendingMetadataRead=null;
         dialogEpoch++; const cleared = clearSecrets();
+        resetReplacement?.();
         if (revealedDialog) { closeDialog(); return; }
         if ($("dialog").open) {
             updateSecretSubmitState();
@@ -119,6 +126,7 @@
     }
     function closeDialog() {
         dialogBack = null;
+        resetReplacement=null;dialogInstance++;
         pendingMetadataRead=null;
         window.ValvraImport?.clear();
         const wasOpen = $("dialog").open;
@@ -136,12 +144,16 @@
         const actions = $("dialog-actions"); actions.append(button(t(options.back ? "← Tillbaka" : submit ? "Avbryt" : "Stäng"), dismissDialog));
         if (submit) { const save = node("button", submitLabel, "button primary"); save.type = "submit"; actions.append(save); }
         $("dialog-form").onsubmit = async event => {
-            event.preventDefault(); if (!submit || !$("dialog").open || document.hidden || !document.hasFocus()) return;
+            event.preventDefault(); if (!submit || !$("dialog").open || document.hidden || !document.hasFocus() || activeSubmission===dialogInstance) return;
             const controls = Array.from(actions.querySelectorAll("button")); controls.forEach(x => x.disabled = true);
-            const submittedEpoch = dialogEpoch;
-            try { const message = await submit(); if (message === false || submittedEpoch !== dialogEpoch) return; closeDialog(); const confirmation = message === undefined ? t("Klart och auditerat: {action}.", {action: String(title)}) : message; if (options.afterSave) await options.afterSave(confirmation); else notice(confirmation); }
-            catch (error) { if (submittedEpoch === dialogEpoch) $("dialog-error").textContent = error.message; else notice(error.message, true); }
-            finally { controls.forEach(x => x.disabled = false); updateSecretSubmitState(); }
+            const submittedInstance=dialogInstance;activeSubmission=submittedInstance;let completed=false;
+            try { const message = await submit(); if (message === false) return;completed=true;
+                const sameDialog=submittedInstance===dialogInstance;if(sameDialog)closeDialog();
+                const confirmation = message === undefined ? t("Klart och auditerat: {action}.", {action: String(title)}) : message;
+                if (sameDialog && options.afterSave && !document.hidden && document.hasFocus()) await options.afterSave(confirmation); else notice(confirmation);
+            }
+            catch (error) { if (submittedInstance === dialogInstance) $("dialog-error").textContent = error.message; else notice(error.message, true); }
+            finally { if(activeSubmission===submittedInstance)activeSubmission=null;if(!completed&&submittedInstance===dialogInstance){controls.forEach(x => x.disabled = false);updateSecretSubmitState();} }
         };
         $("dialog").showModal(); $("dialog-title").focus(); return content;
     }
@@ -206,7 +218,7 @@
         closeActionMenu?.();
         const settingsEpoch = ++renderEpoch;
         $("content").removeAttribute("aria-busy");
-        $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Inställningar") }[state.view]);
+        $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Administration") }[state.view]);
         document.querySelectorAll("[data-view]").forEach(x => { const current = x.dataset.view === state.view; x.classList.toggle("active", current); if (current) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
         if (routeUnavailable) {
             heading(t("Vyn är inte tillgänglig"), t("Länken är ogiltig, innehållet är borttaget eller du saknar behörighet."), [routeLink(t("← Alla resurser"), {view: "vault"})]); return;
@@ -419,15 +431,28 @@
         if (has(4)) secondary.push(button(t("Papperskorg"), recycleBin));
         if (resource.canManage) secondary.push(button(t("Ta bort resurs"), () => deleteTarget(1, resource), "danger"));
         if(secondary.length)actions.push(actionMenu(t("Resursåtgärder"),secondary));
-        heading(resource.name, t("Din åtkomst: ") + (rights(resource.permissions) || t("Behörighetsadministration")), actions);
+        const capabilities=[];
+        if(has(1))capabilities.push(t("Du kan se listan."));
+        if(has(2))capabilities.push(t("Du kan visa och kopiera hemligheter."));
+        if(has(4))capabilities.push(t("Du kan lägga till och ändra innehåll."));
+        if(resource.canManage)capabilities.push(t("Du kan hantera åtkomst."));
+        heading(resource.name,capabilities.join(" "), actions);
         appendImportAction();
-        if (state.view === "groups") groupBreadcrumb(resource.groupId, resource.name);
+        groupBreadcrumb(resource.groupId, resource.name);
         if (!has(1)) { empty($("content"), t("Du administrerar åtkomsten"), t("Tilldela metadata-, läs- eller ändringsrätt för att använda resursens innehåll.")); return; }
         const [secrets, licenses] = await Promise.all([api(`/resources/${resource.id}/secrets`), api(`/resources/${resource.id}/licenses`)]);
         if (epoch !== renderEpoch) return;
-        const passwords = panel($("content"), t("Lösenord"), has(4) ? [button(t("+ Lägg till lösenord"), () => secretDialog(), "primary")] : []);
-        if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t("Lägg till ett konto som hör till den här resursen."));
-        else table(passwords, [t("Konto"), "Version", t("Åtgärder")], secrets.map(secret => {
+        const controls=node("div",undefined,"toolbar"),search=field(controls,t("Sök i resursen"),"search",state.contentFilters[resource.id]||"");
+        search.maxLength=200;hint(controls,t("Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig."));
+        const count=node("p",undefined,"hint");count.setAttribute("role","status");controls.append(count);
+        const records=node("div");$("content").append(controls,records);
+        const paint=()=>{
+        const query=search.value.trim().toLocaleLowerCase(i18n.locale),visibleSecrets=secrets.filter(x=>x.title.toLocaleLowerCase(i18n.locale).includes(query)),visibleLicenses=licenses.filter(x=>x.product.toLocaleLowerCase(i18n.locale).includes(query));
+        state.contentFilters[resource.id]=search.value;records.replaceChildren();count.textContent=t("{shown} av {total} poster visas.",{shown:visibleSecrets.length+visibleLicenses.length,total:secrets.length+licenses.length});
+        const passwords = panel(records, t("Lösenord"), has(4) ? [button(t("+ Lägg till lösenord"), () => secretDialog(), "primary")] : []);
+        if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t(has(4)?"Lägg till ett konto som hör till den här resursen.":"Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem."));
+        else if(!visibleSecrets.length)hint(passwords,t("Inga kontotitlar matchar sökningen."));
+        else table(passwords, [t("Konto"), "Version", t("Åtgärder")], visibleSecrets.map(secret => {
             const actions = node("div", undefined, "actions");
             if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret)), button(t("Kopiera"), () => copySecret(secret)));
             const secondary=[];
@@ -438,8 +463,10 @@
             actions.append(actionMenu(t("Fler åtgärder"),secondary,secret.title));
             return [secret.title, String(secret.currentVersion), actions];
         })).classList.add("mobile-records");
-        const licensePanel = panel($("content"), t("Licenser"), has(4) ? [button(t("+ Lägg till licens"), () => licenseDialog(), "primary")] : []);
-        licenseTable(licensePanel, licenses, true);
+        const licensePanel = panel(records, t("Licenser"), has(4) ? [button(t("+ Lägg till licens"), () => licenseDialog(), "primary")] : []);
+        if(licenses.length&&!visibleLicenses.length)hint(licensePanel,t("Inga produktnamn matchar sökningen."));else licenseTable(licensePanel, visibleLicenses, true);
+        };
+        controls.append(button(t("Rensa filter"),()=>{search.value="";paint();search.focus();}));search.addEventListener("input",paint);paint();
     }
     function createGroup() {
         let name, parent;
@@ -472,23 +499,32 @@
         if (!secrets.length && !licenses.length) hint(body, t("Papperskorgen är tom."));
     }
     function secretDialog(secret) {
-        safely(async () => {
-            const epoch = ++dialogEpoch;
-            const payload = secret && has(2) ? await api(`/secrets/${secret.id}/reveal`, {}) : { username: "", password: "", notes: "" };
-            if (!canDisplay(epoch)) return;
-            let title, username, password, notes, profile;
+            let title, username, password, notes, profile,change,replacementEpoch=0;
             const body = dialog(secret ? t("Ändra lösenord") : t("Lägg till lösenord"), t("Spara"), async () => {
-                const data = { title: title.value, payload: { username: username.value, password: password.value, notes: notes.value }, ldapProfileId: profile.value || null, revision: secret?.revision || 0 };
+                const replace=change.value==="1";
+                if(replace&&!password.value.trim())throw new Error(t("Ange ett lösenord för ersättningen."));
+                const data = { title: title.value, secretChange:replace?1:0,payload: replace?{ username: username.value, password: password.value, notes: notes.value }:null, ldapProfileId: profile.value || null, revision: secret?.revision || 0 };
                 await api(secret ? `/secrets/${secret.id}/update` : `/resources/${state.resource.id}/secrets`, data); await render();
             });
-            if (secret && !has(2)) hint(body, t("Du saknar läsrätt. Alla hemliga fält ersätts med de värden du anger här."));
+            if (secret && !has(2)) hint(body, t("Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas."));
             title = field(body, t("Benämning"), "text", secret?.title || "", true); title.maxLength = 200;
-            username = field(body, t("Användarnamn"), "text", payload.username); username.dataset.sensitive = "true"; username.maxLength = 512;
-            password = field(body, t("Lösenord"), "password", payload.password, true); password.maxLength = 65536;
-            body.append(button(t("Generera lösenord"), () => { const bytes = crypto.getRandomValues(new Uint8Array(24)); password.value = Array.from(bytes, x => x.toString(16).padStart(2, "0")).join(""); updateSecretSubmitState(); }));
-            notes = field(body, t("Hemliga anteckningar"), "textarea", payload.notes); notes.maxLength = 65536;
             profile = select(body, t("LDAP-testprofil"), [["", t("Ingen")], ...state.profiles.map(x => [x.id, x.name])], secret?.ldapProfileId || "");
-        });
+            change=select(body,t("Lösenord och hemliga fält"),secret?[["0",t("Behåll befintliga värden")],["1",t("Ersätt alla hemliga fält")]]:[["1",t("Ersätt alla hemliga fält")]],secret?"0":"1");
+            const replacement=node("div");body.append(replacement);
+            username = field(replacement, t("Användarnamn"), "text"); username.dataset.sensitive = "true"; username.maxLength = 512;
+            password = field(replacement, t("Lösenord"), "password","",true); password.maxLength = 65536;
+            const generate=button(t("Generera lösenord"), () => { const bytes = crypto.getRandomValues(new Uint8Array(24)); password.value = Array.from(bytes, x => x.toString(16).padStart(2, "0")).join("");replacementEpoch++; updateSecretSubmitState(); });replacement.append(generate);
+            notes = field(replacement, t("Hemliga anteckningar"), "textarea"); notes.maxLength = 65536;
+            let readSaved;
+            const update=()=>{replacement.hidden=change.value!=="1";replacementEpoch++;username.value=password.value=notes.value="";username.disabled=password.disabled=notes.disabled=generate.disabled=change.value!=="1";if(readSaved)readSaved.disabled=change.value!=="1";password.required=change.value==="1";const marker=password.labels?.[0]?.querySelectorAll("span")[1];if(marker)i18n.setText(marker,password.required?t(" (obligatoriskt)"):"");updateSecretSubmitState();};
+            change.addEventListener("change",update);update();if(secret)resetReplacement=()=>{change.value="0";update();};
+            [username,password,notes].forEach(input=>input.addEventListener("input",()=>replacementEpoch++));
+            if(secret&&has(2)){readSaved=button(t("Läs sparade värden för ersättning"),async()=>{
+                if(change.value!=="1")throw new Error(t("Välj ersättning först."));const epoch=++dialogEpoch,request=replacementEpoch;
+                const payload=await api(`/secrets/${secret.id}/reveal`,{});if(!canDisplay(epoch)||request!==replacementEpoch||change.value!=="1")return;
+                username.value=payload.username;password.value=payload.password;notes.value=payload.notes;updateSecretSubmitState();
+            });readSaved.disabled=change.value!=="1";replacement.append(readSaved);}
+            hint(body,t("Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen."));
     }
     async function revealSecret(secret, version) {
         const epoch = ++dialogEpoch;
@@ -532,7 +568,7 @@
         body.append(node("p", t("Testet använder det aktuella sparade kontot och lösenordet. Ett misslyckat försök kan bidra till kontolåsning i AD.")));
         hint(body, t("Ett bind-försök utförs utan automatiska återförsök. Kontot kan testas högst en gång per fem minuter i denna tjänsteinstans."));
     }
-    function directoryPicker(parent) {
+    function directoryPicker(parent,options={}) {
         const picker = node("fieldset"); picker.append(node("legend", t("Mottagare"))); parent.append(picker); parent = picker;
         const kind = select(parent, t("Typ"), [["0", t("Användare")], ["1", t("AD-grupp")]]); const query = field(parent, t("Sök i Active Directory"), "text"); query.minLength = 2; query.maxLength = 128;
         const results = select(parent, t("Välj träff"), [["", t("Sök och välj en träff")]]); let subjects = [];
@@ -540,7 +576,7 @@
         let searchEpoch = 0;
         const reset = () => {
             searchEpoch++; subjects = []; results.replaceChildren(node("option", t("Sök och välj en träff"))); results.options[0].value = "";
-            status.textContent = ""; search.disabled = false; results.removeAttribute("aria-busy");
+            status.textContent = ""; search.disabled = false; results.removeAttribute("aria-busy");options.changed?.();
         };
         const runSearch = async () => {
             reset();
@@ -549,10 +585,10 @@
             const epoch = searchEpoch;
             search.disabled = true; results.setAttribute("aria-busy", "true");
             try {
-                const found = await api(`/directory?query=${encodeURIComponent(text)}&kind=${kind.value}`);
+                const found = await api((options.searchPath||"/directory")+`?query=${encodeURIComponent(text)}&kind=${kind.value}`);
                 if (epoch !== searchEpoch || !results.isConnected || !$("dialog").open) return;
                 subjects = found;
-                subjects.forEach(subject => { const o = node("option", subject.name + " · " + subject.id); o.value = subject.id; results.append(o); });
+                subjects.forEach(subject => { const o = node("option", subject.name + (subject.samAccountName?" · "+subject.samAccountName:"")+" · " + subject.id); o.value = subject.id; results.append(o); });
                 status.textContent = subjects.length ? subjects.length + t(" träffar. Välj en träff i listan.") : t("Inga träffar");
                 results.focus();
             } catch (error) { if (epoch === searchEpoch && results.isConnected) status.textContent = error.message; }
@@ -561,15 +597,18 @@
         const search = button(t("Sök"), runSearch, "", false); parent.append(search);
         query.addEventListener("input", reset); kind.addEventListener("change", reset);
         query.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); if (!search.disabled) safely(runSearch); } });
-        results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : ""; });
+        results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : "";options.changed?.(); });
         const pick = () => { const selected = subjects.find(x => x.id === results.value); if (!selected) throw new Error(t("Sök och välj en användare eller grupp först.")); return selected; };
         pick.onlyUsers = enabled => { if (enabled && kind.value !== "0") { kind.value = "0"; reset(); } kind.disabled = enabled; };
+        if(options.usersOnly){pick.onlyUsers(true);kind.hidden=true;kind.previousElementSibling.hidden=true;}
+        pick.clear=reset;
+        pick.selected=()=>subjects.find(x=>x.id===results.value);
         return pick;
     }
     function identityLabel(access, row) {
         const subject = access.subjects?.find(x => x.provider === row.provider && x.id === row.subjectId && x.kind === row.subjectKind);
         const label = node("div");
-        label.append(node("strong", subject?.name || t("Identiteten kunde inte slås upp")), node("p", (row.subjectKind === 0 ? t("Användare") : t("AD-grupp")) + " · " + row.provider, "hint"));
+        label.append(node("strong", subject?(subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")):t("Identiteten kunde inte slås upp")), node("p", (row.subjectKind === 0 ? t("Användare") : t("AD-grupp")) + " · " + row.provider, "hint"));
         const details = node("details"); details.open = !subject; details.append(node("summary", t("Identitet")), node("p", row.subjectId, "audit-id")); label.append(details); return label;
     }
     function accessSource(row, kind, target) {
@@ -617,14 +656,27 @@
             await api("/grants", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id,
                 permissions, startsAt: temp ? new Date(start.value).toISOString() : null, expiresAt: temp ? new Date(expiry.value).toISOString() : null }); await load();
         }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
-        pick = directoryPicker(body);
+        pick = directoryPicker(body,{changed:()=>summary()});
         temporary = select(body, t("Giltighet"), [["permanent", t("Tills vidare")], ["temporary", t("Tillfällig läsrätt – endast användare")]]);
+        const preset=select(body,t("Åtkomstuppgift"),[["1",t("Endast se listan")],["3",t("Läsa och kopiera")],["7",t("Läsa och ändra")],["custom",t("Anpassade rättigheter")]],"1");
         const permissions = node("fieldset"); permissions.append(node("legend", t("Rättigheter"))); body.append(permissions);
         hint(permissions, t("Metadataåtkomst ingår alltid. Välj inga ytterligare rättigheter för endast metadata."));
         [[2, t("Läsa hemligheter")], [4, t("Ändra innehåll")], [8, t("Hantera behörigheter")], [16, t("Testa mot LDAP")]].forEach(([bit, label]) => { const row = node("div", undefined, "check-row"); const input = field(row, label, "checkbox"); input.value = "on"; checks.push({ bit, input }); permissions.append(row); });
         const times = node("div", undefined, "field-row"); const localDate = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         start = field(times, t("Från"), "datetime-local", localDate(new Date())); expiry = field(times, t("Till"), "datetime-local", localDate(new Date(Date.now() + 3600000))); body.append(times); times.hidden = true;
-        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; pick.onlyUsers(temp); times.hidden = !temp; start.required = expiry.required = temp; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; }); });
+        const review=node("section",undefined,"panel");review.setAttribute("aria-label",t("Kontrollera tilldelningen"));review.append(node("h3",t("Kontrollera tilldelningen")));const reviewText=node("p");reviewText.setAttribute("role","status");review.append(reviewText);body.append(review);
+        if(kind===0)hint(review,t("Tilldelningen gäller gruppen och dess ärvande undergrupper och resurser."));
+        function summary(){
+            if(!pick||!temporary||!start||!expiry)return;
+            const subject=pick.selected(),bits=temporary.value==="temporary"?3:checks.filter(x=>x.input.checked).reduce((value,x)=>value|x.bit,1);
+            const path=groupPath(kind===0?target.id:target.groupId).map(x=>x.name).concat(kind===1?[target.name]:[]).join(" / ");
+            reviewText.textContent=(subject?subject.name+(subject.samAccountName?" · "+subject.samAccountName:"")+" · "+subject.provider+" · "+subject.id:t("Sök och välj en användare eller grupp först."))+" — "+path+" — "+rights(bits)+" — "+(temporary.value==="temporary"?date(start.value)+" – "+date(expiry.value):t("Tills vidare"));
+        }
+        const refreshRights=()=>{permissions.hidden=preset.value!=="custom";summary();};
+        preset.addEventListener("change",()=>{if(preset.value!=="custom")checks.forEach(x=>x.input.checked=!!(Number(preset.value)&x.bit));refreshRights();});
+        checks.forEach(x=>x.input.addEventListener("change",summary));start.addEventListener("input",summary);expiry.addEventListener("input",summary);
+        temporary.addEventListener("change", () => { const temp = temporary.value === "temporary"; pick.onlyUsers(temp); times.hidden = !temp; start.required = expiry.required = temp;preset.disabled=temp;if(temp)preset.value="3"; checks.forEach(x => { x.input.disabled = temp; if (temp) x.input.checked = x.bit === 2; });refreshRights(); });
+        refreshRights();
         hint(body, t("Metadataåtkomst ingår. Vid tillfällig rätt är Från och Till obligatoriska. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."));
     }
     function ownerDialog(kind, target) {
@@ -665,7 +717,7 @@
         }, "primary"));
     }
     function licenseTable(parent, licenses, scoped) {
-        if (!licenses.length) { empty(parent, t("Inga licenser ännu"), t("Registrera programlicenser, platser och giltighetstid.")); return; }
+        if (!licenses.length) { empty(parent, t("Inga licenser ännu"), t((scoped?has(4):state.resources.some(x=>(x.permissions&5)===5))?"Registrera programlicenser, platser och giltighetstid.":"Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.")); return; }
         table(parent, [t("Produkt"), t("Platser"), t("Giltig till"), t("Åtgärder")], licenses.map(license => {
             const resource = state.resources.find(x => x.id === license.resourceId); const actions = node("div", undefined, "actions");
             if (resource?.permissions & 2) actions.append(button(t("Visa nyckel"), () => revealLicense(license)));
@@ -690,8 +742,17 @@
                 if(writableResources.length)licenseDialog(null,writableResources);
                 else hint(dialog(t("Lägg till licens")),t("Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination."));
             }, "primary")]);
-        const licenses = (await Promise.all(state.resources.filter(x => x.permissions & 1).map(x => api(`/resources/${x.id}/licenses`)))).flat();
+        const resume=state.licenseResume;state.licenseResume=null;
+        const licenses=resume?.licenses.slice()||[];let offset=resume?.offset||0,hasMore=true,loadError;
+        try{
+            for(let page=0;page<100&&hasMore&&offset<20000;page++){
+                const result=await api(`/licenses/overview?offset=${offset}`);if(epoch!==renderEpoch)return;
+                licenses.push(...result.items.filter(item=>!licenses.some(existing=>existing.id===item.id)));offset+=result.items.length;hasMore=result.hasMore;
+                if(hasMore&&!result.items.length)throw new Error(t("Licensöversikten kunde inte läsas färdigt."));
+            }
+        }catch(error){if(epoch!==renderEpoch)return;if(!licenses.length)throw error;loadError=error.message;}
         if (epoch !== renderEpoch) return;
+        if(hasMore){const partial=node("section",undefined,"notice error");partial.append(node("p",t("Ofullständig översikt: sammanfattningar, sökning och sortering gäller bara inlästa licenser.")));if(loadError){partial.append(node("p",loadError),button(t("Försök igen"),()=>{if(epoch!==renderEpoch)return;state.licenseResume={licenses,offset};return render();}));}else partial.append(routeLink(t("← Alla resurser"),{view:"vault"}));$("content").append(partial);}
         const expiring=x=>x.expiresAt&&new Date(x.expiresAt)<new Date(Date.now()+30*86400000);
         const stats=node("div",undefined,"summary-grid"),toolbar=node("div",undefined,"toolbar"); $("content").append(stats,toolbar);
         const search=field(controlGroup(toolbar),t("Sök licenser"),"search",state.licenseFilters.search||"");
@@ -717,19 +778,21 @@
     }
     function licenseDialog(license, writableResources) {
             const resourceId = license?.resourceId || state.resource?.id;
+            const originalExpiry=license?.expiresAt||null,originalDate=originalExpiry?calendarDate(originalExpiry):"";
             let resourcePicker;
             let product, vendor, reference, seats, expiry, key, notes, change;
             const body = dialog(license ? t("Ändra licens") : t("Lägg till licens"), t("Spara"), async () => {
                 const mode = Number(change.value);
                 if (mode === 1 && !key.value.trim()) throw new Error(t("Ange en ny licensnyckel eller välj att behålla eller tömma nyckeln."));
                 await api(license ? `/licenses/${license.id}/update` : "/licenses", { resourceId: resourcePicker ? resourcePicker.value : resourceId, product: product.value, vendor: vendor.value, purchaseReference: reference.value,
-                    seats: Number(seats.value), expiresAt: expiry.value ? new Date(expiry.value + "T23:59:59").toISOString() : null,
+                    seats: Number(seats.value), expiresAt: expiry.value===originalDate?originalExpiry:expiry.value ? new Date(expiry.value + "T23:59:59").toISOString() : null,
                     secretChange: mode, payload: mode === 1 ? { licenseKey: key.value, notes: notes.value } : null, revision: license?.revision || 0 }); await render();
             });
             if (writableResources) { resourcePicker = select(body, t("Resurs"), [["",t("Välj en destinationsresurs")],...writableResources.map(x => [x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],""); resourcePicker.required=true; }
             product = field(body, t("Produkt"), "text", license?.product || "", true); vendor = field(body, t("Leverantör"), "text", license?.vendor || "");
             reference = field(body, t("Inköpsreferens"), "text", license?.purchaseReference || ""); seats = field(body, t("Antal platser"), "number", String(license?.seats || 1), true); seats.min = "1"; seats.max = "1000000";
-            expiry = field(body, t("Giltig till"), "date", license?.expiresAt?.slice(0, 10) || "");
+            expiry = field(body, t("Giltig till"), "date", originalDate);
+            hint(body,t("Datum visas i din lokala tidszon. Oförändrat datum behåller den exakta giltighetstiden; ett nytt datum gäller till dagens slut i din tidszon."));
             change = select(body, t("Licensnyckel och hemliga anteckningar"), license ? [["0", t("Behåll befintliga värden")], ["1", t("Ersätt med nya värden")], ["2", t("Töm värdena uttryckligen")]] : [["1", t("Spara ny licensnyckel")]], license ? "0" : "1");
             key = field(body, t("Ny licensnyckel"), "password"); notes = field(body, t("Nya hemliga anteckningar"), "textarea"); key.maxLength = notes.maxLength = 65536;
             const update = () => { key.value = notes.value = ""; key.disabled = notes.disabled = change.value !== "1"; key.required = change.value === "1"; updateSecretSubmitState(); };
@@ -760,25 +823,40 @@
             return [String(version.version), date(version.createdAt), version.createdBy, actions];
         }));
     }
-    async function assignmentDialog(license, resource) {
-        const epoch = ++dialogEpoch;
-        const assignments = await api(`/licenses/${license.id}/assignments`); if (!canDisplay(epoch)) return;
-        const body = dialog(t("Tilldelningar · ") + license.product);
-        hint(body, t("{assigned} av {seats} platser tilldelade.", {assigned: license.assignedSeats, seats: license.seats}));
-        if (resource?.permissions & 4) body.append(button(t("+ Tilldela platser"), () => {
-            let mode, pick, target, seats; const form = dialog(t("Tilldela licensplatser"), t("Tilldela"), async () => {
+    async function assignmentDialog(license, resource,feedback) {
+        resource=state.resources.find(x=>x.id===license.resourceId);
+        const loaded=await metadataDialog(t("Tilldelningar · ")+license.product,async()=>{
+            const [rows,licenses]=await Promise.all([api(`/licenses/${license.id}/assignments`),api(`/resources/${license.resourceId}/licenses`)]);
+            const current=licenses.find(x=>x.id===license.id);if(!current)throw new Error(t("Licensen är inte tillgänglig."));return{rows,current};
+        },()=>assignmentDialog(license,resource));if(!loaded)return;
+        const {body,value:{rows:assignments,current}}=loaded;license=current;
+        const assigned=assignments.reduce((sum,x)=>sum+x.seats,0),available=Math.max(0,license.seats-assigned);
+        if(feedback){const result=node("p",feedback,"notice");result.setAttribute("role","status");body.append(result);}
+        hint(body, t("{assigned} av {seats} platser tilldelade.", {assigned,seats:license.seats}));
+        const returnToOverview=()=>assignmentDialog(license,resource);
+        if (resource?.permissions & 4) {const add=button(t("+ Tilldela platser"), () => {
+            let mode, pick, target, seats; const form = dialog(t("Tilldela licensplatser"), t("Tilldela platser"), async () => {
+                if(mode.value==="resource"&&!target.value)throw new Error(t("Välj en destinationsresurs"));
                 const subject = mode.value === "user" ? pick() : null;
                 await api("/assignments", { licenseId: license.id, resourceId: mode.value === "resource" ? target.value : null,
-                    userProvider: subject?.provider || null, userId: subject?.id || null, seats: Number(seats.value) }); await render();
-            });
+                    userProvider: subject?.provider || null, userId: subject?.id || null, seats: Number(seats.value) }); await load();
+            },{back:returnToOverview,afterSave:message=>assignmentDialog(license,resource,message)});
+            hint(form,license.product+" · "+(resource?groupPath(resource.groupId).map(g=>g.name).concat(resource.name).join(" / "):""));
+            hint(form,t("{available} platser tillgängliga.",{available}));
             mode = select(form, t("Tilldela till"), [["user", t("Användare")], ["resource", t("Resurs")]]);
-            const users = node("div"); pick = directoryPicker(users); users.querySelector("select").disabled = true; form.append(users);
-            const resources = node("div"); target = select(resources, t("Resurs"), state.resources.filter(x => x.permissions & 1).map(x => [x.id, x.name])); form.append(resources); resources.hidden = true;
-            mode.addEventListener("change", () => { users.hidden = mode.value !== "user"; resources.hidden = mode.value !== "resource"; });
-            seats = field(form, t("Antal platser"), "number", "1", true); seats.min = "1"; seats.max = String(license.seats);
-        }));
-        table(body, [t("Tilldelad till"), t("Platser"), t("Datum"), ""], assignments.map(x => [x.userId || state.resources.find(r => r.id === x.resourceId)?.name || x.resourceId, String(x.seats), date(x.createdAt),
-            resource?.permissions & 4 ? button(t("Återta"), async () => { await api(`/assignments/${x.id}/remove`, {}); await render(); closeDialog(); }) : ""]));
+            const users = node("div"); pick = directoryPicker(users,{searchPath:`/licenses/${license.id}/people`,usersOnly:true});form.append(users);
+            const resources = node("div"); target = select(resources, t("Resurs"), [["",t("Välj en destinationsresurs")],...state.resources.filter(x=>x.permissions&1).map(x=>[x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],"");form.append(resources);resources.hidden=true;target.disabled=true;
+            mode.addEventListener("change",()=>{pick.clear();target.value="";users.hidden=mode.value!=="user";users.querySelector("fieldset").disabled=users.hidden;resources.hidden=mode.value!=="resource";target.disabled=mode.value!=="resource";target.required=!target.disabled;});
+            seats = field(form, t("Antal platser"), "number", "1", true); seats.min = "1"; seats.max = String(available);
+        });add.disabled=!available;body.append(add);if(!available)hint(body,t("Alla platser är tilldelade. Återta en tilldelning innan du lägger till en ny."));}
+        table(body, [t("Tilldelad till"), t("Platser"), t("Datum"), ""], assignments.map(x => {
+            const target=state.resources.find(r=>r.id===x.resourceId),label=x.userId?(x.userName||x.userId)+(x.samAccountName?" · "+x.samAccountName:""):(target?groupPath(target.groupId).map(g=>g.name).concat(target.name).join(" / "):x.resourceId);
+            const identity=node("div");identity.append(node("strong",label),node("p",x.userId?(x.userProvider+" · "+x.userId):x.resourceId,"hint audit-id"));
+            return[identity,String(x.seats),date(x.createdAt),resource?.permissions&4?button(t("Återta platser"),()=>{
+                const confirmation=dialog(t("Bekräfta återtagning"),t("Återta platser"),async()=>{await api(`/assignments/${x.id}/remove`,{});await load();},{back:returnToOverview,afterSave:message=>assignmentDialog(license,resource,message)});
+                hint(confirmation,t("Återta {seats} platser från {recipient}?",{seats:x.seats,recipient:label}));
+            },"danger"):""];
+        })).classList.add("mobile-records");if(!assignments.length)hint(body,t("Inga tilldelningar ännu."));
     }
     function auditScopeLabel(view) {
         if (!view.signatureValid) return t("Auditkontext kan inte verifieras.");
@@ -795,14 +873,15 @@
         catch { targetsUnavailable = true; }
         if (epoch !== renderEpoch) return;
         const toolbar = node("div", undefined, "audit-filters");
-        const filter = (label, type) => { const group = node("div"); toolbar.append(group); return field(group, label, type); };
+        const advanced=node("details");advanced.append(node("summary",t("Avancerade filter")));const technicalFilters=node("div",undefined,"audit-filters");advanced.append(technicalFilters);
+        const filter = (label, type, parent=toolbar) => { const group = node("div"); parent.append(group); return field(group, label, type); };
         const from = filter(t("Från"), "datetime-local"), to = filter(t("Till (exklusive)"), "datetime-local");
-        const actor = filter(t("Aktörens ID"), "text"), action = filter(t("Operation"), "text"); $("content").append(toolbar);
+        const actor = filter(t("Aktörens ID"), "text",technicalFilters), action = filter(t("Operation"), "text",technicalFilters); $("content").append(toolbar,advanced);
         const actorChoices=targets.actors||[],actionChoices=targets.actions||[];
-        const actorChoice=select(controlGroup(toolbar),t("Registrerade aktörer"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
-        const operationChoice=select(controlGroup(toolbar),t("Registrerade operationer"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
+        const actorChoice=select(controlGroup(toolbar),t("Person eller tjänst"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
+        const operationChoice=select(controlGroup(toolbar),t("Åtgärd"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
         actorChoice.disabled=operationChoice.disabled=targetsUnavailable;
-        hint(toolbar,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
+        hint(advanced,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
         const targetFilter = (label, options) => {
             const names = new Map(); options.forEach(x => names.set(x.name, (names.get(x.name) || 0) + 1));
             const group = node("div"); toolbar.append(group);
@@ -820,9 +899,10 @@
         descendants.checked = saved.descendants !== false;
         let actorProvider=saved.actorProvider||"";
         const read=()=>({from:from.value,to:to.value,actor:actor.value,actorProvider,action:action.value,resource:resource.value,group:group.value,descendants:descendants.checked});
-        let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0;
+        let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0,snapshotExpired=false;
         const selectedActor=actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider);
         actorChoice.value=selectedActor<0?"":String(selectedActor+1);operationChoice.value=action.value;
+        advanced.open=!!(actor.value&&selectedActor<0||action.value&&!actionChoices.includes(action.value));
         const panelNode = panel($("content"), t("Händelser")); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
         const remember=()=>{state.auditFilters={...read(),offset:applied.offset,applied:{...applied}};dirty.textContent=t("Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.");
             dirty.hidden=Object.entries(read()).every(([key,value])=>applied[key]===value);};
@@ -832,31 +912,41 @@
         operationChoice.addEventListener("change",()=>{action.value=operationChoice.value;remember();});
         [from,to,resource,group,descendants].forEach(input=>{input.addEventListener("input",remember);input.addEventListener("change",remember);});
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); panelNode.append(count);
-        function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
-        const availability=busy=>{previous.disabled=busy||!hasResults||applied.offset===0;next.disabled=busy||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||!hasResults;apply.disabled=busy;};
+        const snapshotInfo=node("p",undefined,"hint filter-actions");toolbar.append(snapshotInfo);
+        hint(panelNode,t("En ändring kan ha flera auditrader: begäran och genomförande är steg i samma operation, inte två genomförda ändringar. En begäran bevisar inte att ändringen slutfördes. Jämför operations-ID i detaljer; andra steg kan ligga utanför sidan eller filtret."));
+        function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.snapshotId)params.set("snapshotId",value.snapshotId);if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
+        const availability=busy=>{previous.disabled=busy||snapshotExpired||!hasResults||applied.offset===0;next.disabled=busy||snapshotExpired||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||snapshotExpired||!hasResults||!applied.snapshotId;apply.disabled=refreshAudit.disabled=busy;};
         const paint = async requested => {
             const requestEpoch = ++paintEpoch;availability(true);failure.replaceChildren();results.setAttribute("aria-busy","true");count.textContent=t("Läser in…");
             try {
             const events = await api("/audit?" + query(requested)); if (epoch !== renderEpoch || requestEpoch !== paintEpoch) return;
-            applied={...requested};hasResults=true;rowCount=events.length;remember();results.replaceChildren();
+            applied={...requested,snapshotId:events.snapshotId||requested.snapshotId};snapshotExpired=false;hasResults=true;rowCount=events.length;remember();results.replaceChildren();
+            snapshotInfo.textContent=events.capturedAt?t("Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.",{captured:date(events.capturedAt),expires:date(events.expiresAt)}):t("Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.");
             count.textContent = events.length + t(" händelser visas på sida ") + (applied.offset / 200 + 1) + ".";
             if (!events.length) { empty(results, t("Inga händelser"), t("Ändra filtret eller gå till föregående sida.")); return; }
-            table(results, [t("Tid"), t("Aktör"), t("Operation"), t("Resurs / resursgrupp"), t("Resultat"), t("Verifiering")], events.map(x => [date(x.event.timestamp), node("span", x.event.actorId, "audit-id"),
-                auditActionLabel(x.event.action), auditScopeLabel(x),
-                x.event.outcome, node("span", x.signatureValid ? t("Giltig signatur") : t("Ogiltig signatur"), "badge" + (x.signatureValid ? "" : " error"))]));
-            }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t("Försök igen"),()=>paint(requested)));}
+            table(results, [t("Tid"), t("Aktör"), t("Operation"), t("Resurs / resursgrupp"), t("Resultat"), t("Verifiering"),t("Tekniska detaljer")], events.map(x => {
+                const actor=x.signatureValid?actorChoices.find(a=>a.id===x.event.actorId&&a.provider===x.event.actorProvider):null;
+                const outcome=node("div"),phases={0:"Händelse",1:"Begäran",2:"Genomförd",3:"Misslyckad",Event:"Händelse",Intent:"Begäran",Committed:"Genomförd",Failed:"Misslyckad"};
+                const outcomes={Requested:"Begärd",Committed:"Bekräftad ändring",CommitUncertain:"Kan ha sparats. Kontrollera destinationen före ett nytt försök.",Success:"Lyckades",Denied:"Nekad",Failed:"Misslyckad",InvalidSignature:"Ogiltig signatur"};
+                outcome.append(node("strong",x.signatureValid?t(Object.hasOwn(phases,x.event.phase)?phases[x.event.phase]:"Händelse"):t("Ej verifierat")));if(x.signatureValid)outcome.append(node("p",t(Object.hasOwn(outcomes,x.event.outcome)?outcomes[x.event.outcome]:x.event.outcome),"hint"));
+                const details=node("details");details.append(node("summary",t("Tekniska detaljer")));
+                const facts=[["ID",x.event.id],[t("Operations-ID"),x.event.operationId],[t("Korrelations-ID"),x.event.correlationId],[t("Aktör"),[x.event.actorProvider,x.event.actorId].filter(Boolean).join(" · ")],[t("Operation"),x.event.action],[t("Steg"),x.event.phase],[t("Resultat"),x.event.outcome]];
+                facts.forEach(([label,value])=>details.append(node("p",label+": "+String(value??"—"),"audit-id")));
+                return [date(x.event.timestamp),node("span",actor?.name||x.event.actorId),auditActionLabel(x.event.action),auditScopeLabel(x),outcome,node("span",x.signatureValid?t("Giltig signatur"):t("Ogiltig signatur"),"badge"+(x.signatureValid?"":" error")),details];
+            }));
+            }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;if(error.status===409)snapshotExpired=true;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t(error.status===409?"Uppdatera auditvyn":"Försök igen"),()=>paint(error.status===409?{...requested,snapshotId:undefined,offset:0}:requested)));}
             finally{if(epoch===renderEpoch&&requestEpoch===paintEpoch){results.removeAttribute("aria-busy");availability(false);}}
         };
         const filterActions = node("div", undefined, "actions filter-actions"); toolbar.append(filterActions);
         const apply=button(t("Filtrera"),()=>{if(from.value&&to.value&&new Date(from.value)>=new Date(to.value))throw new Error(t("Sluttiden måste vara efter starttiden."));return paint({...read(),offset:0});});
         const exportPage=button(t("Exportera denna sida"), async () => {
-            const response = await fetch("/api/audit/export?" + query(applied), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok) throw new Error(t("Auditexporten misslyckades."));
+            const response = await fetch("/api/audit/export?" + query(applied), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok){if(response.status===409){snapshotExpired=true;availability(false);}throw new Error(t(response.status===409?"Auditvyn har löpt ut. Läs aktuella händelser innan du fortsätter.":"Auditexporten misslyckades."));}
             const url = URL.createObjectURL(await response.blob()); const link = node("a"); link.href = url; link.download = "valvra-audit.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-        });filterActions.append(apply,exportPage);
+        });const refreshAudit=button(t("Uppdatera auditvyn"),()=>paint({...applied,snapshotId:undefined,offset:0}));filterActions.append(apply,exportPage,refreshAudit);
         const previous=button(t("← Föregående"),()=>paint({...applied,offset:Math.max(0,applied.offset-200)})),next=button(t("Nästa →"),()=>paint({...applied,offset:applied.offset+200}));
         const paging = node("div", undefined, "actions");paging.append(previous,next);$("content").append(paging);await paint(applied);
     }
-    function auditActionLabel(code){const labels={"Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code])+" · "+code:code;}
+    function auditActionLabel(code){const labels={"Group.Delete":"Ta bort resursgrupp","Resource.Delete":"Ta bort resurs","Owner.Add":"Lägg till ägare","Owner.Remove":"Ta bort ägare","GlobalRoles.Update":"Ändra globala roller","Secret.Undelete":"Återställ borttaget lösenord","License.Delete":"Ta bort licens","License.Undelete":"Återställ borttagen licens","Group.Create":"Skapa resursgrupp","Group.Rename":"Byt namn på resursgrupp","Group.Move":"Flytta resursgrupp","Resource.Create":"Skapa resurs","Resource.Rename":"Byt namn på resurs","Resource.Move":"Flytta resurs","Session.Identified":"Verifiera inloggning","Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code]):code;}
     document.querySelectorAll("[data-view],.brand").forEach(bindRouteLink);
     window.addEventListener("resize",()=>closeActionMenu?.());
     // Scrolling a menu trigger into view can dispatch a delayed scroll after it

@@ -44,6 +44,19 @@ test('metadata editing defaults to preserving key without fetching or submitting
     await h.elements.get('dialog-form').onsubmit({preventDefault(){}});
     assert.equal(h.writes.length,1);assert.equal(h.writes[0].body.secretChange,0);assert.equal(h.writes[0].body.payload,null);
 });
+
+for(const [zone,expected]of [['America/New_York','2026-10-13'],['America/Los_Angeles','2026-10-13'],['Europe/Stockholm','2026-10-14'],['Asia/Tokyo','2026-10-14']])test('unchanged license expiry preserves exact instant in '+zone,async()=>{
+ const previous=process.env.TZ;try{process.env.TZ=zone;const h=harness(),instant='2026-10-14T03:59:59Z';h.ui.licenseDialog({...h.license,expiresAt:instant});
+ const expiry=h.elements.get('dialog-content').querySelectorAll('input').find(x=>x.type==='date');assert.equal(expiry.value,expected);
+ await h.elements.get('dialog-form').onsubmit({preventDefault(){}});assert.equal(h.writes[0].body.expiresAt,instant);
+ }finally{if(previous===undefined)delete process.env.TZ;else process.env.TZ=previous;}
+});
+test('changed license expiry uses local end-of-day across DST',async()=>{
+ const previous=process.env.TZ;try{process.env.TZ='America/New_York';const h=harness();h.ui.licenseDialog({...h.license,expiresAt:'2026-10-14T03:59:59Z'});
+ h.elements.get('dialog-content').querySelectorAll('input').find(x=>x.type==='date').value='2026-11-01';await h.elements.get('dialog-form').onsubmit({preventDefault(){}});
+ assert.equal(h.writes[0].body.expiresAt,'2026-11-02T04:59:59.000Z');
+ }finally{if(previous===undefined)delete process.env.TZ;else process.env.TZ=previous;}
+});
 test('blur preserves ordinary license edits and metadata can be saved on return',async()=>{
     const h=harness();h.ui.licenseDialog(h.license);
     h.elements.get('dialog-content').querySelectorAll('input')[0].value='Edited product';h.handlers.get('blur')();

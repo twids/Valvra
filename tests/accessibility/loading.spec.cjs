@@ -33,6 +33,7 @@ test('failed audit updates preserve the displayed query and explicit retry',asyn
     let fail=false;
     await page.route('**/api/audit?*',async route=>fail?route.fulfill({status:503,json:{error:'Synthetic audit failure'}}):route.continue());
     await page.goto('/audit');await expect(page.getByRole('table')).toBeVisible();
+    await page.getByText('Advanced filters',{exact:true}).click();
     await page.getByLabel('Operation',{exact:true}).fill('Secret.Create');fail=true;await page.getByRole('button',{name:'Filter',exact:true}).click();
     await expect(page.getByText('Previous results are shown. The update failed.',{exact:true})).toBeVisible();await expect(page.getByRole('table')).toBeVisible();
     fail=false;await page.getByRole('button',{name:'Retry',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'events shown'})).toContainText('6 ');
