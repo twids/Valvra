@@ -873,14 +873,15 @@
         catch { targetsUnavailable = true; }
         if (epoch !== renderEpoch) return;
         const toolbar = node("div", undefined, "audit-filters");
-        const filter = (label, type) => { const group = node("div"); toolbar.append(group); return field(group, label, type); };
+        const advanced=node("details");advanced.append(node("summary",t("Avancerade filter")));const technicalFilters=node("div",undefined,"audit-filters");advanced.append(technicalFilters);
+        const filter = (label, type, parent=toolbar) => { const group = node("div"); parent.append(group); return field(group, label, type); };
         const from = filter(t("Från"), "datetime-local"), to = filter(t("Till (exklusive)"), "datetime-local");
-        const actor = filter(t("Aktörens ID"), "text"), action = filter(t("Operation"), "text"); $("content").append(toolbar);
+        const actor = filter(t("Aktörens ID"), "text",technicalFilters), action = filter(t("Operation"), "text",technicalFilters); $("content").append(toolbar,advanced);
         const actorChoices=targets.actors||[],actionChoices=targets.actions||[];
-        const actorChoice=select(controlGroup(toolbar),t("Registrerade aktörer"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
-        const operationChoice=select(controlGroup(toolbar),t("Registrerade operationer"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
+        const actorChoice=select(controlGroup(toolbar),t("Person eller tjänst"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),(x.name||x.id)+" · "+x.provider+" · "+x.id])]);
+        const operationChoice=select(controlGroup(toolbar),t("Åtgärd"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
         actorChoice.disabled=operationChoice.disabled=targetsUnavailable;
-        hint(toolbar,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
+        hint(advanced,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
         const targetFilter = (label, options) => {
             const names = new Map(); options.forEach(x => names.set(x.name, (names.get(x.name) || 0) + 1));
             const group = node("div"); toolbar.append(group);
@@ -901,6 +902,7 @@
         let applied=saved.applied?{...saved.applied}:{...read(),offset:saved.offset||0},paintEpoch=0,hasResults=false,rowCount=0,snapshotExpired=false;
         const selectedActor=actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider);
         actorChoice.value=selectedActor<0?"":String(selectedActor+1);operationChoice.value=action.value;
+        advanced.open=!!(actor.value&&selectedActor<0||action.value&&!actionChoices.includes(action.value));
         const panelNode = panel($("content"), t("Händelser")); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
         const remember=()=>{state.auditFilters={...read(),offset:applied.offset,applied:{...applied}};dirty.textContent=t("Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.");
             dirty.hidden=Object.entries(read()).every(([key,value])=>applied[key]===value);};
@@ -910,7 +912,8 @@
         operationChoice.addEventListener("change",()=>{action.value=operationChoice.value;remember();});
         [from,to,resource,group,descendants].forEach(input=>{input.addEventListener("input",remember);input.addEventListener("change",remember);});
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); panelNode.append(count);
-        const snapshotInfo=node("p",undefined,"hint");panelNode.append(snapshotInfo);
+        const snapshotInfo=node("p",undefined,"hint filter-actions");toolbar.append(snapshotInfo);
+        hint(panelNode,t("En ändring kan ha flera auditrader: begäran och genomförande är steg i samma operation, inte två genomförda ändringar. En begäran bevisar inte att ändringen slutfördes. Jämför operations-ID i detaljer; andra steg kan ligga utanför sidan eller filtret."));
         function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.snapshotId)params.set("snapshotId",value.snapshotId);if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
         const availability=busy=>{previous.disabled=busy||snapshotExpired||!hasResults||applied.offset===0;next.disabled=busy||snapshotExpired||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||snapshotExpired||!hasResults||!applied.snapshotId;apply.disabled=refreshAudit.disabled=busy;};
         const paint = async requested => {
@@ -921,9 +924,16 @@
             snapshotInfo.textContent=events.capturedAt?t("Auditvy från {captured}, giltig till {expires}. Signaturer verifierades när vyn lästes. Uppdatera auditvyn för nya händelser.",{captured:date(events.capturedAt),expires:date(events.expiresAt)}):t("Auditvyn saknar en stabil ögonblicksbild. Uppdatera innan export.");
             count.textContent = events.length + t(" händelser visas på sida ") + (applied.offset / 200 + 1) + ".";
             if (!events.length) { empty(results, t("Inga händelser"), t("Ändra filtret eller gå till föregående sida.")); return; }
-            table(results, [t("Tid"), t("Aktör"), t("Operation"), t("Resurs / resursgrupp"), t("Resultat"), t("Verifiering")], events.map(x => [date(x.event.timestamp), node("span", x.event.actorId, "audit-id"),
-                auditActionLabel(x.event.action), auditScopeLabel(x),
-                x.event.outcome, node("span", x.signatureValid ? t("Giltig signatur") : t("Ogiltig signatur"), "badge" + (x.signatureValid ? "" : " error"))]));
+            table(results, [t("Tid"), t("Aktör"), t("Operation"), t("Resurs / resursgrupp"), t("Resultat"), t("Verifiering"),t("Tekniska detaljer")], events.map(x => {
+                const actor=x.signatureValid?actorChoices.find(a=>a.id===x.event.actorId&&a.provider===x.event.actorProvider):null;
+                const outcome=node("div"),phases={0:"Händelse",1:"Begäran",2:"Genomförd",3:"Misslyckad",Event:"Händelse",Intent:"Begäran",Committed:"Genomförd",Failed:"Misslyckad"};
+                const outcomes={Requested:"Begärd",Committed:"Bekräftad ändring",CommitUncertain:"Kan ha sparats. Kontrollera destinationen före ett nytt försök.",Success:"Lyckades",Denied:"Nekad",Failed:"Misslyckad",InvalidSignature:"Ogiltig signatur"};
+                outcome.append(node("strong",x.signatureValid?t(Object.hasOwn(phases,x.event.phase)?phases[x.event.phase]:"Händelse"):t("Ej verifierat")));if(x.signatureValid)outcome.append(node("p",t(Object.hasOwn(outcomes,x.event.outcome)?outcomes[x.event.outcome]:x.event.outcome),"hint"));
+                const details=node("details");details.append(node("summary",t("Tekniska detaljer")));
+                const facts=[["ID",x.event.id],[t("Operations-ID"),x.event.operationId],[t("Korrelations-ID"),x.event.correlationId],[t("Aktör"),[x.event.actorProvider,x.event.actorId].filter(Boolean).join(" · ")],[t("Operation"),x.event.action],[t("Steg"),x.event.phase],[t("Resultat"),x.event.outcome]];
+                facts.forEach(([label,value])=>details.append(node("p",label+": "+String(value??"—"),"audit-id")));
+                return [date(x.event.timestamp),node("span",actor?.name||x.event.actorId),auditActionLabel(x.event.action),auditScopeLabel(x),outcome,node("span",x.signatureValid?t("Giltig signatur"):t("Ogiltig signatur"),"badge"+(x.signatureValid?"":" error")),details];
+            }));
             }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;if(error.status===409)snapshotExpired=true;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t(error.status===409?"Uppdatera auditvyn":"Försök igen"),()=>paint(error.status===409?{...requested,snapshotId:undefined,offset:0}:requested)));}
             finally{if(epoch===renderEpoch&&requestEpoch===paintEpoch){results.removeAttribute("aria-busy");availability(false);}}
         };
@@ -936,7 +946,7 @@
         const previous=button(t("← Föregående"),()=>paint({...applied,offset:Math.max(0,applied.offset-200)})),next=button(t("Nästa →"),()=>paint({...applied,offset:applied.offset+200}));
         const paging = node("div", undefined, "actions");paging.append(previous,next);$("content").append(paging);await paint(applied);
     }
-    function auditActionLabel(code){const labels={"Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code])+" · "+code:code;}
+    function auditActionLabel(code){const labels={"Group.Delete":"Ta bort resursgrupp","Resource.Delete":"Ta bort resurs","Owner.Add":"Lägg till ägare","Owner.Remove":"Ta bort ägare","GlobalRoles.Update":"Ändra globala roller","Secret.Undelete":"Återställ borttaget lösenord","License.Delete":"Ta bort licens","License.Undelete":"Återställ borttagen licens","Group.Create":"Skapa resursgrupp","Group.Rename":"Byt namn på resursgrupp","Group.Move":"Flytta resursgrupp","Resource.Create":"Skapa resurs","Resource.Rename":"Byt namn på resurs","Resource.Move":"Flytta resurs","Session.Identified":"Verifiera inloggning","Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code]):code;}
     document.querySelectorAll("[data-view],.brand").forEach(bindRouteLink);
     window.addEventListener("resize",()=>closeActionMenu?.());
     // Scrolling a menu trigger into view can dispatch a delayed scroll after it

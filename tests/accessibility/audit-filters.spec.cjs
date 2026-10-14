@@ -14,6 +14,7 @@ test('audit resource/group filters and export share criteria and preserve access
     await page.getByLabel('Resurs', {exact: true}).selectOption({label: 'Databasplattform'});
     await page.getByLabel('Resursgrupp', {exact: true}).selectOption({label: 'IT och infrastruktur'});
     await page.getByLabel('Inkludera undergrupper', {exact: true}).uncheck();
+    await page.getByText('Avancerade filter',{exact:true}).click();
     await page.getByLabel('Operation', {exact: true}).fill('Secret.Create');
     await page.getByLabel('Aktörens ID', {exact: true}).fill('user');
     const response = page.waitForResponse(r => r.url().includes('/api/audit?') && r.request().method() === 'GET');
@@ -57,8 +58,8 @@ test('group-only filtering works with subgroup checkbox and pagination', async (
 
 test('recorded actors resolve names and apply exact provider and operation while boundaries disable paging',async({page})=>{
     await page.goto('/audit');
-    const choice=page.getByLabel('Registrerade aktörer',{exact:true});await expect(choice.locator('option')).toHaveCount(2);await expect(choice).toHaveValue('');
-    await choice.selectOption('1');await page.getByLabel('Registrerade operationer',{exact:true}).selectOption('Secret.Create');
+    const choice=page.getByLabel('Person eller tjänst',{exact:true});await expect(choice.locator('option')).toHaveCount(2);await expect(choice).toHaveValue('');
+    await choice.selectOption('1');await page.getByLabel('Åtgärd',{exact:true}).selectOption('Secret.Create');
     const response=page.waitForResponse(r=>r.url().includes('/api/audit?'));
     await page.getByRole('button',{name:'Filtrera',exact:true}).click();const received=await response;
     expect(new URL(received.url()).searchParams.get('actorProvider')).toBe('ad');
@@ -102,4 +103,18 @@ test('expired audit snapshot offers an explicit refresh instead of retrying the 
  await page.getByRole('button',{name:'Uppdatera auditvyn',exact:true}).click();await expect(page.getByText('Expired synthetic view',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Exportera denna sida',exact:true})).toBeDisabled();
  expired=false;await page.getByRole('button',{name:'Uppdatera auditvyn',exact:true}).last().click();await expect(page.getByText('Expired synthetic view',{exact:true})).toHaveCount(0);await expect(page.getByRole('table')).toBeVisible();
+});
+
+test('audit explains mutation phases and retains exact technical evidence and invalid records',async({page})=>{
+ await page.route('**/api/audit/targets',route=>route.fulfill({json:{resources:[],groups:[],actors:[{id:'actor',provider:'ad',name:'Alex <img>'}],actions:['Resource.Create'],invalidEventCount:1}}));
+ const base={timestamp:'2026-10-14T10:00:00Z',actorProvider:'ad',actorId:'actor',action:'Resource.Create',operationId:'same-operation',correlationId:'same-request',scope:null};
+ await page.route('**/api/audit?*',route=>route.fulfill({json:[{event:{...base,id:'intent',phase:1,outcome:'Requested'},signatureValid:true},{event:{...base,id:'commit',phase:2,outcome:'Committed'},signatureValid:true},{event:{...base,id:'invalid',phase:2,outcome:'Success',scope:{resourceName:'Do not trust this',groupPath:[]}},signatureValid:false}]}));
+ await page.goto('/audit');await page.getByLabel('Språk',{exact:true}).selectOption('en');
+ await expect(page.getByLabel('Actor ID',{exact:true})).toBeHidden();
+ const table=page.getByRole('table'),rows=table.getByRole('row');await expect(rows).toHaveCount(4);
+ await expect(rows.nth(1).getByRole('cell').nth(1)).toHaveText('Alex <img>');await expect(rows.nth(1).getByRole('cell').nth(2)).toHaveText('Create resource');
+ await expect(rows.nth(1)).toContainText('Request');await expect(rows.nth(2)).toContainText('Completed');await expect(rows.nth(2)).toContainText('Change confirmed');await expect(rows.nth(3)).toContainText('Invalid signature');
+ await expect(table.locator('img')).toHaveCount(0);await expect(table).not.toContainText('Do not trust this');
+ await rows.nth(1).getByText('Technical details',{exact:true}).click();await expect(rows.nth(1)).toContainText('Operation ID: same-operation');await expect(rows.nth(1)).toContainText('Operation: Resource.Create');
+ await expect(page.getByText(/A change can have multiple audit records/)).toBeVisible();
 });

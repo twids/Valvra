@@ -123,11 +123,11 @@ test('cancel and save return to permissions, revoke requires confirmation, names
     const permissions = page.getByRole('dialog',{name:'Permissions · Databasplattform',exact:true});
     await expect(permissions).toBeVisible(); await expect(permissions).toContainText('Example Person');
     await expect(permissions.locator('img')).toHaveCount(0);
-    await permissions.getByRole('button',{name:/^Revoke/}).click();
+    await permissions.getByRole('row').filter({hasText:'Example Person'}).getByRole('button',{name:/^Revoke/}).click();
     await expect(page.getByRole('dialog',{name:'Revoke access · Databasplattform',exact:true})).toBeVisible();
     expect(revokes).toBe(0);
     await page.getByRole('button',{name:'← Back',exact:true}).click(); expect(revokes).toBe(0);
-    await permissions.getByRole('button',{name:/^Revoke/}).click();
+    await permissions.getByRole('row').filter({hasText:'Example Person'}).getByRole('button',{name:/^Revoke/}).click();
     await page.getByRole('button',{name:'Revoke',exact:true}).click();
     await expect(permissions).toBeVisible(); expect(revokes).toBe(1);
     await expect(permissions.getByRole('status')).toContainText('Completed and audited');
