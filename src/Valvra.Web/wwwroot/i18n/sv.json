@@ -751,5 +751,11 @@
   "Du kan lägga till och ändra innehåll.": "Du kan lägga till och ändra innehåll.",
   "Du kan hantera åtkomst.": "Du kan hantera åtkomst.",
   "Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem.": "Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem.",
-  "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.": "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem."
+  "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.": "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.",
+  "Sök i resursen": "Sök i resursen",
+  "Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig.": "Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig.",
+  "{shown} av {total} poster visas.": "{shown} av {total} poster visas.",
+  "Inga kontotitlar matchar sökningen.": "Inga kontotitlar matchar sökningen.",
+  "Inga produktnamn matchar sökningen.": "Inga produktnamn matchar sökningen.",
+  "{available} platser tillgängliga.": "{available} platser tillgängliga."
 }

@@ -5,7 +5,7 @@
     const navigation = window.ValvraNavigation;
     const t = (key, values) => i18n.message(key, values);
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
-        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), licenseFilters:{}, auditFilters: {} };
+        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), contentFilters:{}, licenseFilters:{}, auditFilters: {} };
     let renderEpoch = 0;
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
@@ -442,9 +442,17 @@
         if (!has(1)) { empty($("content"), t("Du administrerar åtkomsten"), t("Tilldela metadata-, läs- eller ändringsrätt för att använda resursens innehåll.")); return; }
         const [secrets, licenses] = await Promise.all([api(`/resources/${resource.id}/secrets`), api(`/resources/${resource.id}/licenses`)]);
         if (epoch !== renderEpoch) return;
-        const passwords = panel($("content"), t("Lösenord"), has(4) ? [button(t("+ Lägg till lösenord"), () => secretDialog(), "primary")] : []);
+        const controls=node("div",undefined,"toolbar"),search=field(controls,t("Sök i resursen"),"search",state.contentFilters[resource.id]||"");
+        search.maxLength=200;hint(controls,t("Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig."));
+        const count=node("p",undefined,"hint");count.setAttribute("role","status");controls.append(count);
+        const records=node("div");$("content").append(controls,records);
+        const paint=()=>{
+        const query=search.value.trim().toLocaleLowerCase(i18n.locale),visibleSecrets=secrets.filter(x=>x.title.toLocaleLowerCase(i18n.locale).includes(query)),visibleLicenses=licenses.filter(x=>x.product.toLocaleLowerCase(i18n.locale).includes(query));
+        state.contentFilters[resource.id]=search.value;records.replaceChildren();count.textContent=t("{shown} av {total} poster visas.",{shown:visibleSecrets.length+visibleLicenses.length,total:secrets.length+licenses.length});
+        const passwords = panel(records, t("Lösenord"), has(4) ? [button(t("+ Lägg till lösenord"), () => secretDialog(), "primary")] : []);
         if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t(has(4)?"Lägg till ett konto som hör till den här resursen.":"Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem."));
-        else table(passwords, [t("Konto"), "Version", t("Åtgärder")], secrets.map(secret => {
+        else if(!visibleSecrets.length)hint(passwords,t("Inga kontotitlar matchar sökningen."));
+        else table(passwords, [t("Konto"), "Version", t("Åtgärder")], visibleSecrets.map(secret => {
             const actions = node("div", undefined, "actions");
             if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret)), button(t("Kopiera"), () => copySecret(secret)));
             const secondary=[];
@@ -455,8 +463,10 @@
             actions.append(actionMenu(t("Fler åtgärder"),secondary,secret.title));
             return [secret.title, String(secret.currentVersion), actions];
         })).classList.add("mobile-records");
-        const licensePanel = panel($("content"), t("Licenser"), has(4) ? [button(t("+ Lägg till licens"), () => licenseDialog(), "primary")] : []);
-        licenseTable(licensePanel, licenses, true);
+        const licensePanel = panel(records, t("Licenser"), has(4) ? [button(t("+ Lägg till licens"), () => licenseDialog(), "primary")] : []);
+        if(licenses.length&&!visibleLicenses.length)hint(licensePanel,t("Inga produktnamn matchar sökningen."));else licenseTable(licensePanel, visibleLicenses, true);
+        };
+        controls.append(button(t("Rensa filter"),()=>{search.value="";paint();search.focus();}));search.addEventListener("input",paint);paint();
     }
     function createGroup() {
         let name, parent;
@@ -498,22 +508,23 @@
             });
             if (secret && !has(2)) hint(body, t("Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas."));
             title = field(body, t("Benämning"), "text", secret?.title || "", true); title.maxLength = 200;
+            profile = select(body, t("LDAP-testprofil"), [["", t("Ingen")], ...state.profiles.map(x => [x.id, x.name])], secret?.ldapProfileId || "");
             change=select(body,t("Lösenord och hemliga fält"),secret?[["0",t("Behåll befintliga värden")],["1",t("Ersätt alla hemliga fält")]]:[["1",t("Ersätt alla hemliga fält")]],secret?"0":"1");
-            username = field(body, t("Användarnamn"), "text"); username.dataset.sensitive = "true"; username.maxLength = 512;
-            password = field(body, t("Lösenord"), "password","",true); password.maxLength = 65536;
-            const generate=button(t("Generera lösenord"), () => { const bytes = crypto.getRandomValues(new Uint8Array(24)); password.value = Array.from(bytes, x => x.toString(16).padStart(2, "0")).join("");replacementEpoch++; updateSecretSubmitState(); });body.append(generate);
-            notes = field(body, t("Hemliga anteckningar"), "textarea"); notes.maxLength = 65536;
+            const replacement=node("div");body.append(replacement);
+            username = field(replacement, t("Användarnamn"), "text"); username.dataset.sensitive = "true"; username.maxLength = 512;
+            password = field(replacement, t("Lösenord"), "password","",true); password.maxLength = 65536;
+            const generate=button(t("Generera lösenord"), () => { const bytes = crypto.getRandomValues(new Uint8Array(24)); password.value = Array.from(bytes, x => x.toString(16).padStart(2, "0")).join("");replacementEpoch++; updateSecretSubmitState(); });replacement.append(generate);
+            notes = field(replacement, t("Hemliga anteckningar"), "textarea"); notes.maxLength = 65536;
             let readSaved;
-            const update=()=>{replacementEpoch++;username.value=password.value=notes.value="";username.disabled=password.disabled=notes.disabled=generate.disabled=change.value!=="1";if(readSaved)readSaved.disabled=change.value!=="1";password.required=change.value==="1";const marker=password.labels?.[0]?.querySelectorAll("span")[1];if(marker)i18n.setText(marker,password.required?t(" (obligatoriskt)"):"");updateSecretSubmitState();};
+            const update=()=>{replacement.hidden=change.value!=="1";replacementEpoch++;username.value=password.value=notes.value="";username.disabled=password.disabled=notes.disabled=generate.disabled=change.value!=="1";if(readSaved)readSaved.disabled=change.value!=="1";password.required=change.value==="1";const marker=password.labels?.[0]?.querySelectorAll("span")[1];if(marker)i18n.setText(marker,password.required?t(" (obligatoriskt)"):"");updateSecretSubmitState();};
             change.addEventListener("change",update);update();if(secret)resetReplacement=()=>{change.value="0";update();};
             [username,password,notes].forEach(input=>input.addEventListener("input",()=>replacementEpoch++));
             if(secret&&has(2)){readSaved=button(t("Läs sparade värden för ersättning"),async()=>{
                 if(change.value!=="1")throw new Error(t("Välj ersättning först."));const epoch=++dialogEpoch,request=replacementEpoch;
                 const payload=await api(`/secrets/${secret.id}/reveal`,{});if(!canDisplay(epoch)||request!==replacementEpoch||change.value!=="1")return;
                 username.value=payload.username;password.value=payload.password;notes.value=payload.notes;updateSecretSubmitState();
-            });readSaved.disabled=change.value!=="1";body.append(readSaved);}
+            });readSaved.disabled=change.value!=="1";replacement.append(readSaved);}
             hint(body,t("Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen."));
-            profile = select(body, t("LDAP-testprofil"), [["", t("Ingen")], ...state.profiles.map(x => [x.id, x.name])], secret?.ldapProfileId || "");
     }
     async function revealSecret(secret, version) {
         const epoch = ++dialogEpoch;
@@ -589,6 +600,7 @@
         results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? subject.name + " · " + subject.id : ""; });
         const pick = () => { const selected = subjects.find(x => x.id === results.value); if (!selected) throw new Error(t("Sök och välj en användare eller grupp först.")); return selected; };
         pick.onlyUsers = enabled => { if (enabled && kind.value !== "0") { kind.value = "0"; reset(); } kind.disabled = enabled; };
+        if(options.usersOnly){pick.onlyUsers(true);kind.hidden=true;kind.previousElementSibling.hidden=true;}
         pick.clear=reset;
         return pick;
     }
@@ -815,8 +827,10 @@
                 await api("/assignments", { licenseId: license.id, resourceId: mode.value === "resource" ? target.value : null,
                     userProvider: subject?.provider || null, userId: subject?.id || null, seats: Number(seats.value) }); await load();
             },{back:returnToOverview,afterSave:message=>assignmentDialog(license,resource,message)});
+            hint(form,license.product+" · "+(resource?groupPath(resource.groupId).map(g=>g.name).concat(resource.name).join(" / "):""));
+            hint(form,t("{available} platser tillgängliga.",{available}));
             mode = select(form, t("Tilldela till"), [["user", t("Användare")], ["resource", t("Resurs")]]);
-            const users = node("div"); pick = directoryPicker(users,{searchPath:`/licenses/${license.id}/people`});pick.onlyUsers(true);form.append(users);
+            const users = node("div"); pick = directoryPicker(users,{searchPath:`/licenses/${license.id}/people`,usersOnly:true});form.append(users);
             const resources = node("div"); target = select(resources, t("Resurs"), [["",t("Välj en destinationsresurs")],...state.resources.filter(x=>x.permissions&1).map(x=>[x.id,groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")+" · "+x.id])],"");form.append(resources);resources.hidden=true;target.disabled=true;
             mode.addEventListener("change",()=>{pick.clear();target.value="";users.hidden=mode.value!=="user";users.querySelector("fieldset").disabled=users.hidden;resources.hidden=mode.value!=="resource";target.disabled=mode.value!=="resource";target.required=!target.disabled;});
             seats = field(form, t("Antal platser"), "number", "1", true); seats.min = "1"; seats.max = String(available);

@@ -3,6 +3,7 @@ async function edit(page){await page.goto('/');await page.getByRole('link',{name
 test('password metadata edit never reveals and blur cannot silently replace secret fields',async({page})=>{
  let reveals=0,posted;page.on('request',r=>{if(r.url().includes('/reveal'))reveals++;});
  await page.route('**/api/secrets/*/update',route=>{posted=route.request().postDataJSON();return route.fulfill({status:204});});await edit(page);
+ await expect(page.getByLabel('Username',{exact:true})).toBeHidden();await expect(page.getByRole('button',{name:'Read saved values for replacement',exact:true})).toBeHidden();
  await page.getByLabel('Password and secret fields',{exact:true}).selectOption('1');await page.getByLabel('Username',{exact:true}).fill('draft-user');await page.getByLabel('Password (required)',{exact:true}).fill('draft-password');await page.getByLabel('Secret notes',{exact:true}).fill('draft-notes');
  await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await expect(page.getByLabel('Password and secret fields',{exact:true})).toHaveValue('0');
  await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');await expect(page.getByLabel('Username',{exact:true})).toHaveValue('');

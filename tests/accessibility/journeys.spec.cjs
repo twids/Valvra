@@ -27,3 +27,16 @@ test('administration distinguishes global roles from resource access and names t
  await expect(page.getByRole('heading',{name:'Certificates & security',level:1})).toBeFocused();await expect(page).toHaveTitle('Certificates & security · Valvra');
 });
 
+test('resource metadata filtering preserves context and never reads secret payloads',async({page})=>{
+ let reveals=0;page.on('request',r=>{if(r.url().includes('/reveal'))reveals++;});
+ await page.goto('/');await page.getByRole('link',{name:'Open resource · Databasplattform',exact:true}).click();
+ const path=new URL(page.url()).pathname,search=page.getByLabel('Search this resource',{exact:true});
+ await search.fill('Exempellicens');await expect(page.getByRole('table',{name:'Licenses',exact:true})).toBeVisible();
+ await expect(page.getByText('No account titles match your search.',{exact:true})).toBeVisible();
+ await page.getByRole('link',{name:'License overview',exact:true}).click();await page.goBack();
+ await expect(page).toHaveURL(path);await expect(search).toHaveValue('Exempellicens');
+ await search.fill('synthetic-browser-test-password');await expect(page.getByText('No product names match your search.',{exact:true})).toBeVisible();expect(reveals).toBe(0);
+ await page.getByRole('button',{name:'Clear filters',exact:true}).click();await expect(search).toHaveValue('');await expect(page.getByRole('table',{name:'Password',exact:true})).toBeVisible();
+});
+
+

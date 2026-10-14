@@ -2,6 +2,7 @@ const {test,expect}=require('@playwright/test');const {clickAction}=require('./u
 async function open(page){await page.goto('/');await page.getByRole('link',{name:'Open resource · Databasplattform',exact:true}).click();await clickAction(page,'Assignments · Exempellicens');await expect(page.getByRole('dialog').getByRole('table')).toBeVisible();}
 test('assignment destination is explicit and Add/Cancel return to overview',async({page})=>{
  await open(page);await page.getByRole('button',{name:'+ Assign seats',exact:true}).click();await page.getByLabel('Assign to',{exact:true}).selectOption('resource');
+ await expect(page.getByRole('dialog')).toContainText('Exempellicens · IT och infrastruktur / Databasplattform');await expect(page.getByRole('dialog')).toContainText('seats available.');
  const target=page.getByLabel('Resource',{exact:true});await expect(target).toHaveValue('');await expect(target.locator('option').filter({hasText:'Databasplattform'})).toContainText('IT och infrastruktur / Databasplattform · ');
  await page.getByRole('button',{name:'← Back',exact:true}).click();await expect(page.getByRole('dialog').getByRole('table')).toBeVisible();
  await page.getByRole('button',{name:'+ Assign seats',exact:true}).click();await page.getByLabel('Search Active Directory',{exact:true}).fill('x');await page.getByLabel('Assign to',{exact:true}).selectOption('resource');

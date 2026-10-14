@@ -751,5 +751,11 @@
   "Du kan lägga till och ändra innehåll.": "You can add and edit content.",
   "Du kan hantera åtkomst.": "You can manage access.",
   "Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem.": "There are no accounts here yet. Someone with modify permission can add them.",
-  "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.": "There are no licenses here yet. Someone with modify permission can add them."
+  "Det finns inga licenser här ännu. En person med ändringsrätt kan lägga till dem.": "There are no licenses here yet. Someone with modify permission can add them.",
+  "Sök i resursen": "Search this resource",
+  "Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig.": "Search account titles and product names. Secret values are never searched.",
+  "{shown} av {total} poster visas.": "Showing {shown} of {total} records.",
+  "Inga kontotitlar matchar sökningen.": "No account titles match your search.",
+  "Inga produktnamn matchar sökningen.": "No product names match your search.",
+  "{available} platser tillgängliga.": "{available} seats available."
 }
