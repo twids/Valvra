@@ -14,6 +14,7 @@ class Element {
     removeAttribute(name) {delete this.attributes[name];}
     hasAttribute(name) {return Object.hasOwn(this.attributes,name);}
     focus() {}
+    get labels() { let root=this;while(root.parentElement)root=root.parentElement;return root.querySelectorAll('label').filter(x=>x.htmlFor===this.id); }
     querySelector(selector) { return this.querySelectorAll(selector)[0]; }
     close() { this.open=false; }
     showModal() { this.open=true; }

@@ -9,6 +9,21 @@ namespace Valvra.Tests;
 public sealed class CredentialTestTests
 {
     [Fact]
+    public async Task GlobalAdministratorWithoutDirectGrantsCanTestCredentialsAndExclusionPreventsFurtherBind()
+    {
+        await using var f=await VaultServiceTests.Fixture.CreateAsync();
+        var globals=new GlobalRoleService(f.Db,f.Integrity,f.Audit,new FakeDirectory(),f.Clock);
+        await globals.BootstrapAsync(f.User,"setup",default);
+        await globals.SetAsync(f.User,"ad","admin",SubjectKind.User,GlobalRole.GlobalAdministrator,0,"assign",default);
+        var admin=await globals.ApplyAsync(f.User with{SubjectId="admin"},default);
+        var id=await f.Vault.CreateSecretAsync(f.User,f.ResourceId,"LDAP account",new("u","p",""),"approved","create",default);
+        var tester=new CountingTester();var service=Service(f,tester);
+        await service.TestAsync(admin,id,"test",default);Assert.Equal(1,tester.Calls);
+        await globals.ExcludeAsync(f.User,TargetKind.Resource,f.ResourceId,"ad","admin","exclude",default);
+        f.Clock.Advance(TimeSpan.FromMinutes(5));
+        await Assert.ThrowsAsync<AccessDeniedException>(()=>service.TestAsync(admin,id,"denied",default));Assert.Equal(1,tester.Calls);
+    }
+    [Fact]
     public async Task ReadPermissionAloneCannotTriggerLdapBind()
     {
         await using var f = await VaultServiceTests.Fixture.CreateAsync();

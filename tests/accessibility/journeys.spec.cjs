@@ -16,7 +16,7 @@ test('reader and editor see actionable capabilities and paths without administra
   await expect(page.getByRole('navigation',{name:'Group path'})).toContainText('IT och infrastruktur');
   await expect(page.getByRole('link',{name:'Administration',exact:true})).toHaveCount(0);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
-  if(permissions===3){await expect(page.getByText('There are no accounts here yet. Someone with modify permission can add them.',{exact:true})).toBeVisible();await expect(page.getByText('There are no licenses here yet. Someone with modify permission can add them.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'+ Add password',exact:true})).toHaveCount(0);}
+  if(permissions===3){await expect(page.getByText('There are no accounts here yet. Someone with modify permission can add them.',{exact:true})).toBeVisible();await expect(page.getByText('There are no licenses here yet. Someone with modify permission can add them.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'+ Add password',exact:true})).toBeDisabled();}
   else{await expect(page.locator('#page-description')).toContainText('You can add and edit content.');await expect(page.getByRole('button',{name:'+ Add password',exact:true})).toBeVisible();}
   await page.setExtraHTTPHeaders({});
  }
@@ -28,7 +28,7 @@ test('access administration grants no content rights and system-only administrat
  for(const [subjectId,roles]of [['journey-access-admin',32],['journey-system-admin',64]])expect((await page.request.post('/api/settings/roles',{headers,data:{provider:'ad',subjectId,kind:0,roles,revision:0}})).ok()).toBe(true);
  let contentReads=0;page.on('request',r=>{if(new RegExp('/api/resources/'+resource.id+'/(secrets|licenses)$').test(r.url()))contentReads++;});
  await page.setExtraHTTPHeaders({'X-Test-Identity':'journey-access-admin'});await page.goto('/resources/'+resource.id);
- await expect(page.getByText('You manage access',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'+ Add password',exact:true})).toHaveCount(0);expect(contentReads).toBe(0);
+ await expect(page.getByText('You manage access',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'+ Add password',exact:true})).toBeDisabled();expect(contentReads).toBe(0);
  await page.setExtraHTTPHeaders({'X-Test-Identity':'journey-system-admin'});await page.goto('/settings');
  await expect(page.getByRole('heading',{name:'Sign-in and directory',level:1})).toBeVisible();await expect(page.getByRole('link',{name:'Global roles',exact:true})).toHaveCount(0);
  await page.goto('/settings/people');await expect(page.getByRole('heading',{name:'This view is unavailable',level:1})).toBeVisible();

@@ -6,6 +6,8 @@ namespace Valvra.Infrastructure.Services;
 // All public vault operations enter a verified snapshot before reading database state.
 public sealed class VaultService(VaultOperations operations, VaultIntegrity integrity)
 {
+    public Task<IReadOnlyList<DirectorySubject>> ActivePeopleAsync(Actor actor,Guid? licenseId,CancellationToken ct)=>
+        integrity.RunAsync(()=>operations.ActivePeopleAsync(actor,licenseId,ct),ct);
     public Task<IReadOnlyList<GroupView>> GroupsAsync(Actor actor, CancellationToken ct) =>
         integrity.RunAsync(() => operations.GroupsAsync(actor, ct), ct);
 
@@ -57,6 +59,10 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
     public Task RevokeAsync(Actor actor, Guid grantId, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.RevokeAsync(actor, grantId, correlation, ct), ct);
 
+    public Task UpdateGrantAsync(Actor actor, Guid grantId, VaultPermission permissions, DateTimeOffset? startsAt,
+        DateTimeOffset? expiresAt, long revision, string correlation, CancellationToken ct) =>
+        integrity.RunAsync(() => operations.UpdateGrantAsync(actor, grantId, permissions, startsAt, expiresAt, revision, correlation, ct), ct);
+
     public Task<Guid> AddOwnerAsync(Actor actor, ResourceOwner owner, string correlation, CancellationToken ct) =>
         integrity.RunAsync(() => operations.AddOwnerAsync(actor, owner, correlation, ct), ct);
 
@@ -71,6 +77,8 @@ public sealed class VaultService(VaultOperations operations, VaultIntegrity inte
 
     public Task<IReadOnlyList<LicenseView>> LicensesAsync(Actor actor, Guid resourceId, CancellationToken ct) =>
         integrity.RunAsync(() => operations.LicensesAsync(actor, resourceId, ct), ct);
+    public Task<IReadOnlyList<LicenseDestinationView>> LicenseDestinationsAsync(Actor actor, CancellationToken ct) =>
+        integrity.RunAsync(() => operations.LicenseDestinationsAsync(actor, ct), ct);
     public Task<LicenseOverviewPage> LicenseOverviewAsync(Actor actor,int offset,CancellationToken ct)=>
         integrity.RunAsync(()=>operations.LicenseOverviewAsync(actor,offset,ct),ct);
 

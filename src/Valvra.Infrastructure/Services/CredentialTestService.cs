@@ -43,6 +43,9 @@ public sealed class CredentialTestService(VaultDbContext db, AccessService acces
         throttle.Reserve(entry.LdapProfileId, payload.Username);
         await audit.RecordAsync(actor, "Ldap.Test", entryId, "AttemptAuthorized", correlation, ct);
         var fresh = await directory.ResolveAsync(actor.SubjectId, ct);
+        if (fresh.Provider != actor.Provider || fresh.SubjectId != actor.SubjectId) throw new AccessDeniedException();
+        // The verified integrity lease pins global roles throughout the operation; refresh directory status/memberships only.
+        fresh = fresh with { IsGlobalAdministrator = actor.IsGlobalAdministrator };
         await access.RequireAsync(fresh, TargetKind.Resource, entry.ResourceId, VaultPermission.TestCredential | VaultPermission.ReadSecret, ct);
         var result = await tester.TestAsync(entry.LdapProfileId, payload, ct);
         await audit.RecordAsync(actor, "Ldap.TestResult", entryId, result.ToString(), correlation, ct);

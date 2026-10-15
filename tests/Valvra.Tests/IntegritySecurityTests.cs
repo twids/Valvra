@@ -146,17 +146,51 @@ public sealed class IntegritySecurityTests
         Assert.Equal("Resource", (await f.Db.Resources.SingleAsync()).Name);
     }
 
+    [Fact]
+    public async Task GlobalAdministratorOnlyCanRecoverAfterReplacingLastExplicitAccessAdministrator()
+    {
+        var interceptor = new AbortCommit();
+        await using var f = await VaultServiceTests.Fixture.CreateAsync(interceptor);
+        var globals = new Valvra.Infrastructure.Services.GlobalRoleService(f.Db, f.Integrity, f.Audit, new FakeDirectory(), f.Clock);
+        await globals.BootstrapAsync(f.User, "setup", default);
+        await globals.SetAsync(f.User, "ad", "admin", SubjectKind.User, GlobalRole.GlobalAdministrator, 0, "assign", default);
+        await globals.SetAsync(f.User, "ad", "user", SubjectKind.User, GlobalRole.None, 1, "replace", default);
+        Assert.DoesNotContain(await f.Db.Grants.AsNoTracking().Where(x=>x.TargetKind==TargetKind.System).ToListAsync(),
+            x=>x.Permissions.HasFlag((VaultPermission)(int)GlobalRole.AccessAdministrator));
+        interceptor.Enabled = true;
+        await Assert.ThrowsAsync<IOException>(() => ChangeName(f));
+        var restarted = Restarted(f);
+        await Assert.ThrowsAsync<VaultUnavailableException>(() => restarted.RunAsync(() => Task.CompletedTask, default));
+        // Recovery must use the verified stored role, even without any asserted administrator flags.
+        var actor = f.User with { SubjectId="admin", IsAccessAdministrator=false, IsAuditor=false, IsGlobalAdministrator=false };
+        await restarted.RecoverUncommittedAsync(actor, default);
+        Assert.Null(f.Checkpoints.Value!.Prepared);
+        await restarted.RunAsync(() => Task.CompletedTask, default);
+        Assert.Equal("Resource", (await f.Db.Resources.AsNoTracking().SingleAsync()).Name);
+    }
+
     [Theory]
     [InlineData("directory-claim")]
     [InlineData("group")]
     [InlineData("provider")]
     [InlineData("disabled")]
     [InlineData("temporary")]
+    [InlineData("not-started")]
     [InlineData("wrong-installation")]
     [InlineData("system-admin-only")]
     [InlineData("tampered-role")]
+    [InlineData("global-directory-claim")]
+    [InlineData("global-group")]
+    [InlineData("global-provider")]
+    [InlineData("global-disabled")]
+    [InlineData("global-temporary")]
+    [InlineData("global-not-started")]
+    [InlineData("global-wrong-installation")]
+    [InlineData("global-tampered-role")]
     public async Task RecoveryRejectsUntrustedOrIneligibleAdministratorRoles(string scenario)
     {
+        var globalRole = scenario.StartsWith("global-", StringComparison.Ordinal);
+        if (globalRole) scenario = scenario[7..];
         var interceptor = new AbortCommit();
         await using var f = await VaultServiceTests.Fixture.CreateAsync(interceptor);
         if (scenario != "directory-claim")
@@ -169,7 +203,8 @@ public sealed class IntegritySecurityTests
                     SubjectKind = scenario == "group" ? SubjectKind.Group : SubjectKind.User,
                     Provider = scenario == "provider" ? "other" : f.User.Provider,
                     SubjectId = scenario == "tampered-role" ? "outsider" : f.User.SubjectId,
-                    Permissions = (VaultPermission)(int)(scenario == "system-admin-only" ? GlobalRole.SystemAdministrator : GlobalRole.AccessAdministrator),
+                    Permissions = (VaultPermission)(int)(globalRole ? GlobalRole.GlobalAdministrator : scenario == "system-admin-only" ? GlobalRole.SystemAdministrator : GlobalRole.AccessAdministrator),
+                    StartsAt = scenario == "not-started" ? f.Clock.GetUtcNow().AddHours(1) : null,
                     ExpiresAt = scenario == "temporary" ? f.Clock.GetUtcNow().AddHours(1) : null
                 });
                 await f.Integrity.SaveAsync(default);
@@ -179,7 +214,7 @@ public sealed class IntegritySecurityTests
         var checkpoint = f.Checkpoints.Value;
         if (scenario == "tampered-role")
             await f.Db.Database.ExecuteSqlRawAsync("UPDATE Grants SET SubjectId='user' WHERE TargetKind=2");
-        var actor = f.User with { IsEnabled = scenario != "disabled", IsAccessAdministrator = true };
+        var actor = f.User with { IsEnabled = scenario != "disabled", IsAccessAdministrator = true, IsGlobalAdministrator = globalRole };
         var restarted = Restarted(f);
         if (scenario == "tampered-role")
             await Assert.ThrowsAsync<VaultUnavailableException>(() => restarted.RecoverUncommittedAsync(actor, default));

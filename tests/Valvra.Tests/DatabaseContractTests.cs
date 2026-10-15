@@ -125,6 +125,12 @@ public sealed class DatabaseContractTests
         // synthetic prepared checkpoint over the unchanged database snapshot.
         var globals = new GlobalRoleService(db, integrity, audit, new FakeDirectory(), TimeProvider.System);
         await globals.BootstrapAsync(actor, "database-test", default);
+        await globals.SetAsync(actor,"ad","global-admin",SubjectKind.User,GlobalRole.GlobalAdministrator,0,"database-test",default);
+        var globalAdmin=await globals.ApplyAsync(actor with{SubjectId="global-admin"},default);
+        var exclusion=await globals.ExcludeAsync(actor,TargetKind.Group,group,"ad","global-admin","database-test",default);
+        await Assert.ThrowsAsync<AccessDeniedException>(()=>vault.SecretsAsync(globalAdmin,resource,default));
+        await globals.RestoreAccessAsync(globalAdmin,exclusion,1,"database-test",default);
+        Assert.NotEmpty(await vault.SecretsAsync(globalAdmin,resource,default));
         var current = checkpoints.Value!.Current;
         checkpoints.Value = new(current, integritySigner.Sign(current.InstallationId, current.Generation + 1, current.Hash));
         await Assert.ThrowsAsync<AccessDeniedException>(() => integrity.RecoverUncommittedAsync(actor with { SubjectId = "outsider" }, default));

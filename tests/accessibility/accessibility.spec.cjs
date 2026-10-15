@@ -167,11 +167,11 @@ test('focus-loss security retains metadata, clears secret fields and avoids live
     await openLicenseEditor(page);
     await page.getByLabel('Produkt (obligatoriskt)').fill('Utkast');
     await page.getByLabel('Licensnyckel och hemliga anteckningar', {exact: true}).selectOption('1');
-    await page.getByLabel('Ny licensnyckel', {exact: true}).fill('synthetic-secret-only');
+    await page.getByLabel('Ny licensnyckel (obligatoriskt)', {exact: true}).fill('synthetic-secret-only');
     await page.evaluate(() => window.dispatchEvent(new Event('blur')));
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByLabel('Produkt (obligatoriskt)')).toHaveValue('Utkast');
-    await expect(page.getByLabel('Ny licensnyckel', {exact: true})).toHaveValue('');
+    await expect(page.getByLabel('Ny licensnyckel (obligatoriskt)', {exact: true})).toHaveValue('');
     await expect(page.getByRole('button', {name: 'Spara', exact: true})).toBeDisabled();
     expect((await page.locator('[role="alert"],[role="status"],[aria-live]').allTextContents()).join(' ')).not.toContain('synthetic-secret-only');
 });

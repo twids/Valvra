@@ -87,7 +87,7 @@ public sealed class UpgradeContractTests
         else options.UseNpgsql("Host=localhost;Database=unused", x => x.MigrationsAssembly("Valvra.Migrations.PostgreSql"));
         using var db = new VaultDbContext(options.Options);
         Assert.False(db.Database.HasPendingModelChanges());
-        var expected = new[] { nameof(AccessGrant), nameof(AuditRecord), nameof(LicenseAssignment), nameof(LicenseVersion), nameof(ResourceGroup), nameof(ResourceOwner), nameof(SecretEntry), nameof(SecretVersion), nameof(SoftwareLicense), nameof(VaultResource) };
+        var expected = new[] { nameof(AccessExclusion), nameof(AccessGrant), nameof(AuditRecord), nameof(LicenseAssignment), nameof(LicenseVersion), nameof(ResourceGroup), nameof(ResourceOwner), nameof(SecretEntry), nameof(SecretVersion), nameof(SoftwareLicense), nameof(VaultResource) };
         Assert.Equal(expected.Order(), db.Model.GetEntityTypes().Select(x => x.ClrType.Name).Order());
     }
 

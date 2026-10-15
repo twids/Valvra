@@ -9,6 +9,7 @@ public sealed class VaultDbContext(DbContextOptions<VaultDbContext> options) : D
     public DbSet<ResourceGroup> Groups => Set<ResourceGroup>();
     public DbSet<VaultResource> Resources => Set<VaultResource>();
     public DbSet<AccessGrant> Grants => Set<AccessGrant>();
+    public DbSet<AccessExclusion> Exclusions => Set<AccessExclusion>();
     public DbSet<ResourceOwner> Owners => Set<ResourceOwner>();
     public DbSet<SecretEntry> Secrets => Set<SecretEntry>();
     public DbSet<SecretVersion> SecretVersions => Set<SecretVersion>();
@@ -32,6 +33,7 @@ public sealed class VaultDbContext(DbContextOptions<VaultDbContext> options) : D
         model.Entity<LicenseAssignment>().HasOne<SoftwareLicense>().WithMany().HasForeignKey(x => x.LicenseId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<LicenseAssignment>().HasOne<VaultResource>().WithMany().HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<AccessGrant>().HasIndex(x => new { x.TargetKind, x.TargetId });
+        model.Entity<AccessExclusion>().HasIndex(x => new { x.TargetKind, x.TargetId, x.Provider, x.SubjectId }).IsUnique();
         model.Entity<ResourceOwner>().HasIndex(x => new { x.TargetKind, x.TargetId });
         model.Entity<AuditRecord>().HasIndex(x => x.Timestamp);
         model.Entity<AuditRecord>().HasIndex(x => new { x.Delivered, x.Timestamp });
@@ -40,7 +42,7 @@ public sealed class VaultDbContext(DbContextOptions<VaultDbContext> options) : D
         {
             foreach (var property in entity.GetProperties())
             {
-                if (property.ClrType == typeof(string) && property.Name is not ("EnvelopeJson" or "EventJson")) property.SetMaxLength(property.Name == "DetailsJson" ? 4096 : 512);
+                if (property.ClrType == typeof(string) && property.Name is not ("EnvelopeJson" or "EventJson")) property.SetMaxLength(property.Name == "DetailsJson" ? 4096 : entity.ClrType == typeof(AccessExclusion) && property.Name == "Provider" ? 128 : 512);
                 if (property.Name == "Revision") property.IsConcurrencyToken = true;
                 if (property.ClrType == typeof(DateTimeOffset) || property.ClrType == typeof(DateTimeOffset?))
                     property.SetValueConverter(new ValueConverter<DateTimeOffset, long>(value => value.UtcTicks,

@@ -101,11 +101,11 @@ test('global role search distinguishes duplicate display names by account name a
     await page.goto('/settings');await page.getByRole('button',{name:'+ Assign user account',exact:true}).click();
     await page.getByLabel('Search for user account',{exact:true}).fill('Alex');await page.getByRole('button',{name:'Search',exact:true}).click();
     await expect(page.getByRole('button',{name:display+' · alex.one',exact:true})).toBeVisible();
-    await expect(page.getByRole('button',{name:'Legacy Person · person-legacy',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Legacy Person',exact:true})).toBeVisible();
     await expect(page.getByRole('dialog').locator('img')).toHaveCount(0);
     await page.getByRole('button',{name:display+' · alex.two',exact:true}).click();
-    await expect(page.getByRole('dialog').getByRole('status')).toHaveText(display+' · alex.two · ad · person-two');
-    await page.getByRole('checkbox').last().check();
+    await expect(page.getByRole('dialog').getByRole('status')).toHaveText(display+' · alex.two');
+    await page.getByRole('checkbox',{name:'Auditor',exact:true}).check();
     await page.getByRole('button',{name:'Save',exact:true}).click();
     await expect.poll(()=>posted).toMatchObject({provider:'ad',subjectId:'person-two',kind:0,roles:128});
     expect(posted).not.toHaveProperty('samAccountName');expect(posted).not.toHaveProperty('name');

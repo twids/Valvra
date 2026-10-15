@@ -51,6 +51,18 @@ public sealed class AccessPresentationTests
         Assert.Equal(0, directory.Calls);
     }
     [Fact]
+    public async Task VersionNamesAreOptionalMetadataAndNeverReleaseSecrets()
+    {
+        await using var f=await VaultServiceTests.Fixture.CreateAsync();
+        var id=await f.Vault.CreateSecretAsync(f.User,f.ResourceId,"Example",new("u","synthetic",""),null,"test",default);
+        var directory=new Directory();var service=Service(f,directory);
+        var version=Assert.Single(await service.VersionsAsync(f.User,id,default));
+        Assert.Equal("user",version.CreatedBy);Assert.Equal("Example Person",version.CreatedByName);Assert.Equal(0,f.Cipher.Decryptions);
+        directory.Unavailable=true;version=Assert.Single(await service.VersionsAsync(f.User,id,default));Assert.Null(version.CreatedByName);
+        var calls=directory.Calls;var outsider=f.User with{IsAccessAdministrator=false,SubjectId="outsider"};
+        await Assert.ThrowsAsync<AccessDeniedException>(()=>service.VersionsAsync(outsider,id,default));Assert.Equal(calls,directory.Calls);
+    }
+    [Fact]
     public async Task DirectoryOutageKeepsOriginalAssignmentsAvailable()
     {
         await using var f = await VaultServiceTests.Fixture.CreateAsync(); var directory = new Directory { Unavailable=true };

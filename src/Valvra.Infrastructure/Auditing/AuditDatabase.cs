@@ -153,7 +153,7 @@ public sealed record AuditQuery(DateTimeOffset? From, DateTimeOffset? To, string
         && (GroupId is null || (IncludeSubgroups ? value.Scope?.GroupPath?.Any(x => x is not null && x.Id == GroupId) == true : value.Scope?.GroupId == GroupId));
 }
 public sealed record AuditTargetOption(Guid Id, string Name);
-public sealed record AuditActorOption(string Provider, string Id, string? Name = null);
+public sealed record AuditActorOption(string Provider, string Id, string? Name = null, string? SamAccountName = null);
 public sealed record AuditTargetOptions(IReadOnlyList<AuditTargetOption> Resources, IReadOnlyList<AuditTargetOption> Groups, int InvalidEventCount = 0,
     IReadOnlyList<AuditActorOption>? Actors = null, IReadOnlyList<string>? Actions = null);
 public sealed record AuditEventView(AuditEvent Event, string PayloadHash, string SigningKeyId, bool SignatureValid);
@@ -178,7 +178,7 @@ public sealed class AuditReader(AuditDatabaseOptions options, IAuditSigner signe
     private async Task<AuditTargetOptions> ReadTargetsCoreAsync(Actor actor, CancellationToken ct) =>
         BuildTargets(await ReadAllAsync(actor, ct));
 
-    internal static AuditTargetOptions BuildTargets(IEnumerable<AuditEventView> events)
+    public static AuditTargetOptions BuildTargets(IEnumerable<AuditEventView> events)
     {
         var resources = new Dictionary<Guid, string>(); var groups = new Dictionary<Guid, string>();
         var invalid = 0; var actors=new HashSet<(string Provider,string Id)>();var actions=new HashSet<string>();
