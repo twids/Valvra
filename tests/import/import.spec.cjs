@@ -25,6 +25,31 @@ test('initial file-picker blur still allows reading a selected CSV',async({page}
     await file(page,'title,password\nFile picker test,synthetic');
     await expect(page.getByRole('heading',{name:'Import · Mappa kolumner',exact:true})).toBeVisible();
 });
+test('preview requires the selected destination and discards results after a mapping edit',async({page})=>{
+    await page.goto('/');
+    await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();
+    await file(page,'title,password\nExample,synthetic');
+    const mode=page.getByLabel('Destination',{exact:true});
+    await mode.selectOption('resource');
+    const preview=page.getByRole('button',{name:'Förhandsgranska',exact:true});
+    await preview.click();
+    const target=page.getByRole('dialog').getByLabel('Resurs',{exact:true});
+    await expect(target).toBeFocused();
+    await target.selectOption({index:1});
+    let release;
+    const held=new Promise(resolve=>release=resolve);
+    await page.route('**/api/groups',async route=>{await held;await route.continue();});
+    await expect(target).not.toHaveValue('');
+    await preview.focus();
+    await preview.press('Enter');
+    try {
+        await expect(page.getByRole('dialog').getByRole('status')).toContainText('Förbereder förhandsgranskningen');
+        await mode.selectOption('tree');
+    } finally { release(); }
+    await expect(page.getByRole('dialog').getByRole('status')).toContainText('Mappningen har ändrats');
+    await expect(preview).toBeEnabled();
+    await expect(page.getByRole('button',{name:'Starta import',exact:true})).toHaveCount(0);
+});
 
 test('old import completion cannot replace a new session or disable its secret clearing',async({page})=>{
     let release, batches=0;
@@ -70,6 +95,7 @@ test('real audited hierarchy import creates two levels, reuses groups on retry a
     await page.getByRole('button',{name:'Förhandsgranska',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Import · Förhandsgranskning',exact:true})).toBeVisible();
     await expect(page.locator('#dialog-content')).toContainText('2 poster. 2 nya grupper och 1 nya resurser.');
+    await expect(page.locator('#dialog-content')).toContainText('Lösenord att skapa: 2. Dubbletter som hoppas över: 0.');
     await expect(page.locator('#dialog')).not.toContainText('synthetic-import-secret');
     await expect(page.locator('#dialog-content')).toContainText('Ops / Servers / SQL');
     await audit(page);
@@ -83,6 +109,7 @@ test('real audited hierarchy import creates two levels, reuses groups on retry a
     await page.getByLabel('Basgrupp',{exact:true}).selectOption(base.id);
     await page.getByRole('button',{name:'Förhandsgranska',exact:true}).click();
     await expect(page.locator('#dialog-content')).toContainText('0 nya grupper och 0 nya resurser.');
+    await expect(page.locator('#dialog-content')).toContainText('Lösenord att skapa: 0. Dubbletter som hoppas över: 1.');
     await page.getByRole('button',{name:'Starta import',exact:true}).click();
     await expect(page.getByRole('heading',{name:'Import · Resultat',exact:true})).toBeVisible();
     await expect(page.locator('#dialog-content')).toContainText('Sparade: 0. Överhoppade: 1.');

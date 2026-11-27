@@ -19,6 +19,8 @@ Direct links and reloads are handled by explicit server routes in both the produ
 
 ## Filters and keyboard
 
+On the resources page, **Search the vault** finds resource names, account titles and license products. Open an account result to see the matching entries in its resource. Use **Filters and view** to narrow the resource overview by group or change its layout. On a resource you manage, **Permissions** on the card opens access management directly.
+
 Resource search, group filters, subgroup selection and audit filters, including page position, are retained in page memory. Back/Forward restores the filters for the current history entry. Reloading or opening a new tab opens the correct view with default filters; filters are not shared with a colleague through the link.
 
 When navigating within the app or through history, focus moves to the new view's main heading. The initial page load retains the normal tab order, with **Skip to main content** as the first link.

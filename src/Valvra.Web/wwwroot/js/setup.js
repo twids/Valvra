@@ -116,6 +116,16 @@
             .map(([key, input]) => [key, input.type === "checkbox" ? String(input.checked) : input.value])) };
     }
     async function saveDraft() { await post("draft", draft()); }
+    function reportFirstInvalid(inputs) {
+        const invalid = Array.from(inputs).find(input => input.willValidate && !input.validity.valid);
+        if (!invalid) return false;
+        step = sections.findIndex(section => section.contains(invalid));
+        show();
+        for (let details = invalid.closest("details"); details; details = details.parentElement.closest("details")) details.open = true;
+        invalid.focus();
+        invalid.reportValidity();
+        return true;
+    }
     function show(focus = false) {
         sections.forEach((s, i) => s.hidden = i !== step); Array.from($("steps").children).forEach((s, i) => { s.classList.toggle("current", i === step); const button = s.querySelector("button"); if (i === step) button.setAttribute("aria-current", "step"); else button.removeAttribute("aria-current"); });
         $("previous").disabled = step === 0; $("next").hidden = step === sections.length - 1;
@@ -166,8 +176,7 @@
     databases.addEventListener("input", resetDatabaseResults); databases.addEventListener("change", resetDatabaseResults);
     fields.code.addEventListener("input", resetDatabaseResults);
     testDatabases.addEventListener("click", async () => {
-        const invalid = [fields.code, ...databases.querySelectorAll("input,select")].find(input => !input.checkValidity());
-        if (invalid) { step = sections.findIndex(s => s.contains(invalid)); show(); invalid.reportValidity(); return; }
+        if (reportFirstInvalid([fields.code, ...databases.querySelectorAll("input,select")])) return;
         const revision = databaseRevision;
         const {vault, auditWriter, auditReader, useSeparateAuditReader, auditReaderWindowsCredentials, provisionSchemas, vaultProvisioning, auditProvisioning} = request();
         testDatabases.disabled = true; databaseResults.setAttribute("aria-busy", "true");
@@ -275,8 +284,7 @@
         });
     }
     validate.addEventListener("click", async () => {
-        const invalid = Object.values(fields).find(input => !input.checkValidity());
-        if (invalid) { step = sections.findIndex(s => s.contains(invalid)); show(); invalid.reportValidity(); return; }
+        if (reportFirstInvalid(Object.values(fields))) return;
         const testedRevision = revision; passed = false;
         validate.disabled = finish.disabled = true; results.setAttribute("aria-busy", "true"); notice(fields.provision.checked ? t("Förbereder scheman och testar säkerhetsinställningar…") : t("Testar anslutningar och säkerhetsinställningar…"));
         try { const body = request(); await saveDraft(); const result = await post("validate", body); if (testedRevision !== revision) return; renderChecks(result.checks);
@@ -293,7 +301,11 @@
             notice(error.message, true); finish.disabled = !passed; validate.disabled = false;
         }
     });
-    $("next").addEventListener("click", () => { const invalid = Array.from(sections[step].querySelectorAll("input,select")).find(input => !input.checkValidity()); if (invalid) { invalid.reportValidity(); return; } step = Math.min(step + 1, sections.length - 1); show(true); }); $("previous").addEventListener("click", () => { step = Math.max(0, step - 1); show(true); });
+    $("next").addEventListener("click", () => {
+        if (reportFirstInvalid(sections[step].querySelectorAll("input,select"))) return;
+        step = Math.min(step + 1, sections.length - 1); show(true);
+    });
+    $("previous").addEventListener("click", () => { step = Math.max(0, step - 1); show(true); });
     $("setup-form").addEventListener("invalid", event => { event.target.setAttribute("aria-invalid", "true"); notice(t("Kontrollera fältet ”{field}”. {reason}", {field: event.target.labels[0].textContent, reason: i18n.validation(event.target)}), true); }, true);
     $("setup-form").addEventListener("submit", event => event.preventDefault());
     const invalidate = () => { revision++; passed = false; finish.disabled = true; results.replaceChildren(); $("setup-notice").hidden = true; };
@@ -335,10 +347,32 @@
     }));
     document.addEventListener("valvra:languagechange", () => { if (step === sections.length - 1) renderReview(); });
     show();
-    fetch("/api/setup/status", { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }).then(response => { if (!response.ok) throw new Error(t("Windows-inloggningen kunde inte verifieras.")); return response.json(); }).then(status => {
-        csrf = status.csrfToken;
-        if (!status.canConfigure) { $("setup-form").hidden = true; notice(status.installed ? t("Valvra är redan konfigurerat. För att ändra installationen, generera en ny engångskod på servern enligt README.") : t("Generera en installationskod på servern enligt README.")); }
-    }).catch(error => notice(error.message, true));
+    const retry = node("button", t("Försök igen"), "button");
+    retry.type = "button"; retry.hidden = true;
+    $("setup-form").before(retry);
+    async function loadStatus() {
+        const retrying = !retry.hidden;
+        retry.disabled = true;
+        $("steps").hidden = $("setup-form").hidden = true;
+        notice(t("Läser in…"));
+        try {
+            const response = await fetch("/api/setup/status", {credentials:"same-origin", cache:"no-store", headers:{"X-Valvra-Language":i18n.language}});
+            if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? t("Windows-inloggningen kunde inte verifieras.") : t("Installationsstatus kunde inte läsas."));
+            const status = await response.json();
+            csrf = status.csrfToken;
+            retry.hidden = true;
+            if (status.canConfigure) {
+                $("setup-notice").hidden = true;
+                $("steps").hidden = $("setup-form").hidden = false;
+                if (retrying) show(true);
+            } else notice(status.installed ? t("Valvra är redan konfigurerat. För att ändra installationen, generera en ny engångskod på servern enligt README.") : t("Generera en installationskod på servern enligt README."));
+        } catch (error) {
+            notice(error instanceof TypeError ? t("Installationsstatus kunde inte läsas.") : error.message, true);
+            retry.hidden = false;
+        } finally { retry.disabled = false; }
+    }
+    retry.addEventListener("click",loadStatus);
+    await loadStatus();
 })().catch(error => {
     const target = document.getElementById("setup-error"); target.hidden = false;
     target.textContent = error.message || "Could not load setup / Kunde inte läsa installationen.";

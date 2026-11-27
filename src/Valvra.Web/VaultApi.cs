@@ -10,6 +10,7 @@ namespace Valvra.Web;
 public sealed record CreateGroupRequest(string Name, Guid? ParentId);
 public sealed record CreateResourceRequest(string Name, Guid GroupId);
 public sealed record RenameRequest(string Name, long Revision);
+public sealed record ContentSearchRequest(string? Query);
 public sealed record MoveRequest(Guid DestinationGroupId, long Revision);
 public sealed record SecretRequest(string Title, SecretPayload? Payload, string? LdapProfileId, long Revision = 0, SecretChange SecretChange = SecretChange.Replace);
 public sealed record RevealRequest(int? Version = null, bool Copy = false);
@@ -27,6 +28,8 @@ public static class VaultApi
     {
         app.MapImportApi();
         var api = app.MapGroup("/api").RequireAuthorization();
+        api.MapPost("/content/search", async (ContentSearchRequest body, HttpContext ctx, CurrentActor current, VaultService vault) =>
+            await current.RunAsync(ctx, async actor => Results.Ok(await vault.SearchContentAsync(actor, body.Query, ctx.RequestAborted))));
         api.MapGet("/directory/active",async(HttpContext ctx,CurrentActor current,VaultService vault)=>
             await current.RunAsync(ctx,async actor=>Results.Ok(await vault.ActivePeopleAsync(actor,null,ctx.RequestAborted))));
         api.MapGet("/settings/people/active",async(HttpContext ctx,CurrentActor current,VaultService vault,GlobalRoleService globals)=>

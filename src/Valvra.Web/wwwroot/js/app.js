@@ -6,7 +6,7 @@
     const t = (key, values) => i18n.message(key, values);
     const friendlyAccount=(name,sam)=>[name,sam].filter(value=>typeof value==="string"&&value.trim()&&!/S-\d-(?:\d+-)*\d+/i.test(value)).filter((value,index,all)=>all.indexOf(value)===index).join(" · ")||t("Okänt eller borttaget konto");
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
-        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), contentFilters:{}, licenseFilters:{}, auditFilters: {} };
+        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupDirectorySearch: "", groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), contentFilters:{}, licenseFilters:{}, auditFilters: {} };
     let renderEpoch = 0;
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
@@ -41,7 +41,7 @@
     function rememberView() {
         if (!historyKey) return;
         viewSnapshots.set(historyKey, { resourceSearch: state.resourceSearch, resourceGroup: state.resourceGroup,
-            resourceIncludeSubgroups: state.resourceIncludeSubgroups, resourceLayout:state.resourceLayout, resourceSort:state.resourceSort, groupSearch: state.groupSearch,
+            resourceIncludeSubgroups: state.resourceIncludeSubgroups, resourceLayout:state.resourceLayout, resourceSort:state.resourceSort, groupSearch: state.groupSearch, groupDirectorySearch: state.groupDirectorySearch,
             groupIncludeSubgroups: state.groupIncludeSubgroups, licenseFilters:{...state.licenseFilters}, auditFilters: { ...state.auditFilters } });
     }
     function resolveRoute(route) {
@@ -74,7 +74,11 @@
             window.history[initial ? "replaceState" : "pushState"]({ valvraEntry: historyKey }, "", canonical);
         }
         activePath = canonical; routeReady = true;
-        await render(); if (!initial) focusHeading();
+        const opener = document.activeElement;
+        const rendering = render();
+        const epoch = renderEpoch;
+        await rendering;
+        if (!initial && epoch === renderEpoch && (document.activeElement === opener || document.activeElement === document.body)) focusHeading();
     }
     const has = bit => !!(state.resource && (state.resource.permissions & bit));
     const date = value => value ? new Date(value).toLocaleString(i18n.locale) : "—";
@@ -218,6 +222,7 @@
     async function render() {
         closeActionMenu?.();
         const settingsEpoch = ++renderEpoch;
+        $("page-actions").replaceChildren();
         $("content").removeAttribute("aria-busy");
         $("content").replaceChildren(); i18n.setText($("breadcrumb"), { vault: t("Resurser"), groups: t("Resursgrupper"), licenses: t("Licensöversikt"), audit: t("Auditlogg"), settings: t("Administration") }[state.view]);
         document.querySelectorAll("[data-view]").forEach(x => { const current = x.dataset.view === state.view; x.classList.toggle("active", current); if (current) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
@@ -250,23 +255,116 @@
         heading(t("Dina resurser"), t("Lösenord och licenser samlade kring resurserna de tillhör."), state.groups.some(x => x.canManage) ? [button(t("+ Ny resurs"), createResource, "primary")] : []);
         appendImportAction();
         const content = $("content");
-        if (!state.resources.length) { empty(content, t("Inga resurser ännu"), state.session.isAccessAdministrator ? t("Skapa en resursgrupp, lägg till resurser och tilldela åtkomst för att öppna valvet.") : t("Be en resursägare eller behörighetsadministratör tilldela dig åtkomst.")); return; }
-        const toolbar = node("div", undefined, "toolbar"); const search = node("input"); search.placeholder = t("Sök bland dina resurser…"); search.setAttribute("aria-label", t("Sök resurser")); search.value = state.resourceSearch; toolbar.append(search);
-        const filter = select(controlGroup(toolbar), t("Resursgrupp"), [["", t("Alla grupper")], ...sortedGroups(state.groups).map(x => [x.id, groupPath(x.id).map(g => g.name).join(" / ")])], state.resourceGroup);
-        const tree = node("div", undefined, "check-row"); const descendants = field(tree, t("Inkludera undergrupper"), "checkbox"); descendants.checked = state.resourceIncludeSubgroups; descendants.disabled = !filter.value; toolbar.append(tree); content.append(toolbar);
+        const canSearchContent = state.resources.some(resource => resource.permissions & 1) || state.session.isLicenseAdministrator;
+        if (canSearchContent) {
+            const form = node("form", undefined, "vault-search");
+            const input = field(form, t("Sök i valvet"), "search");
+            input.placeholder = t("Kontotitel, produktnamn eller resursnamn");
+            input.maxLength = 200;
+            const submit = node("button", t("Sök"), "button primary"); submit.type = "submit";
+            form.append(submit); content.append(form);
+            form.addEventListener("submit", event => {
+                event.preventDefault();
+                contentSearchDialog(input.value.trim());
+            });
+        }
+        if (!state.resources.length) {
+            empty(content, t("Inga resurser ännu"), state.session.isAccessAdministrator ? t("Skapa en resursgrupp, lägg till resurser och tilldela åtkomst för att öppna valvet.") : t("Be en resursägare eller behörighetsadministratör tilldela dig åtkomst."));
+            if (state.session.isAccessAdministrator) content.lastElementChild.append(routeLink(t("Resursgrupper"), {view:"groups"}));
+            return;
+        }
+        const toolbar = node("div", undefined, "toolbar resource-toolbar");
+        const search = field(controlGroup(toolbar), t("Sök resurser"), "text", state.resourceSearch);
+        const options = node("details", undefined, "browse-options");
+        options.open = Boolean(!canSearchContent || state.resourceSearch || state.resourceGroup || state.resourceLayout !== "cards" || state.resourceSort !== "name");
+        const filters = node("div", undefined, "toolbar");
+        options.append(node("summary", t("Filter och visning")), filters);
+        const filter = select(controlGroup(filters), t("Resursgrupp"), [["", t("Alla grupper")], ...sortedGroups(state.groups).map(x => [x.id, groupPath(x.id).map(g => g.name).join(" / ")])], state.resourceGroup);
+        const tree = node("div", undefined, "check-row"); const descendants = field(tree, t("Inkludera undergrupper"), "checkbox"); descendants.checked = state.resourceIncludeSubgroups; descendants.disabled = !filter.value; filters.append(tree); options.insertBefore(toolbar, filters); content.append(options);
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); content.append(count);
         const cards = node("div", undefined, "cards"); content.append(cards);
         const paint = () => {
             cards.replaceChildren();
+            clear.hidden = !search.value && !filter.value;
             const resources = scopedResources(filter.value, descendants.checked, search.value);
-            count.textContent = resources.length + t(" resurser visas.");
+            count.textContent = resources.length === 1 ? t("1 resurs visas.") : resources.length + t(" resurser visas.");
             resourceCollection(cards, resources);
             if (!resources.length) empty(cards, t("Inga träffar"), t("Prova ett annat sökord eller en annan grupp."));
         }; search.addEventListener("input", () => { state.resourceSearch = search.value; paint(); });
         filter.addEventListener("change", () => { state.resourceGroup = filter.value; descendants.disabled = !filter.value; paint(); });
         descendants.addEventListener("change", () => { state.resourceIncludeSubgroups = descendants.checked; paint(); });
-        browseControls(toolbar,paint);
-        toolbar.append(button(t("Rensa filter"),()=>{search.value="";filter.value="";descendants.checked=true;descendants.disabled=true;state.resourceSearch="";state.resourceGroup="";state.resourceIncludeSubgroups=true;paint();search.focus();})); paint();
+        browseControls(filters,paint);
+        const clear=button(t("Rensa filter"),()=>{search.value="";filter.value="";descendants.checked=true;descendants.disabled=true;state.resourceSearch="";state.resourceGroup="";state.resourceIncludeSubgroups=true;paint();search.focus();});
+        toolbar.append(clear);
+        paint();
+    }
+    function contentSearchDialog(initialQuery = "") {
+        const body = dialog(t("Sök i valvet"), t("Sök"), search);
+        const input = field(body, t("Kontotitel, produktnamn eller resursnamn"), "search", "", true);
+        input.maxLength = 200;
+        const status = node("p", undefined, "hint"), results = node("div");
+        status.setAttribute("role", "status");
+        body.append(status, results);
+        input.addEventListener("input", () => {
+            results.replaceChildren();
+            status.textContent = "";
+            $("dialog-error").textContent = "";
+        });
+        input.value = initialQuery; input.focus();
+        if (initialQuery) $("dialog-form").requestSubmit();
+
+        async function search() {
+            const query = input.value.trim();
+            results.replaceChildren();
+            $("dialog-error").textContent = "";
+            if (!query) {
+                status.textContent = t("Ange ett sökord på 1–200 tecken.");
+                input.focus();
+                return false;
+            }
+            const epoch = dialogEpoch;
+            const resources = scopedResources("", true, query);
+            const groupsById = new Map(state.groups.map(group => [group.id,group]));
+            const resourcesById = new Map(state.resources.map(resource => [resource.id,resource]));
+            const resourcePath = resource => groupPath(resource.groupId,groupsById).map(group => group.name).concat(resource.name).join(" / ");
+            if (resources.length) {
+                const section = panel(results, t("Resurser"));
+                const links = node("ul", undefined, "vault-matches");
+                for (const resource of resources.slice(0,50)) {
+                    const row = node("li");
+                    row.append(routeLink(resourcePath(resource),{view:"vault",resourceId:resource.id},"group-open")); links.append(row);
+                }
+                section.append(links);
+            }
+            status.textContent = t("Söker…");
+            const interrupted = () => { status.textContent = t("Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata."); };
+            pendingMetadataRead = interrupted;
+            try {
+                const page = await api("/content/search", {query});
+                if (!canDisplay(epoch) || query !== input.value.trim()) return false;
+                status.textContent = page.hasMore || resources.length > 50 ? t("Högst 50 träffar per lista visas. Förfina sökningen för att se fler.")
+                    : page.items.length || resources.length ? t("{count} träffar.", {count: page.items.length + resources.length}) : t("Inga träffar");
+                if (page.items.length) table(panel(results,t("Konton och licenser")), [t("Kontotitel eller produktnamn"), t("Typ"), t("Resurs")],
+                    page.items.map(hit => [button(hit.title, () => openHit(hit)), hit.kind === "license" ? t("Licens") : t("Konto"),
+                        resourcesById.has(hit.resourceId) ? resourcePath(resourcesById.get(hit.resourceId)) : hit.resourceName])).classList.add("mobile-records");
+            } catch (error) {
+                if (canDisplay(epoch) && query === input.value.trim()) {
+                    status.textContent = "";
+                    $("dialog-error").textContent = error.message;
+                }
+            } finally {
+                if (pendingMetadataRead === interrupted) pendingMetadataRead = null;
+            }
+            return false;
+        }
+        function openHit(hit) {
+            if (state.resources.some(resource => resource.id === hit.resourceId && (resource.permissions & 1))) {
+                state.contentFilters[hit.resourceId] = hit.title;
+                return navigate(navigation.url({view: "vault", resourceId: hit.resourceId}));
+            }
+            state.licenseFilters = {search: hit.title, filter: "all", sort: "resource"};
+            return navigate(navigation.url({view: "licenses"}));
+        }
     }
     function browseControls(toolbar, paint) {
         const layout=select(controlGroup(toolbar),t("Visning"),[["cards",t("Kort")],["list",t("Kompakt lista")]],state.resourceLayout);
@@ -283,12 +381,14 @@
         table(parent,[t("Namn"),t("Resursgrupp"),t("Din åtkomst"),t("Åtgärder")],ordered.map(resource=>{
             const open=routeLink(t("Öppna resurs →"),state.view==="groups"&&state.group ? {view:"groups",groupId:state.group.id,resourceId:resource.id} : {view:"vault",resourceId:resource.id});
             open.setAttribute("aria-label",t("Öppna resurs · ")+resource.name);
-            return [node("strong",resource.name),path(resource.groupId),rights(resource.permissions)||t("Behörighetsadministration"),open];
+            const actions=node("div",undefined,"actions"); actions.append(open);
+            if(resource.canManage) actions.append(resourceAccessButton(resource));
+            return [node("strong",resource.name),path(resource.groupId),rights(resource.permissions)||t("Behörighetsadministration"),actions];
         })).classList.add("mobile-records");
     }
     function sortedGroups(groups) { return [...groups].sort((a, b) => a.name.localeCompare(b.name, i18n.locale) || a.id.localeCompare(b.id)); }
-    function groupPath(id) {
-        const byId = new Map(state.groups.map(group => [group.id, group])); const path = [], visited = new Set();
+    function groupPath(id, byId = new Map(state.groups.map(group => [group.id, group]))) {
+        const path = [], visited = new Set();
         let group = byId.get(id);
         while (group && !visited.has(group.id) && path.length < 128) { visited.add(group.id); path.unshift(group); group = byId.get(group.parentId); }
         return path;
@@ -305,18 +405,27 @@
     }
     function scopedResources(id, includeSubgroups, query = "") {
         const ids = id ? groupIds(id, includeSubgroups) : null;
-        const term = query.toLocaleLowerCase(i18n.locale);
+        const term = query.trim().toLocaleLowerCase(i18n.locale);
         return state.resources.filter(resource => (!ids || ids.has(resource.groupId)) && resource.name.toLocaleLowerCase(i18n.locale).includes(term));
     }
     function resourceCards(parent, resources, headingLevel = "h2") {
         resources.forEach(resource => {
             const card = node("article", undefined, "card"); const top = node("div", undefined, "card-top"); top.append(node("div", "◇", "resource-icon"), node("span", resource.canManage ? t("Administrerar") : t("Tilldelad åtkomst"), "badge"));
             const path = groupPath(resource.groupId).map(group => group.name).join(" / ");
-            card.append(top, node(headingLevel, resource.name), node("p", path || t("Resursgrupp")));
-            const actions = node("div", undefined, "actions"); const open = routeLink(t("Öppna resurs →"), state.view === "groups" && state.group
+            const open = routeLink(undefined, state.view === "groups" && state.group
                 ? {view: "groups", groupId: state.group.id, resourceId: resource.id} : {view: "vault", resourceId: resource.id});
-            open.setAttribute("aria-label", t("Öppna resurs · ") + resource.name); actions.append(open); card.append(actions); parent.append(card);
+            open.className="resource-title";
+            open.setAttribute("aria-label", t("Öppna resurs · ") + resource.name);
+            open.append(node(headingLevel, resource.name));
+            card.append(top, open, node("p", path || t("Resursgrupp")));
+            if(resource.canManage) card.append(resourceAccessButton(resource));
+            parent.append(card);
         });
+    }
+    function resourceAccessButton(resource) {
+        const manage=button(t("Behörigheter"),()=>accessDialog(1,resource),"resource-access");
+        manage.setAttribute("aria-label",t("Behörigheter")+" · "+resource.name);
+        return manage;
     }
     function groupActions(group) {
         if (!group.canManage) return [];
@@ -399,8 +508,47 @@
         if (!state.groups.length) { empty($("content"), t("Inga synliga grupper"), t("Grupper visas när du har metadataåtkomst eller rätt att administrera dem.")); return; }
         const setBranches=collapsed=>{state.groups.forEach(x=>{if(collapsed)state.collapsedGroups.add(x.id);else state.collapsedGroups.delete(x.id);});
             document.querySelectorAll(".group-tree-branch").forEach(branch=>{branch.hidden=collapsed;document.querySelector(`[aria-controls="${branch.id}"]`)?.setAttribute("aria-expanded",String(!collapsed));});};
-        const p = panel($("content"), t("Gruppstruktur"),[button(t("Visa alla undergrupper"),()=>setBranches(false)),button(t("Dölj alla undergrupper"),()=>setBranches(true))]);
-        groupTree(p, state.groups);
+        const toolbar = node("div", undefined, "toolbar group-search");
+        const search = field(controlGroup(toolbar), t("Sök resursgrupper"), "search", state.groupDirectorySearch);
+        const clear = button(t("Rensa sökning"), () => { search.value = ""; paint(); search.focus(); });
+        toolbar.append(clear);
+        const status = node("p", undefined, "hint");
+        status.setAttribute("role", "status");
+        $("content").append(toolbar, status);
+        const expand = button(t("Visa alla undergrupper"), () => setBranches(false));
+        const collapse = button(t("Dölj alla undergrupper"), () => setBranches(true));
+        const p = panel($("content"), t("Gruppstruktur"), [expand, collapse]);
+        const tree = node("div"), results = node("div");
+        p.append(tree, results);
+        groupTree(tree, state.groups);
+        const hasBranches = Boolean(tree.querySelector(".group-tree-branch"));
+        const groups = sortedGroups(state.groups);
+        const byId = new Map(groups.map(group => [group.id, group]));
+        function paint() {
+            state.groupDirectorySearch = search.value;
+            const term = search.value.trim().toLocaleLowerCase(i18n.locale);
+            tree.hidden = Boolean(term);
+            results.hidden = !term;
+            clear.hidden = !search.value;
+            expand.hidden = collapse.hidden = Boolean(term) || !hasBranches;
+            results.replaceChildren();
+            if (!term) { i18n.setText(status, ""); return; }
+            const matches = groups.filter(group => group.name.toLocaleLowerCase(i18n.locale).includes(term));
+            i18n.setText(status, t("Matchande grupper: {count}", {count: matches.length}));
+            if (!matches.length) { empty(results, t("Inga träffar"), t("Prova ett annat gruppnamn.")); return; }
+            const list = node("ul", undefined, "group-tree");
+            list.setAttribute("role", "list");
+            for (const group of matches) {
+                const row = node("li", undefined, "group-item");
+                const path = groupPath(group.id, byId).map(item => item.name).join(" / ");
+                row.append(routeLink(path, {view: "groups", groupId: group.id}, "group-open"));
+                if (group.canManage) row.append(groupManagement(group));
+                list.append(row);
+            }
+            results.append(list);
+        }
+        search.addEventListener("input", paint);
+        paint();
     }
     function groupPage() {
         const group = state.group;
@@ -412,7 +560,8 @@
         const children = state.groups.filter(child => child.parentId === group.id);
         if (children.length) groupTree(panel($("content"), t("Undergrupper")), children, false);
         const resources = panel($("content"), t("Resurser")); const body = node("div", undefined, "panel-body"); resources.append(body);
-        const toolbar = node("div", undefined, "toolbar"); const search = node("input"); search.setAttribute("aria-label", t("Sök resurser")); search.placeholder = t("Sök bland dina resurser…"); search.value = state.groupSearch; toolbar.append(search);
+        const toolbar = node("div", undefined, "toolbar resource-toolbar");
+        const search = field(controlGroup(toolbar), t("Sök resurser"), "text", state.groupSearch);
         const tree = node("div", undefined, "check-row"); const descendants = field(tree, t("Inkludera undergrupper"), "checkbox"); descendants.checked = state.groupIncludeSubgroups; toolbar.append(tree); body.append(toolbar);
         const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); const cards = node("div", undefined, "cards"); body.append(count, cards);
         const paint = () => {
@@ -443,41 +592,68 @@
         heading(resource.name,capabilities.join(" "), actions);
         appendImportAction();
         groupBreadcrumb(resource.groupId, resource.name);
-        const canAdd=has(1)&&has(4),helpId="resource-content-access";
-        const addAction=(label,action)=>{const add=button(t(label),action,"primary");if(!canAdd&&!(label==="+ Lägg till licens"&&state.session.isLicenseAdministrator)){add.disabled=true;add.setAttribute("aria-describedby",helpId);}return add;};
-        if(!canAdd){const explanation=node("p",t("För att lägga till lösenord eller licenser krävs både Metadata och Ändra på resursen. Administratörsrollen ger inte innehållsåtkomst automatiskt."),"hint");explanation.id=helpId;$("content").append(explanation);}
-        if (!has(1)) { empty($("content"), t("Du administrerar åtkomsten"), t("Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp."));panel($("content"),t("Lösenord"),[addAction("+ Lägg till lösenord",()=>secretDialog())]);panel($("content"),t("Licenser"),[addAction("+ Lägg till licens",()=>licenseDialog())]);return; }
+        const canAdd=has(1)&&has(4);
+        const addLicense = () => canAdd || state.session.isLicenseAdministrator
+            ? [button(t("+ Lägg till licens"),()=>licenseDialog(),"primary")] : [];
+        if (!has(1)) {
+            empty($("content"), t("Du administrerar åtkomsten"), t("Öppna Behörigheter för att tilldela innehållsåtkomst på resursen eller dess överordnade grupp."));
+            if (state.session.isLicenseAdministrator) panel($("content"),t("Licenser"),addLicense());
+            return;
+        }
         const [secretRead,licenseRead]=await Promise.allSettled([api(`/resources/${resource.id}/secrets`),api(`/resources/${resource.id}/licenses`)]);
         if (epoch !== renderEpoch) return;
         const secrets=secretRead.status==="fulfilled"?secretRead.value:[],licenses=licenseRead.status==="fulfilled"?licenseRead.value:[];
-        const controls=node("div",undefined,"toolbar"),search=field(controls,t("Sök i resursen"),"search",state.contentFilters[resource.id]||"");
-        search.maxLength=200;hint(controls,t("Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig."));
+        const controls=node("div",undefined,"content-search"),search=field(controls,t("Sök i resursen"),"search",state.contentFilters[resource.id]||"");
+        search.maxLength=200;
+        const help=node("p",t("Sök i kontotitlar och produktnamn. Hemliga värden söks aldrig."),"hint");
+        help.id="content-search-help";search.setAttribute("aria-describedby",help.id);controls.append(help);
         const count=node("p",undefined,"hint");count.setAttribute("role","status");controls.append(count);
         const records=node("div");$("content").append(controls,records);
+        const clear=button(t("Rensa filter"),()=>{search.value="";paint();search.focus();});
+        controls.append(clear);
+        controls.hidden = !search.value && secretRead.status === "fulfilled" && licenseRead.status === "fulfilled" && secrets.length + licenses.length < 2;
         const paint=()=>{
+        clear.hidden=!search.value;
         const query=search.value.trim().toLocaleLowerCase(i18n.locale),visibleSecrets=secrets.filter(x=>x.title.toLocaleLowerCase(i18n.locale).includes(query)),visibleLicenses=licenses.filter(x=>x.product.toLocaleLowerCase(i18n.locale).includes(query));
-        state.contentFilters[resource.id]=search.value;records.replaceChildren();count.textContent=t("{shown} av {total} poster visas.",{shown:visibleSecrets.length+visibleLicenses.length,total:secrets.length+licenses.length});
-        const passwords = panel(records, t("Lösenord"), [addAction("+ Lägg till lösenord",()=>secretDialog())]);
+        state.contentFilters[resource.id]=search.value;records.replaceChildren();
+        const shown=visibleSecrets.length+visibleLicenses.length;
+        if(secretRead.status==="rejected" && licenseRead.status==="rejected") i18n.setText(count,t("Inga listor kunde hämtas."));
+        else if(secretRead.status==="rejected" || licenseRead.status==="rejected") i18n.setText(count,t("Ofullständigt resultat. Antal träffar i den hämtade listan: {shown}.",{shown}));
+        else i18n.setText(count,t("{shown} av {total} poster visas.",{shown,total:secrets.length+licenses.length}));
+        const passwords = panel(records, t("Lösenord"), canAdd ? [button(t("+ Lägg till lösenord"),()=>secretDialog(),"primary")] : []);
         if(secretRead.status==="rejected"){hint(passwords,secretRead.reason.message);passwords.append(button(t("Försök igen"),()=>render()));}
         else if (!secrets.length) empty(passwords, t("Inga lösenord sparade"), t(has(4)?"Lägg till ett konto som hör till den här resursen.":"Det finns inga konton här ännu. En person med ändringsrätt kan lägga till dem."));
         else if(!visibleSecrets.length)hint(passwords,t("Inga kontotitlar matchar sökningen."));
         else table(passwords, [t("Konto"), "Version", t("Åtgärder")], visibleSecrets.map(secret => {
             const actions = node("div", undefined, "actions");
-            if (has(2)) actions.append(button(t("Visa"), () => revealSecret(secret)), button(t("Kopiera"), () => copySecret(secret)));
+            if (has(2)) {
+                let reset;
+                const copy = button(t("Kopiera"), async () => {
+                    if (!await copySecret(secret) || !copy.isConnected) return;
+                    i18n.setText(copy,t("Kopierat"));
+                    copy.setAttribute("aria-label",t("Kopierat")+" · "+secret.title);
+                    clearTimeout(reset);
+                    reset=setTimeout(()=>{
+                        i18n.setText(copy,t("Kopiera"));
+                        copy.setAttribute("aria-label",t("Kopiera")+" · "+secret.title);
+                    },2500);
+                },"copy-action");
+                actions.append(copy, button(t("Visa"), () => revealSecret(secret)));
+            }
             const secondary=[];
             if (has(4)) secondary.push(button(t("Ändra"), () => secretDialog(secret)));
             secondary.push(button(t("Historik"), () => historyDialog(secret)));
             if (has(2) && has(16) && secret.ldapProfileId) secondary.push(button("LDAP-test", () => ldapTest(secret)));
             if (has(4)) secondary.push(button(t("Ta bort"), () => deleteSecret(secret), "danger"));
-            actions.append(actionMenu(t("Fler åtgärder"),secondary,secret.title));
+            if (secondary.length === 1) actions.append(secondary[0]);
+            else actions.append(actionMenu(t("Fler åtgärder"),secondary,secret.title));
             return [secret.title, String(secret.currentVersion), actions];
         })).classList.add("mobile-records");
-        const licensePanel = panel(records, t("Licenser"), [addAction("+ Lägg till licens",()=>licenseDialog())]);
+        const licensePanel = panel(records, t("Licenser"), addLicense());
         if(licenseRead.status==="rejected"){hint(licensePanel,licenseRead.reason.message);licensePanel.append(button(t("Försök igen"),()=>render()));}
         else if(licenses.length&&!visibleLicenses.length)hint(licensePanel,t("Inga produktnamn matchar sökningen."));else licenseTable(licensePanel, visibleLicenses, true);
-        if(secretRead.status==="rejected"||licenseRead.status==="rejected")count.textContent=t("Översikten är ofullständig. Ett innehållsavsnitt kunde inte läsas.");
         };
-        controls.append(button(t("Rensa filter"),()=>{search.value="";paint();search.focus();}));search.addEventListener("input",paint);paint();
+        search.addEventListener("input",paint);paint();
     }
     function createGroup() {
         let name, parent;
@@ -490,7 +666,11 @@
         let name, group;
         const body = dialog(t("Ny resurs"), t("Skapa resurs"), async () => { const result = await api("/resources", { name: name.value, groupId: group.value }); await load(); await navigate(navigation.url({view: "vault", resourceId: result.id})); });
         name = field(body, t("Resursnamn"), "text", "", true); name.maxLength = 200;
-        group = select(body, t("Resursgrupp"), sortedGroups(state.groups.filter(x => x.canManage)).map(x => [x.id, groupPath(x.id).map(g=>g.name).join(" / ") + " · " + x.id]), state.group?.id);
+          const groups = sortedGroups(state.groups.filter(x => x.canManage));
+          const current = state.group?.id || state.resourceGroup;
+          const selected = groups.some(x => x.id === current) ? current : groups.length === 1 ? groups[0].id : "";
+          group = select(body, t("Resursgrupp"), [["",t("Välj grupp")], ...groups.map(x => [x.id, groupPath(x.id).map(g=>g.name).join(" / ") + " · " + x.id])], selected);
+          group.required = true;
     }
     function renameDialog(kind, target) {
         let name; const body = dialog(t("Byt namn"), t("Spara"), async () => { await api(`/${kind === 0 ? "groups" : "resources"}/${target.id}/rename`, { name: name.value, revision: target.revision }); await load(); });
@@ -511,31 +691,36 @@
     }
     function secretDialog(secret) {
             let title, username, password, notes, profile,change,replacementEpoch=0;
+            const replacing = () => !secret || change.value === "1";
             const body = dialog(secret ? t("Ändra lösenord") : t("Lägg till lösenord"), t("Spara"), async () => {
-                const replace=change.value==="1";
+                const replace=replacing();
                 if(replace&&!password.value.trim())throw new Error(t("Ange ett lösenord för ersättningen."));
-                const data = { title: title.value, secretChange:replace?1:0,payload: replace?{ username: username.value, password: password.value, notes: notes.value }:null, ldapProfileId: profile.value || null, revision: secret?.revision || 0 };
+                const data = { title: title.value, secretChange:replace?1:0,payload: replace?{ username: username.value, password: password.value, notes: notes.value }:null, ldapProfileId: profile?.value || null, revision: secret?.revision || 0 };
                 await api(secret ? `/secrets/${secret.id}/update` : `/resources/${state.resource.id}/secrets`, data); await render();
             });
             if (secret && !has(2)) hint(body, t("Du saknar läsrätt. Metadata kan ändras med bevarade hemligheter. Om du väljer ersättning måste du ange alla hemliga värden som ska sparas."));
             title = field(body, t("Benämning"), "text", secret?.title || "", true); title.maxLength = 200;
-            profile = select(body, t("LDAP-testprofil"), [["", t("Ingen")], ...state.profiles.map(x => [x.id, x.name])], secret?.ldapProfileId || "");
-            change=select(body,t("Lösenord och hemliga fält"),secret?[["0",t("Behåll befintliga värden")],["1",t("Ersätt alla hemliga fält")]]:[["1",t("Ersätt alla hemliga fält")]],secret?"0":"1");
+            if(secret) change=select(body,t("Lösenord och hemliga fält"),[["0",t("Behåll befintliga värden")],["1",t("Ersätt alla hemliga fält")]],"0");
             const replacement=node("div");body.append(replacement);
             username = field(replacement, t("Användarnamn"), "text"); username.dataset.sensitive = "true"; username.maxLength = 512;
             password = field(replacement, t("Lösenord"), "password","",true); password.maxLength = 65536;
             const generate=button(t("Generera lösenord"), () => { const bytes = crypto.getRandomValues(new Uint8Array(24)); password.value = Array.from(bytes, x => x.toString(16).padStart(2, "0")).join("");replacementEpoch++; updateSecretSubmitState(); });replacement.append(generate);
             notes = field(replacement, t("Hemliga anteckningar"), "textarea"); notes.maxLength = 65536;
             let readSaved;
-            const update=()=>{replacement.hidden=change.value!=="1";replacementEpoch++;username.value=password.value=notes.value="";username.disabled=password.disabled=notes.disabled=generate.disabled=change.value!=="1";if(readSaved)readSaved.disabled=change.value!=="1";password.required=change.value==="1";const marker=password.labels?.[0]?.querySelectorAll("span")[1];if(marker)i18n.setText(marker,password.required?t(" (obligatoriskt)"):"");updateSecretSubmitState();};
-            change.addEventListener("change",update);update();if(secret)resetReplacement=()=>{change.value="0";update();};
+            const update=()=>{const inactive=!replacing();replacement.hidden=inactive;replacementEpoch++;username.value=password.value=notes.value="";username.disabled=password.disabled=notes.disabled=generate.disabled=inactive;if(readSaved)readSaved.disabled=inactive;password.required=!inactive;const marker=password.labels?.[0]?.querySelectorAll("span")[1];if(marker)i18n.setText(marker,password.required?t(" (obligatoriskt)"):"");updateSecretSubmitState();};
+            change?.addEventListener("change",update);update();if(secret)resetReplacement=()=>{change.value="0";update();};
             [username,password,notes].forEach(input=>input.addEventListener("input",()=>replacementEpoch++));
             if(secret&&has(2)){readSaved=button(t("Läs sparade värden för ersättning"),async()=>{
                 if(change.value!=="1")throw new Error(t("Välj ersättning först."));const epoch=++dialogEpoch,request=replacementEpoch;
                 const payload=await api(`/secrets/${secret.id}/reveal`,{});if(!canDisplay(epoch)||request!==replacementEpoch||change.value!=="1")return;
                 username.value=payload.username;password.value=payload.password;notes.value=payload.notes;updateSecretSubmitState();
             });readSaved.disabled=change.value!=="1";replacement.append(readSaved);}
-            hint(body,t("Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen."));
+            if(secret) hint(body,t("Metadata kan sparas utan att läsa lösenordet. Ersättning ändrar användarnamn, lösenord och anteckningar tillsammans; tomma frivilliga fält töms. Efter fokusförlust väljs bevarande igen."));
+            if(state.profiles.length || secret?.ldapProfileId) {
+                const profiles=state.profiles.map(x=>[x.id,x.name]);
+                if(secret?.ldapProfileId && !state.profiles.some(x=>x.id===secret.ldapProfileId)) profiles.push([secret.ldapProfileId,t("Befintlig testprofil")]);
+                profile=select(body,t("LDAP-testprofil"),[["",t("Ingen")],...profiles],secret?.ldapProfileId || "");
+            }
     }
     async function revealSecret(secret, version) {
         const epoch = ++dialogEpoch;
@@ -551,7 +736,10 @@
         const epoch = ++dialogEpoch;
         const payload = await api(`/secrets/${secret.id}/reveal`, { copy: true });
         if (!canDisplay(epoch)) return;
-        await navigator.clipboard.writeText(payload.password); notice(t("Lösenordet har kopierats. Töm urklipp när du är klar."));
+        try { await navigator.clipboard.writeText(payload.password); }
+        catch { if (canDisplay(epoch)) throw new Error(t("Kunde inte kopiera till urklipp. Välj Visa för att läsa lösenordet.")); return; }
+        notice(t("Lösenordet har kopierats. Töm urklipp när du är klar."));
+        return true;
     }
     function deleteSecret(secret) {
         const body = dialog(t("Ta bort lösenord"), t("Ta bort"), async () => { await api(`/secrets/${secret.id}/deleted`, { deleted: true, revision: secret.revision }); await render(); });
@@ -582,30 +770,32 @@
     function directoryPicker(parent,options={}) {
         const picker = node("fieldset"); picker.append(node("legend", t("Mottagare"))); parent.append(picker); parent = picker;
         const kind = select(parent, t("Typ"), [["0", t("Användare")], ["1", t("AD-grupp")]]); const query = field(parent, t("Sök i Active Directory"), "text"); query.minLength = 2; query.maxLength = 128;
+        const search = button(t("Sök"), runSearch, "", false); parent.append(search);
         const results = select(parent, t("Välj träff"), [["", t("Sök och välj en träff")]]); let subjects = [];
         const status = node("p", undefined, "hint"); status.setAttribute("role", "status"); parent.append(status);
         let searchEpoch = 0;
         const reset = () => {
             searchEpoch++; subjects = []; results.replaceChildren(node("option", t("Sök och välj en träff"))); results.options[0].value = "";
-            status.textContent = ""; search.disabled = false; results.removeAttribute("aria-busy");options.changed?.();
+            i18n.setText(status,""); search.removeAttribute("aria-disabled"); results.removeAttribute("aria-busy");options.changed?.();
         };
-        const runSearch = async () => {
+        async function runSearch() {
+            if (results.hasAttribute("aria-busy")) return;
             reset();
             const text = query.value.trim();
             if (text.length < 2 || text.length > 128) { status.textContent = t("Ange 2–128 tecken för katalogsökning."); query.focus(); return; }
             const epoch = searchEpoch;
-            search.disabled = true; results.setAttribute("aria-busy", "true");
+            search.setAttribute("aria-disabled","true"); results.setAttribute("aria-busy", "true");
+            status.textContent=t("Söker i katalogen…");
             try {
                 const found = await api((options.searchPath||"/directory")+`?query=${encodeURIComponent(text)}&kind=${kind.value}`);
                 if (epoch !== searchEpoch || !results.isConnected || !$("dialog").open) return;
                 subjects = found;
                 subjects.forEach(subject => { const o = node("option", friendlyAccount(subject.name,subject.samAccountName)); o.value = subject.id; results.append(o); });
                 status.textContent = subjects.length ? subjects.length + t(" träffar. Välj en träff i listan.") : t("Inga träffar");
-                results.focus();
+                if (document.activeElement === query || document.activeElement === search) (subjects.length ? results : query).focus();
             } catch (error) { if (epoch === searchEpoch && results.isConnected) status.textContent = error.message; }
-            finally { if (epoch === searchEpoch) { search.disabled = false; results.removeAttribute("aria-busy"); } }
-        };
-        const search = button(t("Sök"), runSearch, "", false); parent.append(search);
+            finally { if (epoch === searchEpoch) { search.removeAttribute("aria-disabled"); results.removeAttribute("aria-busy"); } }
+        }
         query.addEventListener("input", reset); kind.addEventListener("change", reset);
         query.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); if (!search.disabled) safely(runSearch); } });
         results.addEventListener("change", () => { const subject = subjects.find(x => x.id === results.value); status.textContent = subject ? friendlyAccount(subject.name,subject.samAccountName) : "";options.changed?.(); });
@@ -616,7 +806,7 @@
         api((options.searchPath||"/directory")+"/active").then(people=>{
             if(initialEpoch!==searchEpoch||!results.isConnected||!$("dialog").open||kind.value!=="0")return;
             subjects=people;subjects.forEach(subject=>{const option=node("option",friendlyAccount(subject.name,subject.samAccountName));option.value=subject.id;results.append(option);});
-            status.textContent=t("Tidigare aktiva användare. Sök i katalogen för att lägga till fler.");
+            if (people.length) status.textContent=t("Tidigare aktiva användare. Sök i katalogen för att lägga till fler.");
         }).catch(()=>{if(initialEpoch===searchEpoch&&results.isConnected)status.textContent=t("Aktiva användare kunde inte läsas. Sök i katalogen.");});
         pick.clear=reset;
         pick.selected=()=>subjects.find(x=>x.id===results.value);
@@ -634,15 +824,16 @@
         return group ? routeLink(label, {view:"groups", groupId:group.id}) : node("span", label, "badge");
     }
     async function accessDialog(kind, target, feedback) {
-        const epoch = ++dialogEpoch;
-        const access = await api(`/access/${kind}/${target.id}`); if (!canDisplay(epoch)) return;
-        const body = dialog(t("Behörigheter · ") + target.name);
+        const loaded = await metadataDialog(t("Behörigheter · ") + target.name,
+            () => api(`/access/${kind}/${target.id}`), () => accessDialog(kind,target,feedback));
+        if (!loaded) return;
+        const {body,value:access}=loaded;
         body.classList.add("permissions-overview");
         if (feedback) { const result = node("p", feedback, "notice"); result.setAttribute("role", "status"); body.append(result); }
         hint(body, t("Tilldelningar summeras. Ärvd åtkomst ändras på den överordnade gruppen. Ägare och behörighetsadministratörer kan tilldela sig själva läsrätt."));
         hint(body, t("Din effektiva innehållsåtkomst just nu: {rights}.", {rights:rights(access.effectivePermissions || 0) || t("Ingen") }));
         hint(body,t("Inloggad som {name}.",{name:friendlyAccount(state.session.displayName,state.session.samAccountName)}));
-        const actions = node("div", undefined, "actions"); actions.append(button(t("+ Tilldela åtkomst"), () => grantDialog(kind, target)), button(t("+ Lägg till ägare"), () => ownerDialog(kind, target))); body.append(actions);
+        const actions = node("div", undefined, "actions"); actions.append(button(t("+ Tilldela åtkomst"), () => grantDialog(kind, target),"primary"), button(t("+ Lägg till ägare"), () => ownerDialog(kind, target))); body.append(actions);
         body.append(node("h3", t("Tilldelad åtkomst")));
         if (!access.grants.length) hint(body, t("Inga direkta eller ärvda tilldelningar. Ägare och globala administratörer kan fortfarande hantera åtkomst."));
         else table(body, [t("Identitet"), t("Rättigheter"), t("Giltighet"), t("Källa"), ""], access.grants.map(grant => {
@@ -748,7 +939,7 @@
             const resource = (state.licenseResources||state.resources).find(x => x.id === license.resourceId); const actions = node("div", undefined, "actions");
             if (resource?.permissions & 2) actions.append(button(t("Visa nyckel"), () => revealLicense(license)));
             const secondary=[];
-            if (resource?.permissions & 4) secondary.push(button(t("Ändra"), () => { state.resource = resource; licenseDialog(license); }));
+            if (resource?.permissions & 4) secondary.push(button(t("Ändra"), () => licenseDialog(license)));
             secondary.push(button(t("Tilldelningar"), () => assignmentDialog(license, resource)),button(t("Historik"), () => licenseHistory(license, resource)));
             if (resource?.permissions & 4) secondary.push(button(t("Ta bort"), () => {
                 const body = dialog(t("Ta bort licens · ") + license.product, t("Ta bort"), async () => { await api(`/licenses/${license.id}/deleted`, { deleted: true, revision: license.revision }); await render();return t("Licensen finns i resursens papperskorg."); });
@@ -771,16 +962,19 @@
         if(epoch!==renderEpoch)return;
         const writableResources = (state.licenseResources||state.resources).filter(x => (x.permissions & 5) === 5);
         heading(t("Licensöversikt"), t("Tilldelade platser och kommande utgångsdatum för dina synliga resurser."),
-            [button(t("+ Lägg till licens"), () => {
-                if(writableResources.length)licenseDialog(null,writableResources);
-                else hint(dialog(t("Lägg till licens")),t("Ingen synlig resurs tillåter att du lägger till licenser. Be en resursägare om Metadata och Ändra för rätt destination."));
-            }, "primary"),button(t("Papperskorg för licenser"),()=>licenseRecycleDialog(writableResources))]);
+            writableResources.length ? [button(t("+ Lägg till licens"), () => licenseDialog(null,writableResources),"primary"),
+                button(t("Papperskorg för licenser"),()=>licenseRecycleDialog(writableResources))] : []);
         const resume=state.licenseResume;state.licenseResume=null;
         const licenses=resume?.licenses.slice()||[];let offset=resume?.offset||0,hasMore=true,loadError;
+        const seen = new Set(licenses.map(license => license.id));
         try{
             for(let page=0;page<100&&hasMore&&offset<20000;page++){
                 const result=await api(`/licenses/overview?offset=${offset}`);if(epoch!==renderEpoch)return;
-                licenses.push(...result.items.filter(item=>!licenses.some(existing=>existing.id===item.id)));offset+=result.items.length;hasMore=result.hasMore;
+                for (const item of result.items) {
+                    if (seen.has(item.id)) continue;
+                    seen.add(item.id); licenses.push(item);
+                }
+                offset+=result.items.length;hasMore=result.hasMore;
                 if(hasMore&&!result.items.length)throw new Error(t("Licensöversikten kunde inte läsas färdigt."));
             }
         }catch(error){if(epoch!==renderEpoch)return;if(!licenses.length)throw error;loadError=error.message;}
@@ -810,19 +1004,37 @@
         toolbar.append(button(t("Rensa filter"),()=>{search.value="";filter.value="all";paint();}));paint();
     }
     function licenseRecycleDialog(destinations,selected=""){
-        let picker;
         const body=dialog(t("Papperskorg för licenser"));
-        picker=select(body,t("Resurs"),[["",t("Välj en destinationsresurs")],...destinations.map(x=>[x.id,x.path||groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")])],selected);
-        const results=node("div");body.append(button(t("Öppna"),async()=>{
-            if(!picker.value)return;
-            const id=picker.value,epoch=dialogEpoch;results.replaceChildren(node("p",t("Läser in…")));
-            const rows=await api(`/resources/${id}/deleted-licenses`);if(!canDisplay(epoch))return;results.replaceChildren();
-            if(!rows.length)hint(results,t("Papperskorgen är tom."));
-            else table(results,[t("Produkt"),t("Platser"),t("Åtgärder")],rows.map(x=>[x.product,String(x.assignedSeats)+" / "+x.seats,button(t("Återställ"),()=>{
+        if (!destinations.length) { hint(body,t("Du behöver Metadata och Ändra på en resurs för att se dess papperskorg.")); return; }
+        const picker=select(body,t("Resurs"),[["",t("Välj en destinationsresurs")],...destinations.map(x=>[x.id,x.path||groupPath(x.groupId).map(g=>g.name).concat(x.name).join(" / ")])],selected || (destinations.length === 1 ? destinations[0].id : ""));
+        const status=node("p",undefined,"hint"), results=node("div");
+        status.setAttribute("role","status");body.append(status,results);
+        let revision=0;
+        async function loadDeleted() {
+            const id=picker.value, request=++revision, epoch=dialogEpoch;
+            results.replaceChildren();i18n.setText(status,"");
+            if (!id) { pendingMetadataRead=null; return; }
+            i18n.setText(status,t("Läser in…"));
+            const retry = message => {
+                i18n.setText(status,message);
+                results.replaceChildren(button(t("Försök igen"),loadDeleted));
+            };
+            const interrupted = () => retry(t("Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata."));
+            pendingMetadataRead=interrupted;
+            let rows;
+            try { rows=await api(`/resources/${id}/deleted-licenses`); }
+            catch(error){if (request===revision && canDisplay(epoch)) retry(error.message);return;}
+            finally{if(pendingMetadataRead===interrupted)pendingMetadataRead=null;}
+            if(request!==revision || !canDisplay(epoch))return;
+            i18n.setText(status,rows.length?t("Borttagna licenser: {count}",{count:rows.length}):t("Papperskorgen är tom."));
+            if(!rows.length)return;
+            table(results,[t("Produkt"),t("Platser"),t("Åtgärder")],rows.map(x=>[x.product,String(x.assignedSeats)+" / "+x.seats,button(t("Återställ"),()=>{
                 const confirmation=dialog(t("Återställ borttagen licens"),t("Återställ"),async()=>{await api(`/licenses/${x.id}/deleted`,{deleted:false,revision:x.revision});await render();},{back:()=>licenseRecycleDialog(destinations,id)});
                 hint(confirmation,x.product+" · "+(destinations.find(r=>r.id===id)?.path||destinations.find(r=>r.id===id)?.name||id));
-            })]));
-        }),results);
+            })])).classList.add("mobile-records");
+        }
+        picker.addEventListener("change",loadDeleted);
+        loadDeleted();
     }
     function licenseDialog(license, writableResources) {
             const resourceId = license?.resourceId || state.resource?.id;
@@ -926,17 +1138,18 @@
         try { targets = await api("/audit/targets"); }
         catch { targetsUnavailable = true; }
         if (epoch !== renderEpoch) return;
-        const toolbar = node("div", undefined, "audit-filters");
+        const form = node("form"), toolbar = node("div", undefined, "audit-filters");
         const advanced=node("details");advanced.append(node("summary",t("Avancerade filter")));const technicalFilters=node("div",undefined,"audit-filters");advanced.append(technicalFilters);
         const filter = (label, type, parent=toolbar) => { const group = node("div"); parent.append(group); return field(group, label, type); };
         const from = filter(t("Från"), "datetime-local"), to = filter(t("Till (exklusive)"), "datetime-local");
-        const actor = filter(t("Aktörens ID"), "text",technicalFilters), action = filter(t("Operation"), "text",technicalFilters); $("content").append(toolbar,advanced);
+        const actor = filter(t("Aktörens ID"), "text",technicalFilters), action = filter(t("Operation"), "text",technicalFilters);
+        form.append(toolbar,advanced); $("content").append(form);
         actor.hidden=true;actor.labels[0].hidden=true;
         const actorChoices=targets.actors||[],actionChoices=targets.actions||[];
         const actorChoice=select(controlGroup(toolbar),t("Person eller tjänst"),[["",t("Välj registrerad aktör")],...actorChoices.map((x,index)=>[String(index+1),friendlyAccount(x.name,x.samAccountName)])]);
         const operationChoice=select(controlGroup(toolbar),t("Åtgärd"),[["",t("Välj registrerad operation")],...actionChoices.map(code=>[code,auditActionLabel(code)])]);
         actorChoice.disabled=operationChoice.disabled=targetsUnavailable;
-        hint(advanced,t("Aktörsnamn är aktuella katalognamn, inte historiska namn. Högst 100 registrerade aktörer visas; ID och operationskod kan anges manuellt."));
+        hint(advanced,t("Aktörslistan visar högst 100 registrerade aktörer med deras aktuella katalognamn. Du kan ange en operationskod här."));
         const targetFilter = (label, options) => {
             const names = new Map(); options.forEach(x => names.set(x.name, (names.get(x.name) || 0) + 1));
             const group = node("div"); toolbar.append(group);
@@ -958,7 +1171,8 @@
         const selectedActor=actorChoices.findIndex(x=>x.id===actor.value&&x.provider===actorProvider);
         actorChoice.value=selectedActor<0?"":String(selectedActor+1);operationChoice.value=action.value;
         advanced.open=!!(actor.value&&selectedActor<0||action.value&&!actionChoices.includes(action.value));
-        const panelNode = panel($("content"), t("Händelser")); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
+        const eventActions=node("div",undefined,"actions");
+        const panelNode = panel($("content"), t("Händelser"),[eventActions]); const results = node("div"),failure=node("div"),dirty=node("p",undefined,"hint");panelNode.append(dirty,results,failure);
         const remember=()=>{state.auditFilters={...read(),offset:applied.offset,applied:{...applied}};dirty.textContent=t("Ändrade filter är inte tillämpade. Listan och exporten använder senast tillämpade filter.");
             dirty.hidden=Object.entries(read()).every(([key,value])=>applied[key]===value);};
         actor.addEventListener("input",()=>{actorProvider="";actorChoice.value="";remember();});
@@ -966,11 +1180,11 @@
         actorChoice.addEventListener("change",()=>{const selected=actorChoices[Number(actorChoice.value)-1];actor.value=selected?.id||"";actorProvider=selected?.provider||"";remember();});
         operationChoice.addEventListener("change",()=>{action.value=operationChoice.value;remember();});
         [from,to,resource,group,descendants].forEach(input=>{input.addEventListener("input",remember);input.addEventListener("change",remember);});
-        const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); panelNode.append(count);
-        const snapshotInfo=node("p",undefined,"hint filter-actions");toolbar.append(snapshotInfo);
+        const count = node("p", undefined, "hint"); count.setAttribute("role", "status"); count.tabIndex=-1; panelNode.insertBefore(count,results);
+        const snapshotInfo=node("p",undefined,"hint");panelNode.insertBefore(snapshotInfo,results);
         hint(panelNode,t("En ändring kan ha flera auditrader: begäran och genomförande är steg i samma operation, inte två genomförda ändringar. En begäran bevisar inte att ändringen slutfördes. Jämför operations-ID i detaljer; andra steg kan ligga utanför sidan eller filtret."));
         function query(value) { const params = new URLSearchParams({offset:value.offset});if(value.snapshotId)params.set("snapshotId",value.snapshotId);if(value.from)params.set("from",new Date(value.from).toISOString());if(value.to)params.set("to",new Date(value.to).toISOString());if(value.actor)params.set("actorId",value.actor);if(value.actorProvider)params.set("actorProvider",value.actorProvider);if(value.action)params.set("action",value.action);if(value.resource)params.set("resourceId",value.resource);if(value.group){params.set("groupId",value.group);params.set("includeSubgroups",String(value.descendants));}return params.toString(); }
-        const availability=busy=>{previous.disabled=busy||snapshotExpired||!hasResults||applied.offset===0;next.disabled=busy||snapshotExpired||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||snapshotExpired||!hasResults||!applied.snapshotId;apply.disabled=refreshAudit.disabled=busy;};
+        const availability=busy=>{previous.disabled=busy||snapshotExpired||!hasResults||applied.offset===0;next.disabled=busy||snapshotExpired||!hasResults||rowCount<200||applied.offset>=1000000;exportPage.disabled=busy||snapshotExpired||!hasResults||!applied.snapshotId;clearFilters.disabled=apply.disabled=refreshAudit.disabled=busy;};
         const paint = async requested => {
             const requestEpoch = ++paintEpoch;availability(true);failure.replaceChildren();results.setAttribute("aria-busy","true");count.textContent=t("Läser in…");
             try {
@@ -988,17 +1202,37 @@
                 const facts=[["ID",x.event.id],[t("Operations-ID"),x.event.operationId],[t("Korrelations-ID"),x.event.correlationId],[t("Aktör"),friendlyAccount(actor?.name,actor?.samAccountName)],[t("Operation"),x.event.action],[t("Steg"),x.event.phase],[t("Resultat"),x.event.outcome]];
                 facts.forEach(([label,value])=>details.append(node("p",label+": "+String(value??"—"),"audit-id")));
                 return [date(x.event.timestamp),node("span",friendlyAccount(actor?.name,actor?.samAccountName)),auditActionLabel(x.event.action),auditScopeLabel(x),outcome,node("span",x.signatureValid?t("Giltig signatur"):t("Ogiltig signatur"),"badge"+(x.signatureValid?"":" error")),details];
-            }));
+            })).classList.add("mobile-records");
             }catch(error){if(epoch!==renderEpoch||requestEpoch!==paintEpoch)return;if(error.status===409)snapshotExpired=true;count.textContent=hasResults?t("Tidigare resultat visas. Uppdateringen misslyckades."):t("Inga resultat har lästs ännu.");failure.append(node("p",error.message),button(t(error.status===409?"Uppdatera auditvyn":"Försök igen"),()=>paint(error.status===409?{...requested,snapshotId:undefined,offset:0}:requested)));}
             finally{if(epoch===renderEpoch&&requestEpoch===paintEpoch){results.removeAttribute("aria-busy");availability(false);}}
         };
-        const filterActions = node("div", undefined, "actions filter-actions"); toolbar.append(filterActions);
-        const apply=button(t("Filtrera"),()=>{if(from.value&&to.value&&new Date(from.value)>=new Date(to.value))throw new Error(t("Sluttiden måste vara efter starttiden."));return paint({...read(),offset:0});});
+        const filterActions = node("div", undefined, "actions audit-filter-actions"); form.append(filterActions);
+        const apply = node("button",t("Filtrera"),"button primary"); apply.type="submit";
+        form.addEventListener("submit",event=>{
+            event.preventDefault();
+            if (apply.disabled) return;
+            if(from.value && to.value && new Date(from.value)>=new Date(to.value)){
+                to.setCustomValidity(String(t("Sluttiden måste vara efter starttiden.")));
+                to.focus();to.reportValidity();to.setCustomValidity("");return;
+            }
+            safely(()=>paint({...read(),offset:0}));
+        });
         const exportPage=button(t("Exportera denna sida"), async () => {
             const response = await fetch("/api/audit/export?" + query(applied), { credentials: "same-origin", cache: "no-store", headers: {"X-Valvra-Language": i18n.language} }); if (!response.ok){if(response.status===409){snapshotExpired=true;availability(false);}throw new Error(t(response.status===409?"Auditvyn har löpt ut. Läs aktuella händelser innan du fortsätter.":"Auditexporten misslyckades."));}
             const url = URL.createObjectURL(await response.blob()); const link = node("a"); link.href = url; link.download = "valvra-audit.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-        });const refreshAudit=button(t("Uppdatera auditvyn"),()=>paint({...applied,snapshotId:undefined,offset:0}));filterActions.append(apply,exportPage,refreshAudit);
-        const previous=button(t("← Föregående"),()=>paint({...applied,offset:Math.max(0,applied.offset-200)})),next=button(t("Nästa →"),()=>paint({...applied,offset:applied.offset+200}));
+        });const refreshAudit=button(t("Uppdatera auditvyn"),()=>paint({...applied,snapshotId:undefined,offset:0}));
+        const clearFilters=button(t("Rensa filter"),()=>{
+            for(const input of [from,to,actor,actorChoice,action,operationChoice,resource,group]) input.value="";
+            actorProvider=""; descendants.checked=true; remember();
+            return paint({...read(),offset:0});
+        });
+        filterActions.append(apply,clearFilters);
+        eventActions.append(refreshAudit,exportPage);
+        async function changePage(offset,opener){
+            await paint({...applied,offset});
+            if(epoch===renderEpoch && applied.offset===offset && (document.activeElement===document.body || document.activeElement===opener)) count.focus();
+        }
+        const previous=button(t("← Föregående"),()=>changePage(Math.max(0,applied.offset-200),previous)),next=button(t("Nästa →"),()=>changePage(applied.offset+200,next));
         const paging = node("div", undefined, "actions");paging.append(previous,next);$("content").append(paging);await paint(applied);
     }
     function auditActionLabel(code){const labels={"Access.Update":"Ändra åtkomst","Access.Exclude":"Undanta åtkomst","Access.Restore":"Återställ åtkomst","Group.Delete":"Ta bort resursgrupp","Resource.Delete":"Ta bort resurs","Owner.Add":"Lägg till ägare","Owner.Remove":"Ta bort ägare","GlobalRoles.Update":"Ändra globala roller","Secret.Undelete":"Återställ borttaget lösenord","License.Delete":"Ta bort licens","License.Undelete":"Återställ borttagen licens","Group.Create":"Skapa resursgrupp","Group.Rename":"Byt namn på resursgrupp","Group.Move":"Flytta resursgrupp","Resource.Create":"Skapa resurs","Resource.Rename":"Byt namn på resurs","Resource.Move":"Flytta resurs","Session.Identified":"Verifiera inloggning","Secret.Create":"Skapa lösenord","Secret.Update":"Ändra lösenord","Secret.Reveal":"Visa lösenord","Secret.Copy":"Kopiera lösenord","Secret.Delete":"Ta bort lösenord","Secret.RestoreRead":"Läs version för återställning","License.Create":"Lägg till licens","License.Update":"Ändra licens","License.Reveal":"Visa licensnyckel","License.Assign":"Tilldela licensplatser","License.Unassign":"Ta bort platstilldelning","Access.Grant":"Tilldela behörighet","Access.Revoke":"Återkalla behörighet","Access.Denied":"Åtkomst nekad","Audit.Export":"Exportera auditlogg"};return Object.hasOwn(labels,code)?t(labels[code]):code;}
@@ -1021,8 +1255,8 @@
     $("close-dialog").addEventListener("click", dismissDialog); $("dialog").addEventListener("cancel", event => { event.preventDefault(); dismissDialog(); });
     $("dialog").addEventListener("keydown", event => {
         if (event.key !== "Tab") return;
-        const controls = Array.from($("dialog").querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]'))
-            .filter(x => !x.disabled && x.getClientRects().length);
+        const controls = Array.from($("dialog").querySelectorAll('button,input,select,textarea,a[href],summary,[tabindex="0"]'))
+            .filter(x => !x.matches(":disabled,[tabindex='-1']") && x.getClientRects().length);
         const first = controls[0], last = controls[controls.length - 1];
         if (!first) return;
         if (event.shiftKey && (document.activeElement === first || document.activeElement === $("dialog-title"))) { event.preventDefault(); last.focus(); }

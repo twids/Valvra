@@ -21,7 +21,7 @@ public sealed record LicenseDestinationView(Guid Id, string Name, string Path, V
 public sealed record AccessView(IReadOnlyList<AccessGrant> Grants, IReadOnlyList<ResourceOwner> Owners, IReadOnlyList<DirectorySubject>? Subjects = null,
     VaultPermission EffectivePermissions = VaultPermission.None);
 
-public sealed class VaultOperations(VaultDbContext db, AccessService access, AuditService audit, ISecretCipher cipher, TimeProvider clock,
+public sealed partial class VaultOperations(VaultDbContext db, AccessService access, AuditService audit, ISecretCipher cipher, TimeProvider clock,
     IDirectoryProvider directory, VaultIntegrity integrity)
 {
     public async Task<IReadOnlyList<DirectorySubject>> ActivePeopleAsync(Actor actor,Guid? licenseId,CancellationToken ct)

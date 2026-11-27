@@ -52,6 +52,7 @@ test('navigation clicked during initial identity verification is queued without 
 });
 test('resource and group filters are restored from memory during history traversal',async({page})=>{
     const {group}=await data(page); await page.goto('/resources');
+    await page.getByText('Filter och visning',{exact:true}).click();
     await page.getByLabel('Sök resurser',{exact:true}).fill('Databas');
     await page.getByLabel('Resursgrupp',{exact:true}).selectOption(group.id);
     await page.getByLabel('Inkludera undergrupper',{exact:true}).uncheck();

@@ -16,7 +16,9 @@
             ["directory","Katalog",state.session.isSystemAdministrator], ["certificates","Certifikat och säkerhet",true], ["about","Om Valvra",true]];
         const tabs = node("nav", undefined, "settings-navigation"); tabs.setAttribute("aria-label", t("Inställningssektioner"));
         sections.filter(([, , visible]) => visible).forEach(([key,label]) => { const link = ui.routeLink(t(label), {view:"settings",section:key}); if (key === section) link.setAttribute("aria-current","page"); tabs.append(link); }); content.append(tabs);
-        if (dirty) hint(content, t("Kataloginställningar har osparade ändringar. Utkastet finns kvar i denna flik."));
+        const draftNotice = node("p", t("Kataloginställningar har osparade ändringar. Utkastet finns kvar i denna flik."), "hint");
+        draftNotice.hidden = !dirty;
+        content.append(draftNotice);
         if (section === "import") {
             const p = panel(content,t("Import"));
             hint(p,t("Import kräver behörighetsadministration och destinationens metadata- och ändringsrätt. Befintliga lösenord skrivs aldrig över."));
@@ -65,7 +67,7 @@
                 const input = field(parent, label, type, draft[key], required); inputs[key] = input;
                 input.maxLength = key === "server" ? 253 : 2048;
                 if (type === "number") { input.min = 1; input.max = key === "port" ? 65535 : 30; }
-                input.addEventListener("input", () => { draftEpoch++; dirty = true; draft[key] = type === "number" ? Number(input.value) : input.value.trim(); });
+                input.addEventListener("input", () => { draftEpoch++; dirty = true; draftNotice.hidden = false; draft[key] = type === "number" ? Number(input.value) : input.value.trim(); });
                 if (help) { const description = node("p", help, "hint"); description.id = input.id + "-help"; input.setAttribute("aria-describedby", description.id); parent.append(description); }
                 return input;
             }
@@ -87,22 +89,59 @@
             const actions = node("div", undefined, "actions"); form.append(actions);
             const test = button(t("Testa anslutning"), () => perform(false));
             const save = node("button", t("Spara inställningar"), "button primary"); save.type = "submit";
-            const reload = button(t("Läs in sparade inställningar"), async () => { draftEpoch++; draft = null; dirty = false; await ui.render(); });
+            const reload = button(t("Läs in sparade inställningar"), async () => {
+                if (dirty) {
+                    const explanation = node("p",t("Dina ändringar ersätts med de senast sparade kataloginställningarna."),"hint");
+                    const body = dialog(t("Ersätt osparade ändringar?"), t("Läs in sparade inställningar"), () => reloadSaved(explanation));
+                    body.append(explanation);
+                } else {
+                    const message = await reloadSaved();
+                    if (message) notice(message);
+                }
+            });
+            async function reloadSaved(confirmation) {
+                const epoch = draftEpoch;
+                busy = true;
+                [test, save, reload].forEach(control => control.disabled = true);
+                let saved;
+                try { saved = await api("/settings/directory"); }
+                finally {
+                    busy = false;
+                    [test, save, reload].forEach(control => control.disabled = false);
+                    if (!ui.isCurrent() && state.view === "settings" && state.settingsSection === "directory") await ui.render();
+                }
+                if (!ui.isCurrent() || epoch !== draftEpoch || (confirmation && !confirmation.isConnected)) return false;
+                draftEpoch++;
+                draft = saved;
+                dirty = false;
+                await ui.render();
+                return t("Sparade inställningar har lästs in.");
+            }
             actions.append(test, save, reload);
             [test, save, reload].forEach(x => x.disabled = busy);
+            let inputRevision = 0;
+            form.addEventListener("input", () => {
+                inputRevision++;
+                result.replaceChildren();
+                error.textContent = "";
+            });
             async function perform(saving) {
                 if (busy || !form.reportValidity()) return;
                 busy = true; [test, save, reload].forEach(x => x.disabled = true); error.textContent = "";
-                const submittedEpoch = draftEpoch;
+                const submittedEpoch = draftEpoch, testedRevision = inputRevision;
+                result.replaceChildren(node("p", saving ? t("Sparar inställningar…") : t("Testar anslutningen…")));
                 try {
                     const response = await api(saving ? "/settings/directory" : "/settings/directory/test", {settings: {...draft}, query: query.trim()});
                     result.replaceChildren();
-                    if (saving) { if (submittedEpoch === draftEpoch) { draft = response; dirty = false; } else { draft = {...draft,revision:response.revision}; dirty = true; } notice(t("Kataloginställningarna har sparats och gäller för nya förfrågningar.")); }
-                    else {
+                    if (saving) { if (submittedEpoch === draftEpoch) { draft = response; dirty = false; draftNotice.hidden = true; } else { draft = {...draft,revision:response.revision}; dirty = true; } notice(t("Kataloginställningarna har sparats och gäller för nya förfrågningar.")); }
+                    else if (testedRevision === inputRevision) {
                         result.append(node("p", t("Anslutningen och ditt personkonto har verifierats.")));
                         table(result, [t("Typ"), t("Namn"), t("Kontonamn")], [...response.users.map(x => [t("Personkonto"), friendlyAccount(x.name), friendlyAccount(null,x.samAccountName)]), ...response.groups.map(x => [t("Behörighetsgrupp"), friendlyAccount(x.name), friendlyAccount(null,x.samAccountName)])]);
                     }
-                } catch (failure) { error.textContent = failure.message; }
+                } catch (failure) {
+                    result.replaceChildren();
+                    if (saving || testedRevision === inputRevision) error.textContent = failure.message;
+                }
                 finally { busy = false; [test, save, reload].forEach(x => x.disabled = false); if (!ui.isCurrent() && state.view === "settings" && state.settingsSection === "directory") await ui.render(); }
             }
             form.addEventListener("submit", event => { event.preventDefault(); perform(true); });
@@ -168,19 +207,27 @@
                 const runSearch = async () => {
                     const epoch = ++searchEpoch;
                     subject = null; results.replaceChildren(); status.textContent = "";
-                    if (search.value.trim().length < 2) throw new Error(t("Ange 2–128 tecken för katalogsökning."));
-                    const people = await api("/settings/people?query=" + encodeURIComponent(search.value.trim()));
-                    if (epoch !== searchEpoch || !results.isConnected) return;
-                    results.replaceChildren();
-                    choices(people);
-                    if (!people.length) status.textContent = t("Inga träffar");
+                    if (search.value.trim().length < 2) {
+                        status.textContent=t("Ange 2–128 tecken för katalogsökning."); search.focus(); return;
+                    }
+                    status.textContent=t("Söker i katalogen…");
+                    try {
+                        const people = await api("/settings/people?query=" + encodeURIComponent(search.value.trim()));
+                        if (epoch !== searchEpoch || !results.isConnected) return;
+                        choices(people);
+                        status.textContent=people.length ? people.length + t(" träffar. Välj en träff i listan.") : t("Inga träffar");
+                        if (document.activeElement === searchButton || document.activeElement === search)
+                            (results.querySelector("button") || search).focus();
+                    } catch (error) {
+                        if (epoch === searchEpoch && results.isConnected) status.textContent=error.message;
+                    }
                 };
                 const searchButton = button(t("Sök"), runSearch, "", false);
                 search.addEventListener("input", () => { searchEpoch++; subject = null; results.replaceChildren(); status.textContent = ""; });
                 search.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); searchButton.click(); } });
                 body.append(searchButton, results, status);
                 api("/settings/people/active").then(people=>{
-                    if(searchEpoch!==0||!results.isConnected)return;choices(people);status.textContent=t("Tidigare aktiva användare. Sök i katalogen för att lägga till fler.");
+                    if(searchEpoch!==0||!results.isConnected||!people.length)return;choices(people);status.textContent=t("Tidigare aktiva användare. Sök i katalogen för att lägga till fler.");
                 }).catch(()=>{if(searchEpoch===0&&results.isConnected)status.textContent=t("Aktiva användare kunde inte läsas. Sök i katalogen.");});
             }
             const rights = node("fieldset"); rights.append(node("legend", t("Rättigheter"))); body.append(rights);
