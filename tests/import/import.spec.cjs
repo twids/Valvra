@@ -39,9 +39,15 @@ test('preview requires the selected destination and discards results after a map
     let release;
     const held=new Promise(resolve=>release=resolve);
     await page.route('**/api/groups',async route=>{await held;await route.continue();});
-    await preview.click();
+    await expect(target).not.toHaveValue('');
+    await preview.focus();
+    await preview.press('Enter');
     try {
-        await expect(page.getByRole('status').filter({hasText:'Förbereder förhandsgranskningen.'})).toBeVisible();
+        await expect.poll(() => page.locator('#dialog').evaluate(dialog => ({
+            status: dialog.querySelector('[role=status]')?.textContent,
+            error: dialog.querySelector('#dialog-error').textContent,
+            invalid: Array.from(dialog.querySelectorAll(':invalid')).map(field => field.labels?.[0]?.textContent).filter(Boolean)
+        }))).toMatchObject({status:'Förbereder förhandsgranskningen.'});
         await mode.selectOption('tree');
     } finally { release(); }
     await expect(page.getByRole('status').filter({hasText:'Mappningen har ändrats.'})).toBeVisible();
