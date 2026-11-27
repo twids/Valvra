@@ -15,3 +15,15 @@ test('an account can be located from the resources page using only its title', a
     await expect(page).toHaveURL(/\/resources\/[a-f0-9-]+$/);
     await expect(page.getByRole('searchbox', {name: 'Sök i resursen'})).toHaveValue('Administratörskonto');
 });
+
+test('my accounts opens an account in its resource without revealing a password', async ({page}) => {
+    const reads = [];
+    page.on('request', request => { if (request.url().endsWith('/reveal')) reads.push(request.url()); });
+    await page.goto('/resources');
+    await page.getByLabel('Översikt', {exact:true}).selectOption('accounts');
+    const list = page.getByRole('region', {name:/Mina konton/});
+    await expect(list.getByRole('button', {name:/Kopiera lösenord/}).first()).toBeVisible();
+    await list.getByRole('button', {name:/^Administratörskonto/}).first().click();
+    await expect(page.getByRole('searchbox', {name:'Sök i resursen'})).toHaveValue('Administratörskonto');
+    expect(reads).toEqual([]);
+});

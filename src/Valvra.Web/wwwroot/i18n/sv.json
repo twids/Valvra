@@ -875,5 +875,17 @@
   "Lösenord att skapa: {create}. Dubbletter som hoppas över: {skip}.": "Lösenord att skapa: {create}. Dubbletter som hoppas över: {skip}.",
   "Resurslistan kunde inte uppdateras. Välj Uppdatera för att läsa in resultatet i valvet.": "Resurslistan kunde inte uppdateras. Välj Uppdatera för att läsa in resultatet i valvet.",
   "Mappningen har ändrats. Förhandsgranska igen.": "Mappningen har ändrats. Förhandsgranska igen.",
-  "Förbereder förhandsgranskningen…": "Förbereder förhandsgranskningen…"
+  "Förbereder förhandsgranskningen…": "Förbereder förhandsgranskningen…",
+  "Översikt": "Översikt",
+  "Mina konton": "Mina konton",
+  "Visar konto {first}–{last}.": "Visar konto {first}–{last}.",
+  "Inga konton att visa.": "Inga konton att visa.",
+  "Hantera i {group}": "Hantera i {group}",
+  "Utgången · upphörde {end}": "Utgången · upphörde {end}",
+  "Schemalagd · {start} till {end}": "Schemalagd · {start} till {end}",
+  "Schemalagd · börjar {start}, utan slutdatum": "Schemalagd · börjar {start}, utan slutdatum",
+  "Aktiv · till {end}": "Aktiv · till {end}",
+  "Aktiv · tills vidare": "Aktiv · tills vidare",
+  "Föregående": "Föregående",
+  "Nästa": "Nästa"
 }

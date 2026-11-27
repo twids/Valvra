@@ -50,11 +50,11 @@ public partial class DemoProgram
         app.MapGet("/api/ldap-profiles", () => Array.Empty<object>());
         app.MapPost("/api/content/search", (DemoSearch body) =>
         {
-            var term = body.Query?.Trim();
-            if (string.IsNullOrEmpty(term) || term.Length > 200) return Results.BadRequest();
+            var term = body.Query?.Trim() ?? "";
+            if ((!body.AccountsOnly && term.Length == 0) || term.Length > 200 || body.Offset < 0) return Results.BadRequest();
             var items = new[] { (Title: "Exempelkonto", Kind: "account"), (Title: "Exempelprogram", Kind: "license") }
-                .Where(x => x.Title.Contains(term, StringComparison.OrdinalIgnoreCase))
-                .Select(x => new { x.Title, x.Kind, resourceId = DemoData.Resource, resourceName = "Exempeldatabasserver" });
+                .Where(x => (!body.AccountsOnly || x.Kind == "account") && x.Title.Contains(term, StringComparison.OrdinalIgnoreCase)).Skip(body.Offset)
+                .Select(x => new { x.Title, x.Kind, id = x.Kind == "account" ? DemoData.Secret : DemoData.License, resourceId = DemoData.Resource, resourceName = "Exempeldatabasserver" });
             return Results.Ok(new { items, hasMore = false });
         });
         app.MapGet("/api/resources/{id}/secrets", (string id) => id == DemoData.Resource
@@ -74,7 +74,7 @@ public partial class DemoProgram
 
     }
 }
-internal sealed record DemoSearch(string? Query);
+internal sealed record DemoSearch(string? Query, bool AccountsOnly = false, int Offset = 0);
 internal static class DemoData
 {
     public const string Group = "10000000-0000-0000-0000-000000000001";

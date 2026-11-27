@@ -36,7 +36,7 @@ function harness(audit = null) {
             if(!options.body)return {ok:true,status:200,json:async()=>[]};
             writes.push({path,body:JSON.parse(options.body)});return{ok:true,status:204};}};
     let source=fs.readFileSync('src/Valvra.Web/wwwroot/js/app.js','utf8').split('\n').filter(x=>!x.includes('safely(async () => { await i18n.ready;')).join('\n');
-    source=source.replace(/\}\)\(\);\s*$/,'globalThis.unit = { state, secretDialog, licenseDialog, licenseRecycleDialog, revealLicense, revealSecret, copySecret, closeDialog, auditPage, auditScopeLabel, resourcePage, groupsPage, contentSearchDialog, resourceCards, resourcesPage }; })();');
+    source=source.replace(/\}\)\(\);\s*$/,'globalThis.unit = { grantValidity, accountCopy, state, secretDialog, licenseDialog, licenseRecycleDialog, revealLicense, revealSecret, copySecret, closeDialog, auditPage, auditScopeLabel, resourcePage, groupsPage, contentSearchDialog, resourceCards, resourcesPage }; })();');
     vm.runInNewContext(source,context);
     context.unit.state.session={csrfToken:'synthetic-token'}; context.unit.state.resource={id:'resource',permissions:7};context.unit.state.view='groups';
     return{context,elements,handlers,writes,complete,advance:ms=>now+=ms,ui:context.unit,license:{id:'license',product:'Product',vendor:'Vendor',purchaseReference:'ref',seats:2,revision:1}};
@@ -267,4 +267,23 @@ test('editing a title preserves an existing profile absent from the available li
     await h.elements.get('dialog-form').onsubmit({preventDefault() {}});
     assert.equal(h.writes[0].body.ldapProfileId, 'previous');
     assert.equal(h.writes[0].body.payload, null);
+});
+
+test('grant validity includes an open-ended future start and distinguishes active and expired access', () => {
+    const {ui} = harness();
+    const start = '2026-03-01T00:00:00Z', end = '2026-04-01T00:00:00Z';
+    assert.match(ui.grantValidity({startsAt:start}, Date.parse(start)-1), /Schemalagd.*start/);
+    assert.match(ui.grantValidity({startsAt:start, expiresAt:end}, Date.parse(start)), /Aktiv/);
+    assert.match(ui.grantValidity({expiresAt:end}, Date.parse(end)), /Utgången/);
+});
+test('direct copy is available only for identified accounts on readable resources', () => {
+    const {ui} = harness();
+    const resource = {id:'r',permissions:1};
+    ui.state.resources = [resource];
+    const hit = {kind:'account',id:'s',resourceId:'r',title:'Example'};
+    assert.equal(ui.accountCopy(hit), '');
+    resource.permissions = 3;
+    assert.equal(ui.accountCopy(hit).tag, 'button');
+    assert.equal(ui.accountCopy({...hit,kind:'license'}), '');
+    assert.equal(ui.accountCopy({...hit,id:null}), '');
 });

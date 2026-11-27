@@ -6,7 +6,7 @@
     const t = (key, values) => i18n.message(key, values);
     const friendlyAccount=(name,sam)=>[name,sam].filter(value=>typeof value==="string"&&value.trim()&&!/S-\d-(?:\d+-)*\d+/i.test(value)).filter((value,index,all)=>all.indexOf(value)===index).join(" · ")||t("Okänt eller borttaget konto");
     const state = { session: null, groups: [], resources: [], profiles: [], view: "vault", resource: null, group: null,
-        resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupDirectorySearch: "", groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), contentFilters:{}, licenseFilters:{}, auditFilters: {} };
+        accountOverview: false, resourceSearch: "", resourceGroup: "", resourceIncludeSubgroups: true, groupDirectorySearch: "", groupSearch: "", groupIncludeSubgroups: true, resourceLayout:"cards", resourceSort:"name", collapsedGroups:new Set(), contentFilters:{}, licenseFilters:{}, auditFilters: {} };
     let renderEpoch = 0;
     let routeReady = false, routeUnavailable = false, historyKey, activePath, pendingPath;
     const viewSnapshots = new Map();
@@ -40,7 +40,7 @@
     // Filter snapshots stay in this page's memory. Browser history stores an opaque key only.
     function rememberView() {
         if (!historyKey) return;
-        viewSnapshots.set(historyKey, { resourceSearch: state.resourceSearch, resourceGroup: state.resourceGroup,
+        viewSnapshots.set(historyKey, { accountOverview: state.accountOverview, resourceSearch: state.resourceSearch, resourceGroup: state.resourceGroup,
             resourceIncludeSubgroups: state.resourceIncludeSubgroups, resourceLayout:state.resourceLayout, resourceSort:state.resourceSort, groupSearch: state.groupSearch, groupDirectorySearch: state.groupDirectorySearch,
             groupIncludeSubgroups: state.groupIncludeSubgroups, licenseFilters:{...state.licenseFilters}, auditFilters: { ...state.auditFilters } });
     }
@@ -162,8 +162,8 @@
         };
         $("dialog").showModal(); $("dialog-title").focus(); return content;
     }
-    async function metadataDialog(title,read,retry){
-        const body=dialog(title),progress=node("p",t("Läser in…"));progress.setAttribute("role","status");body.append(progress);body.setAttribute("aria-busy","true");
+    async function metadataDialog(title,read,retry,back){
+        const body=dialog(title,undefined,undefined,{back}),progress=node("p",t("Läser in…"));progress.setAttribute("role","status");body.append(progress);body.setAttribute("aria-busy","true");
         const epoch=dialogEpoch;
         const failed=message=>{progress.remove();body.removeAttribute("aria-busy");body.append(node("p",message),button(t("Försök igen"),retry));};
         const interrupted=()=>failed(t("Läsningen avbröts när sidan tappade fokus. Försök igen för att läsa aktuell metadata."));pendingMetadataRead=interrupted;
@@ -268,6 +268,19 @@
                 contentSearchDialog(input.value.trim());
             });
         }
+        if (state.resources.some(resource => resource.permissions & 1)) {
+            const view = select(controlGroup(content), t("Översikt"), [["resources", t("Resurser")], ["accounts", t("Mina konton")]], state.accountOverview ? "accounts" : "resources");
+            view.id = view.labels[0].htmlFor = "vault-overview";
+            view.addEventListener("change", async () => {
+                state.accountOverview = view.value === "accounts";
+                await render();
+                $("vault-overview")?.focus();
+            });
+            if (state.accountOverview) {
+                accountsOverview(content);
+                return;
+            }
+        }
         if (!state.resources.length) {
             empty(content, t("Inga resurser ännu"), state.session.isAccessAdministrator ? t("Skapa en resursgrupp, lägg till resurser och tilldela åtkomst för att öppna valvet.") : t("Be en resursägare eller behörighetsadministratör tilldela dig åtkomst."));
             if (state.session.isAccessAdministrator) content.lastElementChild.append(routeLink(t("Resursgrupper"), {view:"groups"}));
@@ -297,6 +310,43 @@
         const clear=button(t("Rensa filter"),()=>{search.value="";filter.value="";descendants.checked=true;descendants.disabled=true;state.resourceSearch="";state.resourceGroup="";state.resourceIncludeSubgroups=true;paint();search.focus();});
         toolbar.append(clear);
         paint();
+    }
+    function accountCopy(hit) {
+        const resource = state.resources.find(item => item.id === hit.resourceId);
+        return hit.kind === "account" && hit.id && (resource?.permissions & 2)
+            ? copyButton(hit, t("Kopiera lösenord")) : "";
+    }
+    function accountsOverview(content) {
+        const section = panel(content, t("Mina konton"));
+        const status = node("p"), list = node("div"), actions = node("div", undefined, "actions");
+        status.setAttribute("role", "status");
+        section.append(status, list, actions);
+        const paths = new Map(state.groups.map(group => [group.id, group]));
+        const resources = new Map(state.resources.map(resource => [resource.id, resource]));
+        async function showPage(offset, focusStatus = false) {
+            actions.replaceChildren(); list.replaceChildren();
+            status.textContent = t("Läser in…");
+            if (focusStatus) { status.tabIndex = -1; status.focus(); }
+            try {
+                const page = await api("/content/search", {query:"", accountsOnly:true, offset});
+                if (!section.isConnected) return;
+                status.textContent = page.items.length
+                    ? t("Visar konto {first}–{last}.", {first:offset + 1, last:offset + page.items.length})
+                    : t("Inga konton att visa.");
+                if (page.items.length) table(list, [t("Konto"), t("Resurs"), t("Åtgärder")], page.items.map(hit => {
+                    const resource = resources.get(hit.resourceId);
+                    const path = resource ? groupPath(resource.groupId, paths).map(g => g.name).concat(resource.name).join(" / ") : hit.resourceName;
+                    return [button(hit.title, () => openContentHit(hit)), path, accountCopy(hit)];
+                })).classList.add("mobile-records");
+                if (offset) actions.append(button(t("Föregående"), () => showPage(Math.max(0, offset - 50), true)));
+                if (page.hasMore) actions.append(button(t("Nästa"), () => showPage(offset + page.items.length, true)));
+            } catch (error) {
+                if (!section.isConnected) return;
+                status.textContent = error.message;
+                actions.append(button(t("Försök igen"), () => showPage(offset, true)));
+            }
+        }
+        showPage(0);
     }
     function contentSearchDialog(initialQuery = "") {
         const body = dialog(t("Sök i valvet"), t("Sök"), search);
@@ -344,9 +394,9 @@
                 if (!canDisplay(epoch) || query !== input.value.trim()) return false;
                 status.textContent = page.hasMore || resources.length > 50 ? t("Högst 50 träffar per lista visas. Förfina sökningen för att se fler.")
                     : page.items.length || resources.length ? t("{count} träffar.", {count: page.items.length + resources.length}) : t("Inga träffar");
-                if (page.items.length) table(panel(results,t("Konton och licenser")), [t("Kontotitel eller produktnamn"), t("Typ"), t("Resurs")],
-                    page.items.map(hit => [button(hit.title, () => openHit(hit)), hit.kind === "license" ? t("Licens") : t("Konto"),
-                        resourcesById.has(hit.resourceId) ? resourcePath(resourcesById.get(hit.resourceId)) : hit.resourceName])).classList.add("mobile-records");
+                if (page.items.length) table(panel(results,t("Konton och licenser")), [t("Kontotitel eller produktnamn"), t("Typ"), t("Resurs"), t("Åtgärder")],
+                    page.items.map(hit => [button(hit.title, () => openContentHit(hit)), hit.kind === "license" ? t("Licens") : t("Konto"),
+                        resourcesById.has(hit.resourceId) ? resourcePath(resourcesById.get(hit.resourceId)) : hit.resourceName, accountCopy(hit)])).classList.add("mobile-records");
             } catch (error) {
                 if (canDisplay(epoch) && query === input.value.trim()) {
                     status.textContent = "";
@@ -357,14 +407,14 @@
             }
             return false;
         }
-        function openHit(hit) {
-            if (state.resources.some(resource => resource.id === hit.resourceId && (resource.permissions & 1))) {
-                state.contentFilters[hit.resourceId] = hit.title;
-                return navigate(navigation.url({view: "vault", resourceId: hit.resourceId}));
-            }
-            state.licenseFilters = {search: hit.title, filter: "all", sort: "resource"};
-            return navigate(navigation.url({view: "licenses"}));
+    }
+    function openContentHit(hit) {
+        if (state.resources.some(resource => resource.id === hit.resourceId && (resource.permissions & 1))) {
+            state.contentFilters[hit.resourceId] = hit.title;
+            return navigate(navigation.url({view: "vault", resourceId: hit.resourceId}));
         }
+        state.licenseFilters = {search: hit.title, filter: "all", sort: "resource"};
+        return navigate(navigation.url({view: "licenses"}));
     }
     function browseControls(toolbar, paint) {
         const layout=select(controlGroup(toolbar),t("Visning"),[["cards",t("Kort")],["list",t("Kompakt lista")]],state.resourceLayout);
@@ -627,18 +677,7 @@
         else table(passwords, [t("Konto"), "Version", t("Åtgärder")], visibleSecrets.map(secret => {
             const actions = node("div", undefined, "actions");
             if (has(2)) {
-                let reset;
-                const copy = button(t("Kopiera"), async () => {
-                    if (!await copySecret(secret) || !copy.isConnected) return;
-                    i18n.setText(copy,t("Kopierat"));
-                    copy.setAttribute("aria-label",t("Kopierat")+" · "+secret.title);
-                    clearTimeout(reset);
-                    reset=setTimeout(()=>{
-                        i18n.setText(copy,t("Kopiera"));
-                        copy.setAttribute("aria-label",t("Kopiera")+" · "+secret.title);
-                    },2500);
-                },"copy-action");
-                actions.append(copy, button(t("Visa"), () => revealSecret(secret)));
+                actions.append(copyButton(secret), button(t("Visa"), () => revealSecret(secret)));
             }
             const secondary=[];
             if (has(4)) secondary.push(button(t("Ändra"), () => secretDialog(secret)));
@@ -732,6 +771,21 @@
         hint(body, t("Visningen är auditerad. Fälten töms automatiskt efter 30 sekunder eller när sidan tappar fokus."));
         revealCountdown(body);
     }
+    function copyButton(secret, label = t("Kopiera")) {
+        let reset;
+        const copy = button(label, async () => {
+            if (!await copySecret(secret) || !copy.isConnected) return;
+            i18n.setText(copy,t("Kopierat"));
+            copy.setAttribute("aria-label",t("Kopierat")+" · "+secret.title);
+            clearTimeout(reset);
+            reset=setTimeout(()=>{
+                i18n.setText(copy,label);
+                copy.setAttribute("aria-label",label+" · "+secret.title);
+            },2500);
+        },"copy-action");
+        copy.setAttribute("aria-label", label + " · " + secret.title);
+        return copy;
+    }
     async function copySecret(secret) {
         const epoch = ++dialogEpoch;
         const payload = await api(`/secrets/${secret.id}/reveal`, { copy: true });
@@ -823,9 +877,25 @@
         const label = t("Ärvd från") + " " + (group ? groupPath(group.id).map(x => x.name).join(" / ") : row.targetId);
         return group ? routeLink(label, {view:"groups", groupId:group.id}) : node("span", label, "badge");
     }
-    async function accessDialog(kind, target, feedback) {
+    function grantValidity(grant, now = Date.now()) {
+        if (grant.expiresAt && new Date(grant.expiresAt).getTime() <= now)
+            return t("Utgången · upphörde {end}", {end:date(grant.expiresAt)});
+        if (grant.startsAt && new Date(grant.startsAt).getTime() > now)
+            return grant.expiresAt
+                ? t("Schemalagd · {start} till {end}", {start:date(grant.startsAt), end:date(grant.expiresAt)})
+                : t("Schemalagd · börjar {start}, utan slutdatum", {start:date(grant.startsAt)});
+        return grant.expiresAt ? t("Aktiv · till {end}", {end:date(grant.expiresAt)}) : t("Aktiv · tills vidare");
+    }
+    async function accessDialog(kind, target, feedback, back) {
+        const reopen = message => accessDialog(kind, target, message, back);
+        const inheritedAction = row => {
+            const source = state.groups.find(group => group.id === row.targetId);
+            if (!source?.canManage) return node("span", t("Ändras i källgruppen"), "hint");
+            const path = groupPath(source.id).map(group => group.name).join(" / ");
+            return button(t("Hantera i {group}", {group:path}), () => accessDialog(0, source, undefined, () => reopen()));
+        };
         const loaded = await metadataDialog(t("Behörigheter · ") + target.name,
-            () => api(`/access/${kind}/${target.id}`), () => accessDialog(kind,target,feedback));
+            () => api(`/access/${kind}/${target.id}`), () => reopen(feedback), back);
         if (!loaded) return;
         const {body,value:access}=loaded;
         body.classList.add("permissions-overview");
@@ -833,30 +903,30 @@
         hint(body, t("Tilldelningar summeras. Ärvd åtkomst ändras på den överordnade gruppen. Ägare och behörighetsadministratörer kan tilldela sig själva läsrätt."));
         hint(body, t("Din effektiva innehållsåtkomst just nu: {rights}.", {rights:rights(access.effectivePermissions || 0) || t("Ingen") }));
         hint(body,t("Inloggad som {name}.",{name:friendlyAccount(state.session.displayName,state.session.samAccountName)}));
-        const actions = node("div", undefined, "actions"); actions.append(button(t("+ Tilldela åtkomst"), () => grantDialog(kind, target),"primary"), button(t("+ Lägg till ägare"), () => ownerDialog(kind, target))); body.append(actions);
+        const actions = node("div", undefined, "actions"); actions.append(button(t("+ Tilldela åtkomst"), () => grantDialog(kind, target, undefined, undefined, reopen),"primary"), button(t("+ Lägg till ägare"), () => ownerDialog(kind, target, reopen))); body.append(actions);
         body.append(node("h3", t("Tilldelad åtkomst")));
         if (!access.grants.length) hint(body, t("Inga direkta eller ärvda tilldelningar. Ägare och globala administratörer kan fortfarande hantera åtkomst."));
         else table(body, [t("Identitet"), t("Rättigheter"), t("Giltighet"), t("Källa"), ""], access.grants.map(grant => {
             const direct = grant.targetKind === kind && grant.targetId === target.id;
-            const controls=node("div",undefined,"actions");if(direct)controls.append(button(t("Ändra åtkomst"),()=>grantDialog(kind,target,grant,access)),button(t("Återkalla"),()=>confirmAccessRemoval("grants",grant,access,kind,target)));
-            else controls.append(node("span",t("Ändras i källgruppen"),"hint"));
+            const controls=node("div",undefined,"actions");if(direct)controls.append(button(t("Ändra åtkomst"),()=>grantDialog(kind,target,grant,access,reopen)),button(t("Återkalla"),()=>confirmAccessRemoval("grants",grant,access,kind,target,reopen)));
+            else controls.append(inheritedAction(grant));
             return [identityLabel(access, grant), rights(grant.permissions), grant.expiresAt ? `${date(grant.startsAt)} – ${date(grant.expiresAt)}` : t("Tills vidare"), accessSource(grant, kind, target),controls];
         }));
         body.append(node("h3", t("Resursägare")));
         if (!access.owners.length) hint(body, t("Inga resursägare är tilldelade."));
         else table(body, [t("Identitet"), t("Källa"), ""], access.owners.map(owner => [identityLabel(access, owner), accessSource(owner, kind, target),
-            owner.targetKind === kind && owner.targetId === target.id ? button(t("Ta bort ägare"), () => confirmAccessRemoval("owners", owner, access, kind, target)) : node("span", t("Ändras i källgruppen"), "hint")]));
+            owner.targetKind === kind && owner.targetId === target.id ? button(t("Ta bort ägare"), () => confirmAccessRemoval("owners", owner, access, kind, target, reopen)) : inheritedAction(owner)]));
     }
-    function confirmAccessRemoval(type, row, access, kind, target) {
-        const back = () => accessDialog(kind, target);
+    function confirmAccessRemoval(type, row, access, kind, target, reopen) {
+        const back = () => reopen();
         const body = dialog(t(type === "grants" ? "Återkalla åtkomst" : "Ta bort ägare") + " · " + target.name, t(type === "grants" ? "Återkalla" : "Ta bort ägare"), async () => {
             await api(`/${type}/${row.id}/${type === "grants" ? "revoke" : "remove"}`, {}); await load();
-        }, {back, afterSave:message => accessDialog(kind, target, message)});
+        }, {back, afterSave:reopen});
         body.append(identityLabel(access, row));
         hint(body, t("Endast denna direkta tilldelning tas bort. Andra tilldelningar och gruppmedlemskap kan fortfarande ge åtkomst."));
         if (kind === 0) hint(body, t("Ändringen gäller även resurser och undergrupper som ärver denna tilldelning."));
     }
-    function grantDialog(kind, target, existing, access) {
+    function grantDialog(kind, target, existing, access, reopen) {
         let pick, temporary, start, expiry,metadata; const checks = [];
         const body = dialog(t(existing?"Ändra åtkomst · ":"Tilldela åtkomst · ") + target.name, t(existing?"Spara":"Tilldela"), async () => {
             const subject = pick(); const temp = temporary.value === "temporary";
@@ -866,7 +936,7 @@
             if(temp&&(!start.value||!expiry.value||new Date(expiresAt)<=new Date(startsAt)))throw new Error(t("Till måste vara efter Från."));
             await api(existing?`/grants/${existing.id}/update`:"/grants",existing?{permissions,startsAt,expiresAt,revision:existing.revision}:{ targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id,
                 permissions, startsAt, expiresAt }); await load();
-        }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
+        }, {back:() => reopen(), afterSave:reopen});
         if(existing){body.append(identityLabel(access,existing));const resolved=access.subjects?.find(x=>x.id===existing.subjectId&&x.provider===existing.provider&&x.kind===existing.subjectKind);const subject={id:existing.subjectId,provider:existing.provider,kind:existing.subjectKind,name:resolved?.name||existing.subjectId,samAccountName:resolved?.samAccountName};pick=()=>subject;pick.selected=pick;pick.onlyUsers=()=>{};}
         else pick = directoryPicker(body,{changed:()=>summary()});
         temporary = select(body, t("Giltighet"), [["permanent", t("Tills vidare")],...(existing?.startsAt&&!existing.expiresAt?[["scheduled",t("Från ett startdatum, utan slutdatum")]]:[]),...(!existing||existing.subjectKind===0?[["temporary", t("Tillfällig läsrätt – endast användare")]]:[])],existing?.expiresAt?"temporary":existing?.startsAt?"scheduled":"permanent");
@@ -896,8 +966,8 @@
         refreshRights();
         hint(body, t(existing?"Befintliga rättigheter bevaras tills du ändrar dem. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord.":"Metadataåtkomst ingår. Vid tillfällig rätt är Från och Till obligatoriska. Tillfällig rätt stoppar framtida utlämning men kan inte återkalla ett redan kopierat lösenord."));
     }
-    function ownerDialog(kind, target) {
-        let pick; const body = dialog(t("Lägg till ägare · ") + target.name, t("Lägg till ägare"), async () => { const subject = pick(); await api("/owners", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id }); await load(); }, {back:() => accessDialog(kind, target), afterSave:message => accessDialog(kind, target, message)});
+    function ownerDialog(kind, target, reopen) {
+        let pick; const body = dialog(t("Lägg till ägare · ") + target.name, t("Lägg till ägare"), async () => { const subject = pick(); await api("/owners", { targetKind: kind, targetId: target.id, subjectKind: subject.kind, provider: subject.provider, subjectId: subject.id }); await load(); }, {back:() => reopen(), afterSave:reopen});
         pick = directoryPicker(body); hint(body, t("Ägaren får hantera åtkomst inom resursen eller gruppens underträd."));
     }
     function moveDialog(kind, target, selectedDestination) {

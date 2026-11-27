@@ -19,7 +19,7 @@ Direct links and reloads are handled by explicit server routes in both the produ
 
 ## Filters and keyboard
 
-On the resources page, **Search the vault** finds resource names, account titles and license products. Open an account result to see the matching entries in its resource. Use **Filters and view** to narrow the resource overview by group or change its layout. On a resource you manage, **Permissions** on the card opens access management directly.
+On the resources page, **Search the vault** finds resource names, account titles and license products. Open an account result to see the matching entries in its resource, or use **Copy password** on a readable account. The optional **My accounts** overview lists account titles and resource paths in pages of 50. Listing accounts never reveals a password. Use **Filters and view** to narrow the resource overview by group or change its layout. On a resource you manage, **Permissions** on the card opens access management directly. For an inherited grant or owner, **Manage in** opens the source group when you can manage it. Back returns to the original permissions dialog. Grant rows show scheduled, active, or expired validity.
 
 Resource search, group filters, subgroup selection and audit filters, including page position, are retained in page memory. Back/Forward restores the filters for the current history entry. Reloading or opening a new tab opens the correct view with default filters; filters are not shared with a colleague through the link.
 

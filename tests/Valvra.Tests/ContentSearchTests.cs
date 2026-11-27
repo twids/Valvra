@@ -21,6 +21,10 @@ public sealed class ContentSearchTests
         Assert.Equal("license", Assert.Single((await f.Vault.SearchContentAsync(licenseAdmin, "Office", default)).Items).Kind);
         Assert.Empty((await f.Vault.SearchContentAsync(licenseAdmin with { IsEnabled = false }, "Office", default)).Items);
         Assert.Empty((await f.Vault.SearchContentAsync(f.User, "private", default)).Items);
+        var myAccounts = await f.Vault.SearchContentAsync(f.User, "", default, accountsOnly: true);
+        Assert.Equal(account, Assert.Single(myAccounts.Items).Id);
+        Assert.Empty((await f.Vault.SearchContentAsync(f.User, "", default, accountsOnly: true, offset: 1)).Items);
+        Assert.Empty((await f.Vault.SearchContentAsync(licenseAdmin, "", default, accountsOnly: true)).Items);
         Assert.Equal(0, f.Cipher.Decryptions);
 
         await f.Vault.SetDeletedAsync(f.User, account, true, 1, "request", default);

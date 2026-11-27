@@ -875,5 +875,17 @@
   "Lösenord att skapa: {create}. Dubbletter som hoppas över: {skip}.": "Passwords to create: {create}. Duplicates to skip: {skip}.",
   "Resurslistan kunde inte uppdateras. Välj Uppdatera för att läsa in resultatet i valvet.": "Could not refresh the resource list. Select Refresh to see the imported changes in the vault.",
   "Mappningen har ändrats. Förhandsgranska igen.": "The mapping has changed. Preview it again.",
-  "Förbereder förhandsgranskningen…": "Preparing preview…"
+  "Förbereder förhandsgranskningen…": "Preparing preview…",
+  "Översikt": "Overview",
+  "Mina konton": "My accounts",
+  "Visar konto {first}–{last}.": "Showing accounts {first}–{last}.",
+  "Inga konton att visa.": "No accounts to display.",
+  "Hantera i {group}": "Manage in {group}",
+  "Utgången · upphörde {end}": "Expired · ended {end}",
+  "Schemalagd · {start} till {end}": "Scheduled · {start} to {end}",
+  "Schemalagd · börjar {start}, utan slutdatum": "Scheduled · starts {start}, no end date",
+  "Aktiv · till {end}": "Active · until {end}",
+  "Aktiv · tills vidare": "Active · no end date",
+  "Föregående": "Previous",
+  "Nästa": "Next"
 }
