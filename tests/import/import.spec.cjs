@@ -43,14 +43,10 @@ test('preview requires the selected destination and discards results after a map
     await preview.focus();
     await preview.press('Enter');
     try {
-        await expect.poll(() => page.locator('#dialog').evaluate(dialog => ({
-            status: dialog.querySelector('[role=status]')?.textContent,
-            error: dialog.querySelector('#dialog-error').textContent,
-            invalid: Array.from(dialog.querySelectorAll(':invalid')).map(field => field.labels?.[0]?.textContent).filter(Boolean)
-        }))).toMatchObject({status:'Förbereder förhandsgranskningen.'});
+        await expect(page.getByRole('dialog').getByRole('status')).toContainText('Förbereder förhandsgranskningen');
         await mode.selectOption('tree');
     } finally { release(); }
-    await expect(page.getByRole('status').filter({hasText:'Mappningen har ändrats.'})).toBeVisible();
+    await expect(page.getByRole('dialog').getByRole('status')).toContainText('Mappningen har ändrats');
     await expect(preview).toBeEnabled();
     await expect(page.getByRole('button',{name:'Starta import',exact:true})).toHaveCount(0);
 });
