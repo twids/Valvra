@@ -217,9 +217,9 @@
                     preview = plan(rows, state.groups, state.resources, base.value, mode.value === "resource" ? target.value : null, overrides);
                     const knownTitles = new Map();
                     for (const id of new Set(preview.entries.map(x => x.resourceId))) {
-                        const current = id.startsWith("resource:") ? [] : await api(`/resources/${id}/secrets`);
+                        const existingSecrets = id.startsWith("resource:") ? [] : await api(`/resources/${id}/secrets`);
                         if (!current()) return false;
-                        knownTitles.set(id, new Set(current.map(x => key(x.title))));
+                        knownTitles.set(id, new Set(existingSecrets.map(x => key(x.title))));
                     }
                     for (const entry of preview.entries) {
                         const known = knownTitles.get(entry.resourceId), title = key(entry.title);
