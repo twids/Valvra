@@ -15,9 +15,12 @@ test('resource reads expose progress and retry without replaying mutations or se
     await page.route('**/api/resources/*/secrets',async route=>{reads++;if(reads===1){await held;return route.fulfill({status:503,json:{error:'Synthetic read failure'}});}return route.continue();});
     await page.goto('/');await page.getByRole('link',{name:'Open resource · Databasplattform',exact:true}).click();
     await expect(page.getByRole('status').filter({hasText:'Loading…'})).toBeVisible();release();
-    await expect(page.getByText('Synthetic read failure',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Retry',exact:true}).click();
+    await expect(page.getByText('Synthetic read failure',{exact:true})).toBeVisible();
+    await expect(page.getByRole('status').filter({hasText:'Partial results.'})).toBeVisible();
+    await page.getByRole('button',{name:'Retry',exact:true}).click();
     await expect(page.getByRole('button',{name:'Show · Administratörskonto',exact:true})).toBeVisible();expect(reveals).toBe(0);
     await expect(page.locator('#content')).not.toHaveAttribute('aria-busy','true');
+    await expect(page.getByText(/Partial results\./)).toHaveCount(0);
 });
 
 test('late failed resource reads cannot add retry controls to the next view',async({page})=>{

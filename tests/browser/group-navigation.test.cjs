@@ -20,7 +20,7 @@ test('group scope includes all descendants by ID and keeps same-named unrelated 
 test('direct-only scope and search compose without broadening visible metadata',()=>{
     const h=model(groups,resources);
     assert.deepEqual(Array.from(h.scopedResources('root',false),x=>x.id),['a']);
-    assert.deepEqual(Array.from(h.scopedResources('root',true,'WINDOWS'),x=>x.id),['b']);
+    assert.deepEqual(Array.from(h.scopedResources('root',true,'  WINDOWS  '),x=>x.id),['b']);
     assert.deepEqual(Array.from(h.scopedResources('unknown',true),x=>x.id),[]);
 });
 test('missing parent information remains absent from paths and cannot connect hidden branches',()=>{

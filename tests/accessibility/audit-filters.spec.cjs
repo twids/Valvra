@@ -18,7 +18,7 @@ test('audit resource/group filters and export share criteria and preserve access
     await page.getByLabel('Operation', {exact: true}).fill('Secret.Create');
     await page.getByLabel('Person eller tjänst',{exact:true}).selectOption({label:'user'});
     const response = page.waitForResponse(r => r.url().includes('/api/audit?') && r.request().method() === 'GET');
-    await page.getByRole('button', {name: 'Filtrera', exact: true}).click();
+    await page.getByLabel('Operation', {exact:true}).press('Enter');
     const filtered = await (await response).json();
     expect(filtered).toHaveLength(2);
     expect(filtered.every(x => x.event.scope.resourceName === 'Databasplattform' && x.event.action === 'Secret.Create')).toBe(true);

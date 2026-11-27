@@ -195,21 +195,30 @@
         };
         function mappingStep() {
             step = 1; let mapping = {}, base, target, fallback, mode, overrides = {...mappingDraft.overrides};
+            let revision = 0;
             const body = show("Import · Mappa kolumner", "Förhandsgranska", async () => {
                 if (stopped || !csv) throw new Error(String(t("Importdata har tömts. Välj filen igen.")));
                 remember();
+                const submitted = revision;
+                const current = () => !stopped && session === activeSession && submitted === revision;
+                status.textContent=t("Förbereder förhandsgranskningen…");
                 try {
                     const selected = Object.fromEntries(Object.entries(mapping).map(([name, input]) => [name, Number(input.value)]));
+                    if (mode.value === "resource" && !target.value) {
+                        target.focus();
+                        throw new Error(String(t("Välj en destinationsresurs")));
+                    }
                     if (mode.value === "resource") selected.path = selected.subgroup = selected.resource = -1;
                     rows = mapRows(csv, selected, mode.value === "resource" ? "Import" : fallback.value);
                     // Refresh destinations before planning; never trust the file for permissions.
-                    [state.groups, state.resources] = await Promise.all([api("/groups"), api("/resources")]);
-                    if (stopped || session !== activeSession) return false;
+                    const [groups, resources] = await Promise.all([api("/groups"), api("/resources")]);
+                    if (!current()) return false;
+                    state.groups = groups; state.resources = resources;
                     preview = plan(rows, state.groups, state.resources, base.value, mode.value === "resource" ? target.value : null, overrides);
                     const knownTitles = new Map();
                     for (const id of new Set(preview.entries.map(x => x.resourceId))) {
                         const current = id.startsWith("resource:") ? [] : await api(`/resources/${id}/secrets`);
-                        if (stopped || session !== activeSession) return false;
+                        if (!current()) return false;
                         knownTitles.set(id, new Set(current.map(x => key(x.title))));
                     }
                     for (const entry of preview.entries) {
@@ -217,7 +226,11 @@
                         entry.skip = known.has(title); known.add(title);
                     }
                     previewStep();
-                } catch (error) { throw translateError(error); }
+                } catch (error) { if (current()) throw translateError(error); }
+                finally {
+                    status.textContent = !stopped && session === activeSession && submitted !== revision
+                        ? t("Mappningen har ändrats. Förhandsgranska igen.") : "";
+                }
                 return false;
             });
             hint(body, t("Filen läses endast i denna fliks minne. Hemligheter visas inte i förhandsgranskningen."));
@@ -231,11 +244,14 @@
             fallback = field(tree, t("Resursnamn när kolumn saknas"), "text", mappingDraft.fallback??"Import", true); fallback.maxLength = 200;
             target = select(single, t("Resurs"), [["", t("Välj resurs")], ...state.resources.filter(x => (x.permissions & 5) === 5).map(x => [x.id, groupLabel(state.groups.find(g => g.id === x.groupId) || {name: ""}) + " / " + x.name])], mappingDraft.target??state.resource?.id);
             const paths = node("div"); tree.append(paths);
-            function remember(){mappingDraft={columns:Object.fromEntries(Object.entries(mapping).map(([name,input])=>[name,input.value])),mode:mode.value,base:base.value,target:target.value,fallback:fallback.value,overrides:{...overrides}};}
+            const status = node("p",undefined,"hint"); status.setAttribute("role","status"); body.append(status);
+            function remember(){revision++;status.textContent="";mappingDraft={columns:Object.fromEntries(Object.entries(mapping).map(([name,input])=>[name,input.value])),mode:mode.value,base:base.value,target:target.value,fallback:fallback.value,overrides:{...overrides}};}
             const update = () => {
                 tree.hidden = mode.value !== "tree"; single.hidden = mode.value !== "resource"; fallback.required = !tree.hidden;
-                paths.replaceChildren(); const previous=overrides;overrides = {};
+                target.disabled = single.hidden; target.required = !single.hidden;
+                for (const key of ["path","subgroup","resource"]) mapping[key].disabled = tree.hidden;
                 if (tree.hidden) {remember();return;}
+                paths.replaceChildren(); const previous=overrides;overrides = {};
                 try {
                     const selected = Object.fromEntries(Object.entries(mapping).map(([name, input]) => [name, Number(input.value)]));
                     const mapped = mapRows(csv, selected, fallback.value || "Import");
@@ -270,10 +286,12 @@
                     if (report.uncertainRow > 0) notice(String(message) + " " + reason + " " + t("Rad {row} kan ha sparats trots att svaret uteblev. Kontrollera destinationen före ett nytt försök.", {row: report.uncertainRow}), true);
                 } else notice(message);
                 // Preserve the report while refreshing the ordinary resource list.
-                await load();
+                let refreshed = true;
+                try { await load(); } catch { refreshed = false; }
                 if (session !== activeSession) return false;
                 if (document.getElementById("dialog").open && document.getElementById("dialog-title").textContent === String(t("Import · Förhandsgranskning"))) {
                     const result = show("Import · Resultat"); hint(result, message);
+                    if (!refreshed) hint(result,t("Resurslistan kunde inte uppdateras. Välj Uppdatera för att läsa in resultatet i valvet."));
                     if (reason) hint(result, reason);
                     if (report.failedRow) hint(result, t("Kontrollera rad {row} i källfilen.", {row:report.failedRow}));
                     if (report.stopped) hint(result, t("Importen stoppades. Redan sparade objekt finns kvar. Kontrollera destinationen före ett nytt försök."));
@@ -284,6 +302,8 @@
             // Ordinary Back keeps the in-memory file; closing/blur still invokes wipe.
             back=button(t("← Tillbaka"),()=>{if(busy||stopped||!csv)throw new Error(String(t("Importdata har tömts. Välj filen igen.")));mappingStep();});body.append(back);
             hint(body, t("{count} poster. {groups} nya grupper och {resources} nya resurser.", {count: preview.entries.length, groups: preview.groups.length, resources: preview.resources.length}));
+            const skipped = preview.entries.filter(entry => entry.skip).length;
+            body.append(node("p",t("Lösenord att skapa: {create}. Dubbletter som hoppas över: {skip}.",{create:preview.entries.length-skipped,skip:skipped})));
             hint(body, t("Befintliga titlar i samma resurs hoppas över. Inga lösenord skrivs över. Varje ändring auditeras separat."));
             hint(body, t("Avbrott stoppar efter pågående anrop. Redan sparade objekt tas inte bort."));
             const groupNames = new Map([...state.groups, ...preview.groups].map(x => [x.id, x]));
@@ -293,7 +313,7 @@
                 while (id && !seen.has(id)) { seen.add(id); const group = groupNames.get(id); if (!group) break; names.unshift(group.name); id = group.parentId; }
                 return names.join(" / ");
             };
-            table(body, [t("Rad"), t("Titel"), t("Destination"), t("Åtgärder")], preview.entries.slice(0, 100).map(x => [String(x.row), x.title, label(x), x.skip ? t("Hoppa över dubblett") : t("Skapa lösenord")]));
+            table(body, [t("Rad"), t("Titel"), t("Destination"), t("Åtgärder")], preview.entries.slice(0, 100).map(x => [String(x.row), x.title, label(x), x.skip ? t("Hoppa över dubblett") : t("Skapa lösenord")])).classList.add("mobile-records");
             if (preview.entries.length > 100) hint(body, t("De första 100 posterna visas. Alla validerade poster ingår i importen."));
         }
         const body = show("Importera lösenord", "Läs fil", async () => {

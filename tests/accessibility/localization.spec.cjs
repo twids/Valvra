@@ -39,7 +39,7 @@ test('license overview creates a license in the selected writable resource',asyn
     await expect(page.getByRole('row').filter({hasText:'Overview license'})).toContainText('Windows-servrar');
 });
 
-test('license overview explains creation when no resource is writable',async({page})=>{
+test('read-only license overview omits creation and recovery actions',async({page})=>{
     await page.route('**/api/resources',async route=>{
         const response=await route.fetch(); const resources=await response.json();
         resources.forEach(x=>x.permissions=3);
@@ -48,9 +48,8 @@ test('license overview explains creation when no resource is writable',async({pa
     await page.goto('/');
     await page.getByRole('navigation').getByRole('link',{name:'License overview',exact:true}).click();
     await expect(page.getByRole('heading',{name:'License overview',level:1})).toBeVisible();
-    await page.getByRole('button',{name:'+ Add license',exact:true}).click();
-    await expect(page.getByRole('dialog')).toContainText('No visible resource allows you to add licenses.');
-    await expect(page.getByRole('dialog').getByRole('button',{name:'Save',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'+ Add license',exact:true})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'License recycle bin',exact:true})).toHaveCount(0);
 });
 
 test('license summaries filter metadata and search sorting clear and back preserve context',async({page})=>{
@@ -86,6 +85,7 @@ test('English navigation, document language, headings and accessibility across a
 
 test('explicit choice survives reload and navigation, preserving search and original resource names',async({page})=>{
     await page.goto('/');
+    await page.getByText('Filters and view',{exact:true}).click();
     await page.getByRole('textbox',{name:'Search resources',exact:true}).fill('Databasplattform');
     await page.getByLabel('Language',{exact:true}).selectOption('sv');
     await expect(page.getByRole('heading',{name:'Dina resurser',level:1})).toBeVisible();

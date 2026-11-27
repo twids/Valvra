@@ -10,6 +10,29 @@ async function open(page) {
     await expect(page.getByRole('heading',{name:'Globala roller',level:1})).toBeFocused();
     await expect(page.getByRole('heading',{name:'Globala rättigheter',level:2})).toBeVisible();
 }
+test('directory test results belong to the settings that were tested', async ({page}) => {
+    let release;
+    const held = new Promise(resolve => release = resolve);
+    await page.route('**/api/settings/directory/test', async route => {
+        await held;
+        await route.fulfill({json:{users:[],groups:[]}});
+    });
+    await page.goto('/settings/directory');
+    const testButton = page.getByRole('button',{name:'Testa anslutning',exact:true});
+    await testButton.click();
+    await expect(page.getByText('Testar anslutningen…')).toBeVisible();
+    await page.getByLabel('Söktext för anslutningstest',{exact:false}).fill('other');
+    release();
+    await expect(testButton).toBeEnabled();
+    await expect(page.getByText('Anslutningen och ditt personkonto har verifierats.')).toHaveCount(0);
+    await testButton.click();
+    await expect(page.getByText('Anslutningen och ditt personkonto har verifierats.')).toBeVisible();
+    await page.getByLabel('Sökbas för personkonton (valfritt)',{exact:true}).fill('OU=Draft');
+    await expect(page.getByText('Anslutningen och ditt personkonto har verifierats.')).toHaveCount(0);
+    await page.getByRole('button',{name:'Läs in sparade inställningar'}).click();
+    await page.getByRole('button',{name:'Avbryt'}).click();
+    await expect(page.getByLabel('Sökbas för personkonton (valfritt)',{exact:true})).toHaveValue('OU=Draft');
+});
 test('settings support keyboard navigation, directory testing and individual-only role dialogs',async({page})=>{
     await open(page); await expect(page).toHaveURL(/\/settings$/); await audit(page);
     await page.getByRole('link',{name:'Katalog',exact:true}).click();

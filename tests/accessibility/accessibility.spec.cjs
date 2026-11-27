@@ -538,3 +538,15 @@ test('synthetic demo uses the same accessible navigation, tables and named revea
     await page.keyboard.press('Escape');
     await expect(page.getByRole('button', {name: 'Visa nyckel · Exempelprogram', exact: true})).toBeFocused();
 });
+test('installation guide: status can be retried before the first step', async ({page}) => {
+    let attempts = 0;
+    await page.route('**/api/setup/status', route => ++attempts === 1
+        ? route.fulfill({status:503})
+        : route.fulfill({json:{canConfigure:true,csrfToken:'synthetic'}}));
+    await page.goto('/setup');
+    await expect(page.locator('#setup-form')).toBeHidden();
+    await expect(page.locator('#steps')).toBeHidden();
+    await page.locator('button').filter({hasText:/Försök igen|Retry/}).click();
+    await expect(page.locator('#step-0')).toBeFocused();
+    await expect(page.locator('#setup-form')).toBeVisible();
+});

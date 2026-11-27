@@ -11,6 +11,7 @@ test('compact browsing sorts and clears filters without reading secret contents'
         await route.fulfill({response,json:Array.from({length:150},(_,i)=>({...original[0],id:'resource-'+i,name:'Resource '+String(i).padStart(3,'0'),permissions:1,canManage:false}))});
     });
     await page.goto('/');
+    await page.getByText('Filters and view',{exact:true}).click();
     await page.getByLabel('View',{exact:true}).selectOption('list');
     await page.getByLabel('Sort',{exact:true}).selectOption('reverse');
     await expect(page.getByRole('row').nth(1)).toContainText('Resource 149');
@@ -22,7 +23,8 @@ test('compact browsing sorts and clears filters without reading secret contents'
 });
 
 test('layout and sorting survive resource navigation and browser back',async({page})=>{
-    await page.goto('/'); await page.getByLabel('View',{exact:true}).selectOption('list');
+    await page.goto('/'); await page.getByText('Filters and view',{exact:true}).click();
+    await page.getByLabel('View',{exact:true}).selectOption('list');
     await page.getByLabel('Sort',{exact:true}).selectOption('reverse');
     await page.getByRole('link',{name:'Open resource · Databasplattform',exact:true}).click();
     await page.goBack();

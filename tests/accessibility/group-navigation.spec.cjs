@@ -18,6 +18,31 @@ async function fixture(page,{manage=false}={}) {
     return {root,calls};
 }
 async function openRoot(page) { await page.getByRole('link',{name:'Öppna grupp · IT och infrastruktur',exact:true}).click(); }
+
+test('search finds collapsed groups and preserves the tree and query across navigation', async ({page}) => {
+    await page.setViewportSize({width: 320, height: 800});
+    const {calls} = await fixture(page);
+    const before = calls.length;
+    await page.getByRole('button', {name:'Dölj alla undergrupper'}).click();
+    const search = page.getByRole('searchbox', {name:'Sök resursgrupper'});
+    await search.fill('  PRODUK  ');
+    await expect(page.getByRole('status').filter({hasText:'Matchande grupper'})).toHaveText('Matchande grupper: 1');
+    const result = page.getByRole('link', {name:'IT och infrastruktur / Servrar / Produktion', exact:true});
+    await expect(result).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(calls.length).toBe(before);
+    await result.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', {name:'Produktion', level:1})).toBeFocused();
+    await page.goBack();
+    await expect(search).toHaveValue('  PRODUK  ');
+    await search.fill('zzz');
+    await expect(page.getByRole('heading', {name:'Inga träffar'})).toBeVisible();
+    await page.getByRole('button', {name:'Rensa sökning'}).click();
+    await expect(search).toBeFocused();
+    await expect(page.getByRole('link', {name:'Öppna grupp · Produktion'})).toBeHidden();
+    await expect(page.getByRole('button', {name:'Visa alla undergrupper'})).toBeVisible();
+});
 async function audit(page) {
     const result=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa']).analyze();
     expect(result.violations.map(x=>({id:x.id,nodes:x.nodes.map(n=>n.target)}))).toEqual([]);
@@ -92,6 +117,7 @@ test('subgroup and breadcrumb navigation keep resource context and support keybo
 test('resource overview group filter includes descendants and survives resource return and refresh',async({page})=>{
     await fixture(page);
     await page.getByRole('navigation',{name:'Huvudmeny'}).getByRole('link',{name:'Resurser',exact:true}).click();
+    await page.getByText('Filter och visning',{exact:true}).click();
     await page.getByLabel('Resursgrupp',{exact:true}).selectOption('child');
     await expect(page.getByRole('heading',{name:'Windows-servrar',level:2,exact:true})).toBeVisible();
     await expect(page.getByRole('heading',{name:'Nätverk och åtkomst',level:2,exact:true})).toBeVisible();

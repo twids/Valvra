@@ -35,7 +35,7 @@ public partial class DemoProgram
             context.Response.Headers["X-Valvra-Demo"] = "synthetic-read-only";
             if (context.Request.ContentLength > 256) { context.Response.StatusCode = 413; return; }
             if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method)
-                && !(HttpMethods.IsPost(context.Request.Method) && DemoData.RevealPaths.Contains(context.Request.Path.Value!)))
+                && !(HttpMethods.IsPost(context.Request.Method) && (context.Request.Path == "/api/content/search" || DemoData.RevealPaths.Contains(context.Request.Path.Value!))))
             { context.Response.StatusCode = 405; return; }
             await next();
         });
@@ -48,6 +48,15 @@ public partial class DemoProgram
         app.MapGet("/api/groups", () => new[] { new { id = DemoData.Group, parentId = (string?)null, name = "Exempelinfrastruktur", revision = 1, canManage = false } });
         app.MapGet("/api/resources", () => new[] { new { id = DemoData.Resource, groupId = DemoData.Group, name = "Exempeldatabasserver", revision = 1, permissions = 3, canManage = false } });
         app.MapGet("/api/ldap-profiles", () => Array.Empty<object>());
+        app.MapPost("/api/content/search", (DemoSearch body) =>
+        {
+            var term = body.Query?.Trim();
+            if (string.IsNullOrEmpty(term) || term.Length > 200) return Results.BadRequest();
+            var items = new[] { (Title: "Exempelkonto", Kind: "account"), (Title: "Exempelprogram", Kind: "license") }
+                .Where(x => x.Title.Contains(term, StringComparison.OrdinalIgnoreCase))
+                .Select(x => new { x.Title, x.Kind, resourceId = DemoData.Resource, resourceName = "Exempeldatabasserver" });
+            return Results.Ok(new { items, hasMore = false });
+        });
         app.MapGet("/api/resources/{id}/secrets", (string id) => id == DemoData.Resource
             ? Results.Ok(new[] { new { id = DemoData.Secret, title = "Exempelkonto", currentVersion = 1, revision = 1, ldapProfileId = (string?)null } }) : Results.NotFound());
         app.MapGet("/api/resources/{id}/licenses", (string id) => id == DemoData.Resource
@@ -65,6 +74,7 @@ public partial class DemoProgram
 
     }
 }
+internal sealed record DemoSearch(string? Query);
 internal static class DemoData
 {
     public const string Group = "10000000-0000-0000-0000-000000000001";
