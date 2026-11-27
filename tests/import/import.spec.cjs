@@ -29,7 +29,6 @@ test('preview requires the selected destination and discards results after a map
     await page.goto('/');
     await page.getByRole('button',{name:'Importera lösenord',exact:true}).click();
     await file(page,'title,password\nExample,synthetic');
-    await page.getByLabel('Basgrupp',{exact:true}).selectOption({index:1});
     const mode=page.getByLabel('Destination',{exact:true});
     await mode.selectOption('resource');
     const preview=page.getByRole('button',{name:'Förhandsgranska',exact:true});
@@ -40,9 +39,11 @@ test('preview requires the selected destination and discards results after a map
     let release;
     const held=new Promise(resolve=>release=resolve);
     await page.route('**/api/groups',async route=>{await held;await route.continue();});
-    const request=page.waitForRequest('**/api/groups');
-    await preview.click();await request;
-    await mode.selectOption('tree');release();
+    await preview.click();
+    try {
+        await expect(page.getByRole('status').filter({hasText:'Förbereder förhandsgranskningen.'})).toBeVisible();
+        await mode.selectOption('tree');
+    } finally { release(); }
     await expect(page.getByRole('status').filter({hasText:'Mappningen har ändrats.'})).toBeVisible();
     await expect(preview).toBeEnabled();
     await expect(page.getByRole('button',{name:'Starta import',exact:true})).toHaveCount(0);
